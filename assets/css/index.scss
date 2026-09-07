@@ -1,0 +1,267 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+    font-family: Yekan Bakh FaNum;
+    font-style: normal;
+    font-weight: 100;
+    src: url('../fonts/yekanbakh/YekanBakhFaNum-thin.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: Yekan Bakh FaNum;
+    font-style: normal;
+    font-weight: 300;
+    src: url('../fonts/yekanbakh/YekanBakhFaNum-Light.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: Yekan Bakh FaNum;
+    font-style: normal;
+    font-weight: normal;
+    src: url('../fonts/yekanbakh/YekanBakhFaNum-Regular.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: Yekan Bakh FaNum;
+    font-style: normal;
+    font-weight: 600;
+    src: url('../fonts/yekanbakh/YekanBakhFaNum-SemiBold.woff2') format('woff2');
+}
+
+@font-face {
+    font-display: swap;
+    font-family: Yekan Bakh FaNum;
+    font-style: normal;
+    font-weight: 700;
+    src: url('../fonts/yekanbakh/YekanBakhFaNum-Bold.woff2') format('woff2');
+}
+
+@font-face {
+    font-display: swap;
+    font-family: Yekan Bakh FaNum;
+    font-style: normal;
+    font-weight: 900;
+    src: url('../fonts/yekanbakh/YekanBakhFaNum-Black.woff2') format('woff2');
+}
+
+body.pinova-container{
+  @apply sm:bg-[#F8F8F8] bg-white;
+}
+
+.pinova-container{
+    scroll-behavior: smooth;
+    font-family: 'Yekan Bakh FaNum', Tahoma, serif;
+    direction: rtl;
+    font-weight: 500;
+    letter-spacing: -.025em;
+}
+
+/* Global Styles */
+a, button {
+    @apply duration-300
+}
+
+a {
+    outline: 0 !important;
+    @apply transition duration-300 inline-block;
+}
+
+[pinova-cloak] { display: none !important; }
+
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+input[type=number]{
+    -moz-appearance: textfield;
+}
+
+
+[x-cloak], [pinova-cloak] { display: none !important; }
+
+input, textarea {
+    outline: none;
+    background-color: transparent;
+
+    &:focus-visible {
+        outline: none;
+    }
+}
+
+.loader {
+    width: 48px;
+    height: 48px;
+    border: 5px solid #0065d1;
+    border-bottom-color: transparent;
+    border-radius: 50%;
+    display: inline-block;
+    box-sizing: border-box;
+    animation: rotation 1s linear infinite;
+}
+
+@keyframes rotation {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.custom-scrollbar {
+    &::-webkit-scrollbar-track {
+        border-radius: 10px;
+        background-color: transparent;
+    }
+
+    &::-webkit-scrollbar {
+        width: 5px;
+        height: 5px;
+        background-color: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        border-radius: 10px;
+        background-color: #cccccc;
+    }
+}
+
+.hidden-scrollbar {
+    &::-webkit-scrollbar {
+        display: none;
+    }
+
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #e0e0e0 25%, #f5f5f5 50%, #e0e0e0 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.loader {
+  width: 48px;
+  height: 48px;
+  border: 5px solid #0065D1;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  box-sizing: border-box;
+  animation: rotation 1s linear infinite;
+}
+
+.rotation-animation{
+  display: block;
+  animation: rotation 1s linear infinite;
+}
+
+@keyframes rotation {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.notyf{
+  z-index: 999999 !important;
+}
+
+.notyf__wrapper{
+  @apply sm:min-w-[225px];
+
+  .notyf__dismiss{
+    width: 30px !important;
+  }
+
+  .notyf__message{
+    font-size: 14px !important;
+    font-weight: 500 !important;
+  }
+
+}
+
+.datepicker-container-inline{
+
+  *{
+    font-family: 'Yekan Bakh FaNum', 'Vazirmatn', serif !important;
+  }
+
+  .datepicker-plot-area-inline-view {
+     float: unset !important;
+  }
+
+  .datepicker-plot-area .datepicker-day-view .table-days td.selected span, .datepicker-plot-area .datepicker-year-view .year-item.selected, .datepicker-plot-area .datepicker-month-view .month-item.selected{
+    background-color: #004FA3 !important;
+  }
+
+  .datepicker-plot-area .datepicker-day-view .table-days td{
+    padding: 1px;
+  }
+
+  .datepicker-plot-area .datepicker-day-view .table-days td.today span{
+    background-color: rgba(0, 79, 163, 0.3);
+  }
+
+  .pwt-btn-next, .pwt-btn-prev{
+    color: transparent !important;
+    position: relative;
+
+    &::after {
+      content: "";
+      display: block;
+      background-image: url('../images/icons/chevron-left.svg');
+      background-size: 100%;
+      background-position: center;
+      height: 20px;
+      width: 20px;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      margin-top: -10px;
+      margin-left: -10px;
+    }
+
+  }
+
+  .pwt-btn-prev{
+
+    &::after {
+      transform: rotate(180deg);
+    }
+
+  }
+
+  .datepicker-plot-area .datepicker-day-view .table-days td span{
+    border-radius: 5px !important;
+  }
+
+  .datepicker-navigator{
+    direction: ltr !important;
+    font-size: 14px;
+  }
+
+  .datepicker-plot-area{
+    box-shadow: none !important;
+    border: none !important
+  }
+
+}
+

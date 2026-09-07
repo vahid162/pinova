@@ -1,0 +1,1672 @@
+.pinova-container *, .pinova-container ::before, .pinova-container ::after {
+  --tw-border-spacing-x: 0;
+  --tw-border-spacing-y: 0;
+  --tw-translate-x: 0;
+  --tw-translate-y: 0;
+  --tw-rotate: 0;
+  --tw-skew-x: 0;
+  --tw-skew-y: 0;
+  --tw-scale-x: 1;
+  --tw-scale-y: 1;
+  --tw-pan-x:  ;
+  --tw-pan-y:  ;
+  --tw-pinch-zoom:  ;
+  --tw-scroll-snap-strictness: proximity;
+  --tw-gradient-from-position:  ;
+  --tw-gradient-via-position:  ;
+  --tw-gradient-to-position:  ;
+  --tw-ordinal:  ;
+  --tw-slashed-zero:  ;
+  --tw-numeric-figure:  ;
+  --tw-numeric-spacing:  ;
+  --tw-numeric-fraction:  ;
+  --tw-ring-inset:  ;
+  --tw-ring-offset-width: 0px;
+  --tw-ring-offset-color: #fff;
+  --tw-ring-color: rgb(46 144 250 / 0.5);
+  --tw-ring-offset-shadow: 0 0 #0000;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-shadow: 0 0 #0000;
+  --tw-shadow-colored: 0 0 #0000;
+  --tw-blur:  ;
+  --tw-brightness:  ;
+  --tw-contrast:  ;
+  --tw-grayscale:  ;
+  --tw-hue-rotate:  ;
+  --tw-invert:  ;
+  --tw-saturate:  ;
+  --tw-sepia:  ;
+  --tw-drop-shadow:  ;
+  --tw-backdrop-blur:  ;
+  --tw-backdrop-brightness:  ;
+  --tw-backdrop-contrast:  ;
+  --tw-backdrop-grayscale:  ;
+  --tw-backdrop-hue-rotate:  ;
+  --tw-backdrop-invert:  ;
+  --tw-backdrop-opacity:  ;
+  --tw-backdrop-saturate:  ;
+  --tw-backdrop-sepia:  ;
+  --tw-contain-size:  ;
+  --tw-contain-layout:  ;
+  --tw-contain-paint:  ;
+  --tw-contain-style:  ;
+}
+
+.pinova-container ::backdrop {
+  --tw-border-spacing-x: 0;
+  --tw-border-spacing-y: 0;
+  --tw-translate-x: 0;
+  --tw-translate-y: 0;
+  --tw-rotate: 0;
+  --tw-skew-x: 0;
+  --tw-skew-y: 0;
+  --tw-scale-x: 1;
+  --tw-scale-y: 1;
+  --tw-pan-x:  ;
+  --tw-pan-y:  ;
+  --tw-pinch-zoom:  ;
+  --tw-scroll-snap-strictness: proximity;
+  --tw-gradient-from-position:  ;
+  --tw-gradient-via-position:  ;
+  --tw-gradient-to-position:  ;
+  --tw-ordinal:  ;
+  --tw-slashed-zero:  ;
+  --tw-numeric-figure:  ;
+  --tw-numeric-spacing:  ;
+  --tw-numeric-fraction:  ;
+  --tw-ring-inset:  ;
+  --tw-ring-offset-width: 0px;
+  --tw-ring-offset-color: #fff;
+  --tw-ring-color: rgb(46 144 250 / 0.5);
+  --tw-ring-offset-shadow: 0 0 #0000;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-shadow: 0 0 #0000;
+  --tw-shadow-colored: 0 0 #0000;
+  --tw-blur:  ;
+  --tw-brightness:  ;
+  --tw-contrast:  ;
+  --tw-grayscale:  ;
+  --tw-hue-rotate:  ;
+  --tw-invert:  ;
+  --tw-saturate:  ;
+  --tw-sepia:  ;
+  --tw-drop-shadow:  ;
+  --tw-backdrop-blur:  ;
+  --tw-backdrop-brightness:  ;
+  --tw-backdrop-contrast:  ;
+  --tw-backdrop-grayscale:  ;
+  --tw-backdrop-hue-rotate:  ;
+  --tw-backdrop-invert:  ;
+  --tw-backdrop-opacity:  ;
+  --tw-backdrop-saturate:  ;
+  --tw-backdrop-sepia:  ;
+  --tw-contain-size:  ;
+  --tw-contain-layout:  ;
+  --tw-contain-paint:  ;
+  --tw-contain-style:  ;
+}/*
+! tailwindcss v3.4.19 | MIT License | https://tailwindcss.com
+*//*
+1. Prevent padding and border from affecting element width. (https://github.com/mozdevs/cssremedy/issues/4)
+2. Allow adding a border to an element by just adding a border-width. (https://github.com/tailwindcss/tailwindcss/pull/116)
+*/
+
+.pinova-container *,
+.pinova-container ::before,
+.pinova-container ::after {
+  box-sizing: border-box; /* 1 */
+  border-width: 0; /* 2 */
+  border-style: solid; /* 2 */
+  border-color: #eaecf0; /* 2 */
+}
+
+.pinova-container ::before,
+.pinova-container ::after {
+  --tw-content: '';
+}
+
+/*
+1. Use a consistent sensible line-height in all browsers.
+2. Prevent adjustments of font size after orientation changes in iOS.
+3. Use a more readable tab size.
+4. Use the user's configured `sans` font-family by default.
+5. Use the user's configured `sans` font-feature-settings by default.
+6. Use the user's configured `sans` font-variation-settings by default.
+7. Disable tap highlights on iOS
+*/
+
+.pinova-container html,
+.pinova-container :host {
+  line-height: 1.5; /* 1 */
+  -webkit-text-size-adjust: 100%; /* 2 */
+  -moz-tab-size: 4; /* 3 */
+  tab-size: 4; /* 3 */
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"; /* 4 */
+  font-feature-settings: normal; /* 5 */
+  font-variation-settings: normal; /* 6 */
+  -webkit-tap-highlight-color: transparent; /* 7 */
+}
+
+/*
+1. Remove the margin in all browsers.
+2. Inherit line-height from `html` so users can set them as a class directly on the `html` element.
+*/
+
+.pinova-container body {
+  margin: 0; /* 1 */
+  line-height: inherit; /* 2 */
+}
+
+/*
+1. Add the correct height in Firefox.
+2. Correct the inheritance of border color in Firefox. (https://bugzilla.mozilla.org/show_bug.cgi?id=190655)
+3. Ensure horizontal rules are visible by default.
+*/
+
+.pinova-container hr {
+  height: 0; /* 1 */
+  color: inherit; /* 2 */
+  border-top-width: 1px; /* 3 */
+}
+
+/*
+Add the correct text decoration in Chrome, Edge, and Safari.
+*/
+
+.pinova-container abbr:where([title]) {
+  text-decoration: underline dotted;
+}
+
+/*
+Remove the default font size and weight for headings.
+*/
+
+.pinova-container h1,
+.pinova-container h2,
+.pinova-container h3,
+.pinova-container h4,
+.pinova-container h5,
+.pinova-container h6 {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+/*
+Reset links to optimize for opt-in styling instead of opt-out.
+*/
+
+.pinova-container a {
+  color: inherit;
+  text-decoration: inherit;
+}
+
+/*
+Add the correct font weight in Edge and Safari.
+*/
+
+.pinova-container b,
+.pinova-container strong {
+  font-weight: bolder;
+}
+
+/*
+1. Use the user's configured `mono` font-family by default.
+2. Use the user's configured `mono` font-feature-settings by default.
+3. Use the user's configured `mono` font-variation-settings by default.
+4. Correct the odd `em` font sizing in all browsers.
+*/
+
+.pinova-container code,
+.pinova-container kbd,
+.pinova-container samp,
+.pinova-container pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; /* 1 */
+  font-feature-settings: normal; /* 2 */
+  font-variation-settings: normal; /* 3 */
+  font-size: 1em; /* 4 */
+}
+
+/*
+Add the correct font size in all browsers.
+*/
+
+.pinova-container small {
+  font-size: 80%;
+}
+
+/*
+Prevent `sub` and `sup` elements from affecting the line height in all browsers.
+*/
+
+.pinova-container sub,
+.pinova-container sup {
+  font-size: 75%;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+}
+
+.pinova-container sub {
+  bottom: -0.25em;
+}
+
+.pinova-container sup {
+  top: -0.5em;
+}
+
+/*
+1. Remove text indentation from table contents in Chrome and Safari. (https://bugs.chromium.org/p/chromium/issues/detail?id=999088, https://bugs.webkit.org/show_bug.cgi?id=201297)
+2. Correct table border color inheritance in all Chrome and Safari. (https://bugs.chromium.org/p/chromium/issues/detail?id=935729, https://bugs.webkit.org/show_bug.cgi?id=195016)
+3. Remove gaps between table borders by default.
+*/
+
+.pinova-container table {
+  text-indent: 0; /* 1 */
+  border-color: inherit; /* 2 */
+  border-collapse: collapse; /* 3 */
+}
+
+/*
+1. Change the font styles in all browsers.
+2. Remove the margin in Firefox and Safari.
+3. Remove default padding in all browsers.
+*/
+
+.pinova-container button,
+.pinova-container input,
+.pinova-container optgroup,
+.pinova-container select,
+.pinova-container textarea {
+  font-family: inherit; /* 1 */
+  font-feature-settings: inherit; /* 1 */
+  font-variation-settings: inherit; /* 1 */
+  font-size: 100%; /* 1 */
+  font-weight: inherit; /* 1 */
+  line-height: inherit; /* 1 */
+  letter-spacing: inherit; /* 1 */
+  color: inherit; /* 1 */
+  margin: 0; /* 2 */
+  padding: 0; /* 3 */
+}
+
+/*
+Remove the inheritance of text transform in Edge and Firefox.
+*/
+
+.pinova-container button,
+.pinova-container select {
+  text-transform: none;
+}
+
+/*
+1. Correct the inability to style clickable types in iOS and Safari.
+2. Remove default button styles.
+*/
+
+.pinova-container button,
+.pinova-container input:where([type='button']),
+.pinova-container input:where([type='reset']),
+.pinova-container input:where([type='submit']) {
+  -webkit-appearance: button; /* 1 */
+  background-color: transparent; /* 2 */
+  background-image: none; /* 2 */
+}
+
+/*
+Use the modern Firefox focus style for all focusable elements.
+*/
+
+.pinova-container :-moz-focusring {
+  outline: auto;
+}
+
+/*
+Remove the additional `:invalid` styles in Firefox. (https://github.com/mozilla/gecko-dev/blob/2f9eacd9d3d995c937b4251a5557d95d494c9be1/layout/style/res/forms.css#L728-L737)
+*/
+
+.pinova-container :-moz-ui-invalid {
+  box-shadow: none;
+}
+
+/*
+Add the correct vertical alignment in Chrome and Firefox.
+*/
+
+.pinova-container progress {
+  vertical-align: baseline;
+}
+
+/*
+Correct the cursor style of increment and decrement buttons in Safari.
+*/
+
+.pinova-container ::-webkit-inner-spin-button,
+.pinova-container ::-webkit-outer-spin-button {
+  height: auto;
+}
+
+/*
+1. Correct the odd appearance in Chrome and Safari.
+2. Correct the outline style in Safari.
+*/
+
+.pinova-container [type='search'] {
+  -webkit-appearance: textfield; /* 1 */
+  outline-offset: -2px; /* 2 */
+}
+
+/*
+Remove the inner padding in Chrome and Safari on macOS.
+*/
+
+.pinova-container ::-webkit-search-decoration {
+  -webkit-appearance: none;
+}
+
+/*
+1. Correct the inability to style clickable types in iOS and Safari.
+2. Change font properties to `inherit` in Safari.
+*/
+
+.pinova-container ::-webkit-file-upload-button {
+  -webkit-appearance: button; /* 1 */
+  font: inherit; /* 2 */
+}
+
+/*
+Add the correct display in Chrome and Safari.
+*/
+
+.pinova-container summary {
+  display: list-item;
+}
+
+/*
+Removes the default spacing and border for appropriate elements.
+*/
+
+.pinova-container blockquote,
+.pinova-container dl,
+.pinova-container dd,
+.pinova-container h1,
+.pinova-container h2,
+.pinova-container h3,
+.pinova-container h4,
+.pinova-container h5,
+.pinova-container h6,
+.pinova-container hr,
+.pinova-container figure,
+.pinova-container p,
+.pinova-container pre {
+  margin: 0;
+}
+
+.pinova-container fieldset {
+  margin: 0;
+  padding: 0;
+}
+
+.pinova-container legend {
+  padding: 0;
+}
+
+.pinova-container ol,
+.pinova-container ul,
+.pinova-container menu {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/*
+Reset default styling for dialogs.
+*/
+.pinova-container dialog {
+  padding: 0;
+}
+
+/*
+Prevent resizing textareas horizontally by default.
+*/
+
+.pinova-container textarea {
+  resize: vertical;
+}
+
+/*
+1. Reset the default placeholder opacity in Firefox. (https://github.com/tailwindlabs/tailwindcss/issues/3300)
+2. Set the default placeholder color to the user's configured gray 400 color.
+*/
+
+.pinova-container input::placeholder,
+.pinova-container textarea::placeholder {
+  opacity: 1; /* 1 */
+  color: #98a2b3; /* 2 */
+}
+
+/*
+Set the default cursor for buttons.
+*/
+
+.pinova-container button,
+.pinova-container [role="button"] {
+  cursor: pointer;
+}
+
+/*
+Make sure disabled buttons don't get the pointer cursor.
+*/
+.pinova-container :disabled {
+  cursor: default;
+}
+
+/*
+1. Make replaced elements `display: block` by default. (https://github.com/mozdevs/cssremedy/issues/14)
+2. Add `vertical-align: middle` to align replaced elements more sensibly by default. (https://github.com/jensimmons/cssremedy/issues/14#issuecomment-634934210)
+   This can trigger a poorly considered lint error in some tools but is included by design.
+*/
+
+.pinova-container img,
+.pinova-container svg,
+.pinova-container video,
+.pinova-container canvas,
+.pinova-container audio,
+.pinova-container iframe,
+.pinova-container embed,
+.pinova-container object {
+  display: block; /* 1 */
+  vertical-align: middle; /* 2 */
+}
+
+/*
+Constrain images and videos to the parent width and preserve their intrinsic aspect ratio. (https://github.com/mozdevs/cssremedy/issues/14)
+*/
+
+.pinova-container img,
+.pinova-container video {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Make elements with the HTML hidden attribute stay hidden by default */
+.pinova-container [hidden]:where(:not([hidden="until-found"])) {
+  display: none;
+}
+.pinova-container .container {
+  width: 100%;
+  margin-right: auto;
+  margin-left: auto;
+  padding-right: .5rem;
+  padding-left: .5rem;
+}
+@media (min-width: 640px) {
+
+  .pinova-container .container {
+    max-width: 640px;
+  }
+}
+@media (min-width: 768px) {
+
+  .pinova-container .container {
+    max-width: 768px;
+  }
+}
+@media (min-width: 1024px) {
+
+  .pinova-container .container {
+    max-width: 1024px;
+  }
+}
+@media (min-width: 1280px) {
+
+  .pinova-container .container {
+    max-width: 1280px;
+  }
+}
+@media (min-width: 1536px) {
+
+  .pinova-container .container {
+    max-width: 1536px;
+  }
+}
+.pinova-container .static {
+  position: static;
+}
+.pinova-container .fixed {
+  position: fixed;
+}
+.pinova-container .absolute {
+  position: absolute;
+}
+.pinova-container .relative {
+  position: relative;
+}
+.pinova-container .-left-\[1px\] {
+  left: -1px;
+}
+.pinova-container .left-0 {
+  left: 0px;
+}
+.pinova-container .left-5 {
+  left: 1.25rem;
+}
+.pinova-container .right-0 {
+  right: 0px;
+}
+.pinova-container .top-0 {
+  top: 0px;
+}
+.pinova-container .top-4 {
+  top: 1rem;
+}
+.pinova-container .top-\[calc\(100\%\+4px\)\] {
+  top: calc(100% + 4px);
+}
+.pinova-container .left-20 {
+  left: 5rem;
+}
+.pinova-container .-z-\[1\] {
+  z-index: -1;
+}
+.pinova-container .z-10 {
+  z-index: 10;
+}
+.pinova-container .z-20 {
+  z-index: 20;
+}
+.pinova-container .z-\[1\] {
+  z-index: 1;
+}
+.pinova-container .z-\[2\] {
+  z-index: 2;
+}
+.pinova-container .z-\[99999\] {
+  z-index: 99999;
+}
+.pinova-container .z-\[999\] {
+  z-index: 999;
+}
+.pinova-container .order-first {
+  order: -9999;
+}
+.pinova-container .col-span-full {
+  grid-column: 1 / -1;
+}
+.pinova-container .mx-0\.5 {
+  margin-left: 0.125rem;
+  margin-right: 0.125rem;
+}
+.pinova-container .mx-1 {
+  margin-left: 0.25rem;
+  margin-right: 0.25rem;
+}
+.pinova-container .mx-auto {
+  margin-left: auto;
+  margin-right: auto;
+}
+.pinova-container .my-auto {
+  margin-top: auto;
+  margin-bottom: auto;
+}
+.pinova-container .mb-1 {
+  margin-bottom: 0.25rem;
+}
+.pinova-container .mb-10 {
+  margin-bottom: 2.5rem;
+}
+.pinova-container .mb-2 {
+  margin-bottom: 0.5rem;
+}
+.pinova-container .mb-3 {
+  margin-bottom: 0.75rem;
+}
+.pinova-container .mb-4 {
+  margin-bottom: 1rem;
+}
+.pinova-container .mb-5 {
+  margin-bottom: 1.25rem;
+}
+.pinova-container .mb-6 {
+  margin-bottom: 1.5rem;
+}
+.pinova-container .mb-8 {
+  margin-bottom: 2rem;
+}
+.pinova-container .ml-2 {
+  margin-left: 0.5rem;
+}
+.pinova-container .ml-auto {
+  margin-left: auto;
+}
+.pinova-container .mr-1 {
+  margin-right: 0.25rem;
+}
+.pinova-container .mr-auto {
+  margin-right: auto;
+}
+.pinova-container .mt-8 {
+  margin-top: 2rem;
+}
+.pinova-container .line-clamp-1 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+.pinova-container .block {
+  display: block;
+}
+.pinova-container .inline-block {
+  display: inline-block;
+}
+.pinova-container .flex {
+  display: flex;
+}
+.pinova-container .inline-flex {
+  display: inline-flex;
+}
+.pinova-container .table {
+  display: table;
+}
+.pinova-container .grid {
+  display: grid;
+}
+.pinova-container .hidden {
+  display: none;
+}
+.pinova-container .size-1\.5 {
+  width: 0.375rem;
+  height: 0.375rem;
+}
+.pinova-container .size-10 {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+.pinova-container .size-12 {
+  width: 3rem;
+  height: 3rem;
+}
+.pinova-container .size-2 {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+.pinova-container .size-4 {
+  width: 1rem;
+  height: 1rem;
+}
+.pinova-container .size-5 {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.pinova-container .size-6 {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.pinova-container .size-7 {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+.pinova-container .size-9 {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+.pinova-container .h-1 {
+  height: 0.25rem;
+}
+.pinova-container .h-11 {
+  height: 2.75rem;
+}
+.pinova-container .h-4 {
+  height: 1rem;
+}
+.pinova-container .h-5 {
+  height: 1.25rem;
+}
+.pinova-container .h-6 {
+  height: 1.5rem;
+}
+.pinova-container .h-full {
+  height: 100%;
+}
+.pinova-container .h-screen {
+  height: 100vh;
+}
+.pinova-container .\!max-h-40 {
+  max-height: 10rem !important;
+}
+.pinova-container .max-h-0 {
+  max-height: 0px;
+}
+.pinova-container .max-h-20 {
+  max-height: 5rem;
+}
+.pinova-container .min-h-screen {
+  min-height: 100vh;
+}
+.pinova-container .w-1\/2 {
+  width: 50%;
+}
+.pinova-container .w-1\/3 {
+  width: 33.333333%;
+}
+.pinova-container .w-20 {
+  width: 5rem;
+}
+.pinova-container .w-28 {
+  width: 7rem;
+}
+.pinova-container .w-3 {
+  width: 0.75rem;
+}
+.pinova-container .w-32 {
+  width: 8rem;
+}
+.pinova-container .w-5 {
+  width: 1.25rem;
+}
+.pinova-container .w-\[390px\] {
+  width: 390px;
+}
+.pinova-container .w-\[480px\] {
+  width: 480px;
+}
+.pinova-container .w-\[500px\] {
+  width: 500px;
+}
+.pinova-container .w-\[calc\(100\%\+2px\)\] {
+  width: calc(100% + 2px);
+}
+.pinova-container .w-full {
+  width: 100%;
+}
+.pinova-container .w-screen {
+  width: 100vw;
+}
+.pinova-container .min-w-10 {
+  min-width: 2.5rem;
+}
+.pinova-container .min-w-6 {
+  min-width: 1.5rem;
+}
+.pinova-container .min-w-9 {
+  min-width: 2.25rem;
+}
+.pinova-container .min-w-fit {
+  min-width: fit-content;
+}
+.pinova-container .max-w-full {
+  max-width: 100%;
+}
+.pinova-container .rotate-180 {
+  --tw-rotate: 180deg;
+  transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
+}
+.pinova-container .cursor-pointer {
+  cursor: pointer;
+}
+.pinova-container .resize-none {
+  resize: none;
+}
+.pinova-container .list-disc {
+  list-style-type: disc;
+}
+.pinova-container .grid-cols-12 {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+.pinova-container .flex-col {
+  flex-direction: column;
+}
+.pinova-container .flex-wrap {
+  flex-wrap: wrap;
+}
+.pinova-container .items-start {
+  align-items: flex-start;
+}
+.pinova-container .items-center {
+  align-items: center;
+}
+.pinova-container .justify-end {
+  justify-content: flex-end;
+}
+.pinova-container .justify-center {
+  justify-content: center;
+}
+.pinova-container .gap-1 {
+  gap: 0.25rem;
+}
+.pinova-container .gap-1\.5 {
+  gap: 0.375rem;
+}
+.pinova-container .gap-2 {
+  gap: 0.5rem;
+}
+.pinova-container .gap-3 {
+  gap: 0.75rem;
+}
+.pinova-container .gap-4 {
+  gap: 1rem;
+}
+.pinova-container .gap-5 {
+  gap: 1.25rem;
+}
+.pinova-container .overflow-auto {
+  overflow: auto;
+}
+.pinova-container .overflow-hidden {
+  overflow: hidden;
+}
+.pinova-container .text-nowrap {
+  text-wrap: nowrap;
+}
+.pinova-container .\!rounded-lg {
+  border-radius: 0.5rem !important;
+}
+.pinova-container .rounded {
+  border-radius: 0.25rem;
+}
+.pinova-container .rounded-2xl {
+  border-radius: 1rem;
+}
+.pinova-container .rounded-\[8px\] {
+  border-radius: 8px;
+}
+.pinova-container .rounded-full {
+  border-radius: 9999px;
+}
+.pinova-container .rounded-lg {
+  border-radius: 0.5rem;
+}
+.pinova-container .rounded-md {
+  border-radius: 0.375rem;
+}
+.pinova-container .rounded-xl {
+  border-radius: 0.75rem;
+}
+.pinova-container .border {
+  border-width: 1px;
+}
+.pinova-container .border-b {
+  border-bottom-width: 1px;
+}
+.pinova-container .border-l {
+  border-left-width: 1px;
+}
+.pinova-container .border-t {
+  border-top-width: 1px;
+}
+.pinova-container .\!border-error-300 {
+  --tw-border-opacity: 1 !important;
+  border-color: rgb(234 108 128 / var(--tw-border-opacity, 1)) !important;
+}
+.pinova-container .\!border-gray-300 {
+  --tw-border-opacity: 1 !important;
+  border-color: rgb(208 213 221 / var(--tw-border-opacity, 1)) !important;
+}
+.pinova-container .\!border-primary-600 {
+  --tw-border-opacity: 1 !important;
+  border-color: rgb(0 79 163 / var(--tw-border-opacity, 1)) !important;
+}
+.pinova-container .border-\[\#66666640\] {
+  border-color: #66666640;
+}
+.pinova-container .border-error-600 {
+  --tw-border-opacity: 1;
+  border-color: rgb(217 45 32 / var(--tw-border-opacity, 1));
+}
+.pinova-container .border-gray-100 {
+  --tw-border-opacity: 1;
+  border-color: rgb(242 244 247 / var(--tw-border-opacity, 1));
+}
+.pinova-container .border-gray-200 {
+  --tw-border-opacity: 1;
+  border-color: rgb(234 236 240 / var(--tw-border-opacity, 1));
+}
+.pinova-container .border-gray-300 {
+  --tw-border-opacity: 1;
+  border-color: rgb(208 213 221 / var(--tw-border-opacity, 1));
+}
+.pinova-container .border-primary-500 {
+  --tw-border-opacity: 1;
+  border-color: rgb(0 101 209 / var(--tw-border-opacity, 1));
+}
+.pinova-container .border-primary-600 {
+  --tw-border-opacity: 1;
+  border-color: rgb(0 79 163 / var(--tw-border-opacity, 1));
+}
+.pinova-container .border-transparent {
+  border-color: transparent;
+}
+.pinova-container .\!border-opacity-100 {
+  --tw-border-opacity: 1 !important;
+}
+.pinova-container .border-opacity-0 {
+  --tw-border-opacity: 0;
+}
+.pinova-container .\!bg-gray-300 {
+  --tw-bg-opacity: 1 !important;
+  background-color: rgb(208 213 221 / var(--tw-bg-opacity, 1)) !important;
+}
+.pinova-container .\!bg-gray-50 {
+  --tw-bg-opacity: 1 !important;
+  background-color: rgb(249 250 251 / var(--tw-bg-opacity, 1)) !important;
+}
+.pinova-container .bg-black {
+  --tw-bg-opacity: 1;
+  background-color: rgb(0 0 0 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-current {
+  background-color: currentColor;
+}
+.pinova-container .bg-error-100 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(249 210 217 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-error-50 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(253 240 243 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-error-600 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(217 45 32 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-gray-100 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(242 244 247 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-gray-300 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(208 213 221 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-primary-100 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(204 228 255 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-primary-50 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(240 247 255 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-primary-500 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(0 101 209 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-primary-600 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(0 79 163 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-white {
+  --tw-bg-opacity: 1;
+  background-color: rgb(255 255 255 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-red-50 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(254 242 242 / var(--tw-bg-opacity, 1));
+}
+.pinova-container .bg-opacity-50 {
+  --tw-bg-opacity: 0.5;
+}
+.pinova-container .bg-opacity-90 {
+  --tw-bg-opacity: 0.9;
+}
+.pinova-container .p-1\.5 {
+  padding: 0.375rem;
+}
+.pinova-container .p-2 {
+  padding: 0.5rem;
+}
+.pinova-container .p-2\.5 {
+  padding: 0.625rem;
+}
+.pinova-container .p-4 {
+  padding: 1rem;
+}
+.pinova-container .p-5 {
+  padding: 1.25rem;
+}
+.pinova-container .\!px-3 {
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important;
+}
+.pinova-container .\!py-2 {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
+.pinova-container .px-1 {
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
+.pinova-container .px-2 {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+.pinova-container .px-3 {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+.pinova-container .px-3\.5 {
+  padding-left: 0.875rem;
+  padding-right: 0.875rem;
+}
+.pinova-container .px-4 {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+.pinova-container .px-5 {
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
+}
+.pinova-container .px-6 {
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+.pinova-container .px-8 {
+  padding-left: 2rem;
+  padding-right: 2rem;
+}
+.pinova-container .py-1 {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+.pinova-container .py-10 {
+  padding-top: 2.5rem;
+  padding-bottom: 2.5rem;
+}
+.pinova-container .py-14 {
+  padding-top: 3.5rem;
+  padding-bottom: 3.5rem;
+}
+.pinova-container .py-2 {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+.pinova-container .py-2\.5 {
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+}
+.pinova-container .py-3 {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+.pinova-container .py-4 {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+.pinova-container .py-5 {
+  padding-top: 1.25rem;
+  padding-bottom: 1.25rem;
+}
+.pinova-container .py-6 {
+  padding-top: 1.5rem;
+  padding-bottom: 1.5rem;
+}
+.pinova-container .py-8 {
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+}
+.pinova-container .pb-2 {
+  padding-bottom: 0.5rem;
+}
+.pinova-container .pl-10 {
+  padding-left: 2.5rem;
+}
+.pinova-container .pl-2\.5 {
+  padding-left: 0.625rem;
+}
+.pinova-container .pl-3 {
+  padding-left: 0.75rem;
+}
+.pinova-container .pr-5 {
+  padding-right: 1.25rem;
+}
+.pinova-container .pt-0\.5 {
+  padding-top: 0.125rem;
+}
+.pinova-container .pt-1\.5 {
+  padding-top: 0.375rem;
+}
+.pinova-container .pt-5 {
+  padding-top: 1.25rem;
+}
+.pinova-container .text-center {
+  text-align: center;
+}
+.pinova-container .text-base {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+.pinova-container .text-lg {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+.pinova-container .text-sm {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+.pinova-container .text-xl {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+.pinova-container .text-xs {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+.pinova-container .font-bold {
+  font-weight: 700;
+}
+.pinova-container .font-normal {
+  font-weight: 400;
+}
+.pinova-container .font-semibold {
+  font-weight: 600;
+}
+.pinova-container .leading-none {
+  line-height: 1;
+}
+.pinova-container .tracking-\[20px\] {
+  letter-spacing: 20px;
+}
+.pinova-container .text-\[\#333333\] {
+  --tw-text-opacity: 1;
+  color: rgb(51 51 51 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-error-300 {
+  --tw-text-opacity: 1;
+  color: rgb(234 108 128 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-error-400 {
+  --tw-text-opacity: 1;
+  color: rgb(223 32 64 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-error-500 {
+  --tw-text-opacity: 1;
+  color: rgb(183 26 52 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-gray-300 {
+  --tw-text-opacity: 1;
+  color: rgb(208 213 221 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-gray-400 {
+  --tw-text-opacity: 1;
+  color: rgb(152 162 179 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-gray-500 {
+  --tw-text-opacity: 1;
+  color: rgb(102 112 133 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-gray-600 {
+  --tw-text-opacity: 1;
+  color: rgb(71 84 103 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-gray-700 {
+  --tw-text-opacity: 1;
+  color: rgb(52 64 84 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-gray-900 {
+  --tw-text-opacity: 1;
+  color: rgb(16 24 40 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-primary-300 {
+  --tw-text-opacity: 1;
+  color: rgb(87 168 255 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-primary-500 {
+  --tw-text-opacity: 1;
+  color: rgb(0 101 209 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-success-400 {
+  --tw-text-opacity: 1;
+  color: rgb(50 213 131 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-white {
+  --tw-text-opacity: 1;
+  color: rgb(255 255 255 / var(--tw-text-opacity, 1));
+}
+.pinova-container .text-yellow-600 {
+  --tw-text-opacity: 1;
+  color: rgb(202 138 4 / var(--tw-text-opacity, 1));
+}
+.pinova-container .\!opacity-100 {
+  opacity: 1 !important;
+}
+.pinova-container .opacity-0 {
+  opacity: 0;
+}
+.pinova-container .shadow {
+  --tw-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --tw-shadow-colored: 0 1px 3px 0 var(--tw-shadow-color), 0 1px 2px -1px var(--tw-shadow-color);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+.pinova-container .shadow-\[0_1px_2px_0_\#1018280D\] {
+  --tw-shadow: 0 1px 2px 0 #1018280D;
+  --tw-shadow-colored: 0 1px 2px 0 var(--tw-shadow-color);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+.pinova-container .duration-300 {
+  transition-duration: 300ms;
+}
+@font-face {
+  font-family: Yekan Bakh FaNum;
+  font-style: normal;
+  font-weight: 100;
+  src: url("../fonts/yekanbakh/YekanBakhFaNum-thin.woff2") format("woff2");
+}
+@font-face {
+  font-family: Yekan Bakh FaNum;
+  font-style: normal;
+  font-weight: 300;
+  src: url("../fonts/yekanbakh/YekanBakhFaNum-Light.woff2") format("woff2");
+}
+@font-face {
+  font-family: Yekan Bakh FaNum;
+  font-style: normal;
+  font-weight: normal;
+  src: url("../fonts/yekanbakh/YekanBakhFaNum-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: Yekan Bakh FaNum;
+  font-style: normal;
+  font-weight: 600;
+  src: url("../fonts/yekanbakh/YekanBakhFaNum-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-display: swap;
+  font-family: Yekan Bakh FaNum;
+  font-style: normal;
+  font-weight: 700;
+  src: url("../fonts/yekanbakh/YekanBakhFaNum-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-display: swap;
+  font-family: Yekan Bakh FaNum;
+  font-style: normal;
+  font-weight: 900;
+  src: url("../fonts/yekanbakh/YekanBakhFaNum-Black.woff2") format("woff2");
+}
+body.pinova-container {
+  --tw-bg-opacity: 1;
+  background-color: rgb(255 255 255 / var(--tw-bg-opacity, 1));
+}
+@media (min-width: 640px) {
+
+  body.pinova-container {
+    --tw-bg-opacity: 1;
+    background-color: rgb(248 248 248 / var(--tw-bg-opacity, 1));
+  }
+}
+
+.pinova-container {
+  scroll-behavior: smooth;
+  font-family: "Yekan Bakh FaNum", Tahoma, serif;
+  direction: rtl;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+/* Global Styles */
+.pinova-container a, .pinova-container button {
+  transition-duration: 300ms;
+}
+
+.pinova-container a {
+  outline: 0 !important;
+  display: inline-block;
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 300ms;
+}
+
+.pinova-container [pinova-cloak] {
+  display: none !important;
+}
+
+.pinova-container input::-webkit-outer-spin-button,
+.pinova-container input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.pinova-container input[type=number] {
+  -moz-appearance: textfield;
+}
+
+.pinova-container [x-cloak], .pinova-container [pinova-cloak] {
+  display: none !important;
+}
+
+.pinova-container input, .pinova-container textarea {
+  outline: none;
+  background-color: transparent;
+}
+.pinova-container input:focus-visible, .pinova-container textarea:focus-visible {
+  outline: none;
+}
+
+.pinova-container .loader {
+  width: 48px;
+  height: 48px;
+  border: 5px solid #0065d1;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  box-sizing: border-box;
+  animation: rotation 1s linear infinite;
+}
+
+@keyframes rotation {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+.pinova-container .custom-scrollbar::-webkit-scrollbar-track {
+  border-radius: 10px;
+  background-color: transparent;
+}
+.pinova-container .custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+  background-color: transparent;
+}
+.pinova-container .custom-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 10px;
+  background-color: #cccccc;
+}
+
+.pinova-container .hidden-scrollbar {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+.pinova-container .hidden-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.pinova-container .skeleton {
+  background: linear-gradient(90deg, #e0e0e0 25%, #f5f5f5 50%, #e0e0e0 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.pinova-container .loader {
+  width: 48px;
+  height: 48px;
+  border: 5px solid #0065D1;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  box-sizing: border-box;
+  animation: rotation 1s linear infinite;
+}
+
+.pinova-container .rotation-animation {
+  display: block;
+  animation: rotation 1s linear infinite;
+}
+
+@keyframes rotation {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+.pinova-container .notyf {
+  z-index: 999999 !important;
+}
+
+@media (min-width: 640px) {
+
+  .pinova-container .notyf__wrapper {
+    min-width: 225px;
+  }
+}
+.pinova-container .notyf__wrapper .notyf__dismiss {
+  width: 30px !important;
+}
+.pinova-container .notyf__wrapper .notyf__message {
+  font-size: 14px !important;
+  font-weight: 500 !important;
+}
+
+.pinova-container .datepicker-container-inline * {
+  font-family: "Yekan Bakh FaNum", "Vazirmatn", serif !important;
+}
+.pinova-container .datepicker-container-inline .datepicker-plot-area-inline-view {
+  float: unset !important;
+}
+.pinova-container .datepicker-container-inline .datepicker-plot-area .datepicker-day-view .table-days td.selected span, .pinova-container .datepicker-container-inline .datepicker-plot-area .datepicker-year-view .year-item.selected, .pinova-container .datepicker-container-inline .datepicker-plot-area .datepicker-month-view .month-item.selected {
+  background-color: #004FA3 !important;
+}
+.pinova-container .datepicker-container-inline .datepicker-plot-area .datepicker-day-view .table-days td {
+  padding: 1px;
+}
+.pinova-container .datepicker-container-inline .datepicker-plot-area .datepicker-day-view .table-days td.today span {
+  background-color: rgba(0, 79, 163, 0.3);
+}
+.pinova-container .datepicker-container-inline .pwt-btn-next, .pinova-container .datepicker-container-inline .pwt-btn-prev {
+  color: transparent !important;
+  position: relative;
+}
+.pinova-container .datepicker-container-inline .pwt-btn-next::after, .pinova-container .datepicker-container-inline .pwt-btn-prev::after {
+  content: "";
+  display: block;
+  background-image: url("../images/icons/chevron-left.svg");
+  background-size: 100%;
+  background-position: center;
+  height: 20px;
+  width: 20px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin-top: -10px;
+  margin-left: -10px;
+}
+.pinova-container .datepicker-container-inline .pwt-btn-prev::after {
+  transform: rotate(180deg);
+}
+.pinova-container .datepicker-container-inline .datepicker-plot-area .datepicker-day-view .table-days td span {
+  border-radius: 5px !important;
+}
+.pinova-container .datepicker-container-inline .datepicker-navigator {
+  direction: ltr !important;
+  font-size: 14px;
+}
+.pinova-container .datepicker-container-inline .datepicker-plot-area {
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.pinova-container .empty\:\!pt-0:empty {
+  padding-top: 0px !important;
+}
+
+.pinova-container .empty\:pt-0:empty {
+  padding-top: 0px;
+}
+
+.pinova-container .hover\:bg-error-100:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(249 210 217 / var(--tw-bg-opacity, 1));
+}
+
+.pinova-container .hover\:bg-gray-100:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(242 244 247 / var(--tw-bg-opacity, 1));
+}
+
+.pinova-container .hover\:bg-primary-50:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(240 247 255 / var(--tw-bg-opacity, 1));
+}
+
+.pinova-container .hover\:bg-primary-600:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(0 79 163 / var(--tw-bg-opacity, 1));
+}
+
+.pinova-container .hover\:text-error-300:hover {
+  --tw-text-opacity: 1;
+  color: rgb(234 108 128 / var(--tw-text-opacity, 1));
+}
+
+.pinova-container .hover\:text-primary-300:hover {
+  --tw-text-opacity: 1;
+  color: rgb(87 168 255 / var(--tw-text-opacity, 1));
+}
+
+.pinova-container .hover\:text-primary-600:hover {
+  --tw-text-opacity: 1;
+  color: rgb(0 79 163 / var(--tw-text-opacity, 1));
+}
+
+.pinova-container .hover\:text-white:hover {
+  --tw-text-opacity: 1;
+  color: rgb(255 255 255 / var(--tw-text-opacity, 1));
+}
+
+.pinova-container .hover\:shadow:hover {
+  --tw-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --tw-shadow-colored: 0 1px 3px 0 var(--tw-shadow-color), 0 1px 2px -1px var(--tw-shadow-color);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
+.pinova-container .focus\:border-primary-500:focus {
+  --tw-border-opacity: 1;
+  border-color: rgb(0 101 209 / var(--tw-border-opacity, 1));
+}
+
+.pinova-container .disabled\:opacity-40:disabled {
+  opacity: 0.4;
+}
+
+.pinova-container .disabled\:opacity-50:disabled {
+  opacity: 0.5;
+}
+
+.pinova-container .disabled\:shadow-none:disabled {
+  --tw-shadow: 0 0 #0000;
+  --tw-shadow-colored: 0 0 #0000;
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
+.pinova-container .disabled\:hover\:bg-transparent:hover:disabled {
+  background-color: transparent;
+}
+
+@media (min-width: 640px) {
+
+  .pinova-container .sm\:relative {
+    position: relative;
+  }
+
+  .pinova-container .sm\:size-7 {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .pinova-container .sm\:w-1\/2 {
+    width: 50%;
+  }
+
+  .pinova-container .sm\:min-w-7 {
+    min-width: 1.75rem;
+  }
+
+  .pinova-container .sm\:flex-nowrap {
+    flex-wrap: nowrap;
+  }
+
+  .pinova-container .sm\:border {
+    border-width: 1px;
+  }
+
+  .pinova-container .sm\:px-6 {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+
+  .pinova-container .sm\:py-10 {
+    padding-top: 2.5rem;
+    padding-bottom: 2.5rem;
+  }
+
+  .pinova-container .sm\:py-8 {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+  }
+}
+
+@media (min-width: 768px) {
+
+  .pinova-container .md\:col-span-6 {
+    grid-column: span 6 / span 6;
+  }
+
+  .pinova-container .md\:mb-5 {
+    margin-bottom: 1.25rem;
+  }
+
+  .pinova-container .md\:h-5 {
+    height: 1.25rem;
+  }
+
+  .pinova-container .md\:grid-cols-11 {
+    grid-template-columns: repeat(11, minmax(0, 1fr));
+  }
+
+  .pinova-container .md\:p-6 {
+    padding: 1.5rem;
+  }
+
+  .pinova-container .md\:px-5 {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+
+  .pinova-container .md\:pl-5 {
+    padding-left: 1.25rem;
+  }
+
+  .pinova-container .md\:text-sm {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+}
+
+@media (min-width: 1024px) {
+
+  .pinova-container .lg\:col-span-2 {
+    grid-column: span 2 / span 2;
+  }
+
+  .pinova-container .lg\:col-span-3 {
+    grid-column: span 3 / span 3;
+  }
+
+  .pinova-container .lg\:block {
+    display: block;
+  }
+
+  .pinova-container .lg\:grid-cols-11 {
+    grid-template-columns: repeat(11, minmax(0, 1fr));
+  }
+
+  .pinova-container .lg\:gap-2 {
+    gap: 0.5rem;
+  }
+
+  .pinova-container .lg\:pt-7 {
+    padding-top: 1.75rem;
+  }
+}
+
+/*# sourceMappingURL=style.css.map */

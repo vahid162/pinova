@@ -1,0 +1,135 @@
+.metabox-holder form {
+    background: #ffffff;
+    padding: 32px;
+    border-radius: 16px;
+    border: 1px solid #e7e9ef;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.06);
+    margin-top: 25px;
+}
+
+.nav-tab-wrapper {
+    display: flex;
+    gap: 8px;
+    background: transparent !important;
+    border: none !important;
+    padding-bottom: 10px;
+}
+
+.nav-tab {
+    border: none !important;
+    background: #f3f5f8 !important;
+    padding: 6px 16px !important;
+    border-radius: 10px;
+    font-size: 14px;
+    color: #444 !important;
+    cursor: pointer;
+    transition: 0.25s;
+    box-shadow: inset 0 0 0 1px #e4e7ec;
+}
+
+.nav-tab:hover {
+    background: #e8ecf4 !important;
+}
+
+.nav-tab-active {
+    background: #4c6fff !important;
+    color: #fff !important;
+    box-shadow: 0 3px 10px rgba(76, 111, 255, 0.35);
+}
+
+.nav-tab-active:focus, .nav-tab-active:hover {
+    box-shadow: 0 3px 10px rgba(76, 111, 255, 0.35);
+    background: #fff !important;
+    color: #4c6fff !important;
+}
+
+.form-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0 20px;
+}
+
+.form-table th {
+    width: 200px;
+    text-align: right;
+    font-weight: 600;
+    padding-top: 5px;
+    color: #2a2f3a;
+    font-size: 15px;
+}
+
+.form-table td {
+    padding: 0;
+}
+
+.form-table input[type="text"], .form-table input[type="number"], .form-table textarea, .form-table select {
+    background: #f8f9fc;
+    padding: 4px 10px;
+    font-size: 14px;
+    border-radius: 5px !important;
+    border: 1px solid #dfe3eb;
+    transition: all 0.25s;
+}
+
+.form-table input:focus, .form-table textarea:focus, .form-table select:focus {
+    background: #fff;
+    border-color: #4c6fff;
+    box-shadow: 0 0 0 4px rgba(76, 111, 255, 0.25);
+}
+
+.form-table textarea {
+    min-height: 120px;
+}
+
+.description {
+    font-size: 13px;
+    color: #6f7585 !important;
+    margin-top: 6px;
+    line-height: 1.7;
+}
+
+.button-primary {
+    background: #4c6fff !important;
+    border-radius: 10px !important;
+    padding: 10px 22px !important;
+    font-size: 15px;
+    border: none;
+    box-shadow: 0 6px 15px rgba(76, 111, 255, 0.35);
+    transition: 0.25s;
+}
+
+.button-primary:hover {
+    background: #3c59d4 !important;
+    box-shadow: 0 8px 20px rgba(76, 111, 255, 0.4);
+}
+
+.group {
+    animation: fadeUi 0.35s ease;
+}
+
+@keyframes fadeUi {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+#pinova_design img {
+    border-radius: 12px;
+    border: 1px solid #e3e7ef;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+#pinova-test-sms-btn {
+    vertical-align: middle;
+    margin-inline-start: 10px;
+}
+
+textarea[name="pinova_sms[message]"] {
+    direction: ltr;
+    text-align: left;
+}

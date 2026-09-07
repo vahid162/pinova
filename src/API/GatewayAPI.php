@@ -5,6 +5,7 @@ namespace Pinova\API;
 use Pinova\Admin\Settings;
 use Pinova\Services\SMSService;
 use WP_REST_Request;
+use WP_REST_Response;
 
 class GatewayAPI extends RestAPI {
 
@@ -21,9 +22,9 @@ class GatewayAPI extends RestAPI {
 	/**
 	 * @param WP_REST_Request $request
 	 *
-	 * @return void
+	 * @return WP_REST_Response
 	 */
-	public function get_options( WP_REST_Request $request ): void {
+	public function get_options( WP_REST_Request $request ): WP_REST_Response {
 
 		$gateway = $request->get_param( 'gateway' );
 		$section = 'pinova_sms';
@@ -31,7 +32,7 @@ class GatewayAPI extends RestAPI {
 		try {
 			$gateway = SMSService::get_gateway_instance( $gateway );
 		} catch ( \Exception $e ) {
-			self::response( false, $e->getMessage() );
+			return self::response( false, $e->getMessage(), [], 400 );
 		}
 
 		$options = $gateway->options();
@@ -63,7 +64,7 @@ class GatewayAPI extends RestAPI {
 			);
 		}
 
-		self::response( true, null, $rows );
+		return self::response( true, null, $rows );
 	}
 
 	/**

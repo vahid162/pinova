@@ -3,6 +3,8 @@
 namespace Pinova\API;
 
 use WP_REST_Request;
+use WP_REST_Response;
+use WP_Error;
 
 abstract class RestAPI {
 
@@ -12,7 +14,8 @@ abstract class RestAPI {
 
 	abstract public function register_routes();
 
-	public function permission_callback( WP_REST_Request $request ): bool {
+	/** @return bool|WP_Error */
+	public function permission_callback( WP_REST_Request $request ) {
 		return true;
 	}
 
@@ -21,17 +24,29 @@ abstract class RestAPI {
 	 * @param string|null $message
 	 * @param array       $data
 	 *
-	 * @return no-return
+	 * @param int         $status
+	 * @param array       $headers
+	 *
+	 * @return WP_REST_Response
 	 */
-	public static function response( bool $success, ?string $message = null, array $data = [] ) {
-
-		echo wp_json_encode( [
+	public static function response(
+		bool $success,
+		?string $message = null,
+		array $data = [],
+		int $status = 200,
+		array $headers = []
+	): WP_REST_Response {
+		$response = new WP_REST_Response( [
 			'success' => $success,
 			'message' => $message,
 			'data'    => $data,
-		] );
+		], $status );
 
-		die();
+		foreach ( $headers as $name => $value ) {
+			$response->header( sanitize_key( (string) $name ), (string) $value );
+		}
+
+		return $response;
 	}
 
 }

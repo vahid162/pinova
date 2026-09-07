@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+build_dir="${project_dir}/.build"
+stage_dir="${build_dir}/pinova"
+version="$(php -r '$s=file_get_contents($argv[1]); preg_match("/Version:\\s*([0-9.]+)/", $s, $m); echo $m[1] ?? "dev";' "${project_dir}/pinova.php")"
+
+rm -rf "${build_dir}"
+mkdir -p "${stage_dir}"
+
+tar -C "${project_dir}" \
+  --exclude='.git' \
+  --exclude='.build' \
+  --exclude='node_modules' \
+  --exclude='vendor' \
+  --exclude='tests' \
+  --exclude='tools' \
+  --exclude='package.json' \
+  --exclude='package-lock.json' \
+  --exclude='phpunit.xml.dist' \
+  --exclude='phpunit.integration.xml.dist' \
+  --exclude='phpstan.neon.dist' \
+  --exclude='phpcs.xml.dist' \
+  --exclude='.wp-env.json' \
+  -cf - . | tar -C "${stage_dir}" -xf -
+
+if [[ -n "${COMPOSER_PHAR:-}" ]]; then
+  php_binary="${PHP_BINARY:-php}"
+  composer_command=("${php_binary}" "${COMPOSER_PHAR}")
+else
+  composer_command=(composer)
+fi
+
+install_args=(
+  "--working-dir=${stage_dir}"
+  --no-dev
+  --no-interaction
+  --no-scripts
+  --prefer-dist
+  --optimize-autoloader
+)
+
+if [[ "${PINOVA_IGNORE_FILEINFO:-0}" == "1" ]]; then
+  install_args+=(--ignore-platform-req=ext-fileinfo)
+fi
+
+"${composer_command[@]}" install "${install_args[@]}"
+
+rm "${stage_dir}/composer.json" "${stage_dir}/composer.lock"
+
+( cd "${build_dir}" && zip -qr "pinova-${version}.zip" pinova )
+echo "Built ${build_dir}/pinova-${version}.zip"

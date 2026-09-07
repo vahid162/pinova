@@ -1,0 +1,63 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:v2
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer test
+      - run: composer phpstan
+      - if: matrix.php == '8.1'
+        run: composer phpcs
+      - if: matrix.php == '8.1'
+        run: composer audit
+      - if: matrix.php == '8.1'
+        run: composer build
+
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        wp: ['6.8', 'latest']
+        wc: ['10.9.4', 'latest']
+        hpos: ['yes', 'no']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: composer install --no-interaction --prefer-dist
+      - run: npm install --ignore-scripts
+      - run: npm run env:configure
+        env:
+          WP_VERSION: ${{ matrix.wp }}
+          WC_VERSION: ${{ matrix.wc }}
+      - run: npm run env:start -- --update
+      - run: npx wp-env run cli wp option update woocommerce_custom_orders_table_enabled ${{ matrix.hpos }}
+      - run: npm run test:integration

@@ -94,6 +94,6 @@ class SMSService {
 		return str_ireplace( [
 			'{{code}}',
 			'{{otp}}',
-		], $code, $message );
+		], (string) $code, $message );
 	}
 }

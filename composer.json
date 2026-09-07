@@ -1,0 +1,54 @@
+{
+  "name": "vahid162/pinova",
+  "description": "Secure OTP, email and password authentication for WordPress and WooCommerce.",
+  "type": "wordpress-plugin",
+  "license": "GPL-3.0-or-later",
+  "require": {
+    "php": ">=8.1",
+    "ext-curl": "*",
+    "ext-json": "*",
+    "giggsey/libphonenumber-for-php-lite": "^9.0.30",
+    "hekmatinasser/verta": "^9.0",
+    "illuminate/database": "^8.83.27",
+    "phpoffice/phpspreadsheet": "^5.9"
+  },
+  "require-dev": {
+    "phpstan/phpstan": "^2.1",
+    "php-stubs/woocommerce-stubs": "^10.0",
+    "phpunit/phpunit": "^9.6",
+    "szepeviktor/phpstan-wordpress": "^2.0",
+    "wp-coding-standards/wpcs": "^3.2"
+  },
+  "autoload": {
+    "psr-4": {
+      "Pinova\\": "src/"
+    },
+    "classmap": [
+      "utils/"
+    ]
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Pinova\\Tests\\": "tests/"
+    }
+  },
+  "config": {
+    "allow-plugins": {
+      "dealerdirect/phpcodesniffer-composer-installer": true
+    },
+    "optimize-autoloader": true,
+    "sort-packages": true
+  },
+  "scripts": {
+    "build": "bash tools/build.sh",
+    "lint": "php -l pinova.php && find src utils tests -name '*.php' -print0 | xargs -0 -n1 php -l",
+    "phpcs": "phpcs --standard=phpcs.xml.dist",
+    "phpstan": "phpstan analyse --configuration=phpstan.neon.dist --no-progress",
+    "test": "phpunit --configuration=phpunit.xml.dist",
+    "check": [
+      "@lint",
+      "@test",
+      "@phpstan"
+    ]
+  }
+}

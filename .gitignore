@@ -1,0 +1,12 @@
+/.build/
+/.phpunit.result.cache
+/.phpstan.cache
+/node_modules/
+/vendor/bin/
+/vendor/phpstan/
+/vendor/phpunit/
+/vendor/sebastian/
+/vendor/squizlabs/
+/vendor/wp-coding-standards/
+/vendor/szepeviktor/
+

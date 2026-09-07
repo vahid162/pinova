@@ -46,7 +46,7 @@ class Load {
 		add_filter( 'woocommerce_checkout_fields', [ $this, 'make_phone_field_required' ] );
 
 		// Add new customer button and modal in order creation page
-		add_action( 'admin_enqueue_scripts', [ $this, 'admin_enqueue_scripts' ], 1, 10 );
+		add_action( 'admin_enqueue_scripts', [ $this, 'admin_enqueue_scripts' ], 1 );
 		add_action( 'woocommerce_admin_order_data_after_order_details', [ $this, 'render_create_customer' ], 1, 1 );
 	}
 

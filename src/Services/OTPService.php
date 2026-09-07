@@ -17,43 +17,7 @@ class OTPService {
 	 * @throws Exception
 	 */
 	public static function create( Identifier $identifier, array $channels, string $type, ?int $user_id = null ): array {
-
-		$ip_requests = OTP::query()
-		                  ->where( 'ip_address', IP::get() )
-		                  ->where( 'expires_at', '>=', Carbon::now()->subHour() )
-		                  ->count();
-
-		if ( $ip_requests >= 8 ) {
-
-			FirewallService::block( IP::get(), 60 );
-
-			throw new SendOTPException( __( 'آدرس آی.پی شما مسدود شده است.', 'pinova' ) );
-		}
-
-		$ip_requests = OTP::query()
-		                  ->where( 'ip_address', IP::get() )
-		                  ->where( 'expires_at', '>=', Carbon::now()->subWeek() )
-		                  ->whereNull( 'verified_at' )
-		                  ->count();
-
-		if ( $ip_requests >= 12 ) {
-
-			FirewallService::block( IP::get(), 24 * 60 );
-
-			throw new SendOTPException( __( 'آدرس آی.پی شما مسدود شده است.', 'pinova' ) );
-		}
-
-		$identifier_requests = OTP::query()
-		                          ->where( 'identifier', $identifier->get_value() )
-		                          ->where( 'expires_at', '>=', Carbon::now()->subHour() )
-		                          ->count();
-
-		if ( $identifier_requests >= 5 ) {
-
-			FirewallService::block( $identifier->get_value(), 60 );
-
-			throw new SendOTPException( __( 'ایمیل یا تلفن همراه مسدود شده است.', 'pinova' ) );
-		}
+		RateLimitService::otp( IP::get(), $identifier->get_value() );
 
 		$code = self::generate_code();
 
@@ -114,15 +78,7 @@ class OTPService {
 
 		$otp->markVerified();
 
-		$user       = UserService::get_or_create( $otp );
-		$identifier = new Identifier( $otp->identifier );
-		$username   = sanitize_user( $identifier->get_value(), true );
-
-		if ( $identifier->is_mobile() && $user->user_login !== $username ) {
-			UserService::update_username( $user->ID, $username );
-		}
-
-		return $user;
+		return UserService::get_or_create( $otp );
 	}
 
 	public static function generate_code(): int {

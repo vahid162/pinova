@@ -23,8 +23,6 @@ class UserProfile {
 			return;
 		}
 
-		add_filter( 'pre_user_login', [ $this, 'new_user_username' ] );
-
 		add_action( 'show_user_profile', [ $this, 'render_mobile_field' ] );
 		add_action( 'edit_user_profile', [ $this, 'render_mobile_field' ] );
 
@@ -161,20 +159,22 @@ class UserProfile {
 			return;
 		}
 
-		UserService::update_username( $user_id, $identifier->get_value() );
+		update_user_meta( $user_id, 'pinova_mobile', $identifier->get_value() );
 	}
 
 	/**
 	 * @param WP_Error $errors WP_Error object (passed by reference).
 	 *
-	 * @return void
+	 * @return WP_Error
 	 */
-	public function remove_empty_email_validation( WP_Error $errors ): void {
+	public function remove_empty_email_validation( WP_Error $errors ): WP_Error {
 
 		if ( empty( $_POST['email'] ) ) {
 			$errors->remove( 'empty_email' );
 			$errors->remove( 'invalid_email' );
 		}
+
+		return $errors;
 
 	}
 

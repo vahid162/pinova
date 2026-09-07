@@ -279,41 +279,33 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                     const responseData = result.data;
                     this.forms.loginByPassword.inputs.identifier.value = this.forms.authenticate.inputs.identifier.value;
 
-                    if(responseData.has_account){
-                        if(nextStepName === "forgotPassword"){
-                            this.changeStep("forgotPassword");
-                            this.forms.forgotPassword.inputs.jwt.value = responseData.jwt;
-                            this.forms.forgotPassword.inputs.code.value = '';
-                            this.forms.forgotPassword.msg = result.message;
-                            if(!this.time.timerInterval){
-                                this.time.duration = responseData.ttl * 1000;
-                                this.startTime();
-                            }
-                        }else if(nextStepName === "loginByOtp" || responseData.login_method === 'otp'){
-                            this.changeStep("loginByOtp");
-                            this.forms.loginByOtp.inputs.jwt.value = responseData.jwt;
-                            this.forms.loginByOtp.inputs.code.value = '';
-                            this.forms.loginByOtp.msg = result.message;
-                            if(!this.time.timerInterval){
-                                this.time.duration = responseData.ttl * 1000;
-                                this.startTime();
-                            }
-                        }else if(responseData.login_method === 'password'){
-                            this.changeStep('loginByPassword');
-                        }
-
-                    }else{
-                        this.changeStep('signIn');
+                    if(nextStepName === "forgotPassword"){
+                        this.changeStep("forgotPassword");
+                        this.forms.forgotPassword.inputs.jwt.value = responseData.jwt;
+                        this.forms.forgotPassword.inputs.code.value = '';
+                        this.forms.forgotPassword.msg = result.message;
                         if(!this.time.timerInterval){
                             this.time.duration = responseData.ttl * 1000;
                             this.startTime();
                         }
-                        this.forms.signIn.inputs.jwt.value = responseData.jwt;
-                        this.forms.signIn.inputs.code.value = '';
-                        this.forms.signIn.msg = result.message;
+                    }else if(nextStepName === "loginByOtp" || responseData.login_method === 'otp'){
+                        this.changeStep("loginByOtp");
+                        this.forms.loginByOtp.inputs.jwt.value = responseData.jwt;
+                        this.forms.loginByOtp.inputs.code.value = '';
+                        this.forms.loginByOtp.msg = result.message;
+                        if(!this.time.timerInterval){
+                            this.time.duration = responseData.ttl * 1000;
+                            this.startTime();
+                        }
+                    }else if(responseData.login_method === 'password'){
+                        this.changeStep('loginByPassword');
                     }
 
                 }else{
+                    if (result.data && result.data.native_login_url) {
+                        window.location.href = result.data.native_login_url;
+                        return;
+                    }
                     pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
                 }
 
@@ -356,6 +348,10 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
                     window.location.href = responseData.back_url;
                 }else{
+                    if (result.data && result.data.native_login_url) {
+                        window.location.href = result.data.native_login_url;
+                        return;
+                    }
                     pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
                     this.forms[this.stepName].inputs.code.value = null;
                     this.pageLoaderIsActive = false;
@@ -397,6 +393,10 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
                     window.location.href = responseData.back_url;
                 }else{
+                    if (result.data && result.data.native_login_url) {
+                        window.location.href = result.data.native_login_url;
+                        return;
+                    }
                     pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
                     this.pageLoaderIsActive = false;
                 }

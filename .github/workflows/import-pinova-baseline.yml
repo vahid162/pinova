@@ -1,0 +1,51 @@
+name: Import Pinova 1.2.2 baseline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/import-pinova-baseline.yml
+
+permissions:
+  contents: write
+
+jobs:
+  import-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch verified Pinova mirror commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/WordPressBugBounty/plugins-pinova.git "$RUNNER_TEMP/pinova-upstream"
+          git -C "$RUNNER_TEMP/pinova-upstream" checkout --detach aa38d8dd1e5955c4298e73f0a9942b132a8206bc
+          test "$(git -C "$RUNNER_TEMP/pinova-upstream" rev-parse HEAD)" = "aa38d8dd1e5955c4298e73f0a9942b132a8206bc"
+          grep -Fq "Version: 1.2.2" "$RUNNER_TEMP/pinova-upstream/pinova/pinova.php"
+
+      - name: Replace repository tree with plugin baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -r --ignore-unmatch .
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "$RUNNER_TEMP/pinova-upstream/pinova/." .
+          git add -A
+
+      - name: Commit exact baseline and create tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Import Pinova 1.2.2 baseline"
+          git push origin HEAD:main
+          git tag -f upstream-1.2.2
+          git tag -f baseline-v1
+          git push origin refs/tags/upstream-1.2.2 --force
+          git push origin refs/tags/baseline-v1 --force

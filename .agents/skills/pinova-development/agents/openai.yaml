@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pinova Development"
+  short_description: "Develop and release Pinova safely"
+  default_prompt: "Use $pinova-development to inspect the current Pinova state and complete this change through tests, documentation, and release readiness."

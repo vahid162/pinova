@@ -12,6 +12,7 @@ mkdir -p "${stage_dir}"
 tar -C "${project_dir}" \
   --exclude='.git' \
   --exclude='.github' \
+  --exclude='.agents' \
   --exclude='.gitignore' \
   --exclude='.activated' \
   --exclude='.build' \
@@ -23,6 +24,8 @@ tar -C "${project_dir}" \
   --exclude='tools' \
   --exclude='package.json' \
   --exclude='package-lock.json' \
+  --exclude='AGENTS.md' \
+  --exclude='README.md' \
   --exclude='phpunit.xml.dist' \
   --exclude='phpunit.integration.xml.dist' \
   --exclude='phpstan.neon.dist' \

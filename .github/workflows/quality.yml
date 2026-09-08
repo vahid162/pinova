@@ -38,9 +38,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        wp: ['6.8', 'latest']
-        wc: ['10.9.4', 'latest']
-        hpos: ['yes', 'no']
+        include:
+          - wp: '6.8'
+            wc: '10.7.0'
+            hpos: 'yes'
+          - wp: '6.8'
+            wc: '10.7.0'
+            hpos: 'no'
+          - wp: 'latest'
+            wc: '10.9.4'
+            hpos: 'yes'
+          - wp: 'latest'
+            wc: '10.9.4'
+            hpos: 'no'
+          - wp: 'latest'
+            wc: 'latest'
+            hpos: 'yes'
+          - wp: 'latest'
+            wc: 'latest'
+            hpos: 'no'
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2

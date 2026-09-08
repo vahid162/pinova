@@ -12,8 +12,6 @@ class Biff8 extends Xls
      * read BIFF8 constant value array from array data
      * returns e.g. ['value' => '{1,2;3,4}', 'size' => 40]
      * section 2.5.8.
-     *
-     * @return array{value: string, size: int}
      */
     protected static function readBIFF8ConstantArray(string $arrayData): array
     {
@@ -49,8 +47,6 @@ class Biff8 extends Xls
      * read BIFF8 constant value which may be 'Empty Value', 'Number', 'String Value', 'Boolean Value', 'Error Value'
      * section 2.5.7
      * returns e.g. ['value' => '5', 'size' => 9].
-     *
-     * @return array{value: bool|float|int|string, size: int}
      */
     private static function readBIFF8Constant(string $valueData): array
     {
@@ -105,8 +101,6 @@ class Biff8 extends Xls
     /**
      * Read BIFF8 cell range address list
      * section 2.5.15.
-     *
-     * @return array{size: int, cellRangeAddresses: mixed[]}
      */
     public static function readBIFF8CellRangeAddressList(string $subData): array
     {
@@ -241,7 +235,7 @@ class Biff8 extends Xls
      */
     protected static function readBIFF8CellRangeAddress(string $subData): string
     {
-        // todo: if cell range is just a single cell, should this function
+        // todo: if cell range is just a single cell, should this funciton
         // not just return e.g. 'A1' and not 'A1:A1' ?
 
         // offset: 0; size: 2; index to first row (0... 65535) (or offset (-32768... 32767))
@@ -297,7 +291,7 @@ class Biff8 extends Xls
         [$baseCol, $baseRow] = Coordinate::indexesFromString($baseCell);
         $baseCol = $baseCol - 1;
 
-        // TODO: if cell range is just a single cell, should this function
+        // TODO: if cell range is just a single cell, should this funciton
         // not just return e.g. 'A1' and not 'A1:A1' ?
 
         // offset: 0; size: 2; first row

@@ -5,7 +5,6 @@ namespace PhpOffice\PhpSpreadsheet\Calculation\Web;
 use PhpOffice\PhpSpreadsheet\Calculation\Functions;
 use PhpOffice\PhpSpreadsheet\Calculation\Information\ExcelError;
 use PhpOffice\PhpSpreadsheet\Cell\Cell;
-use PhpOffice\PhpSpreadsheet\Shared\StringHelper;
 
 class Service
 {
@@ -24,21 +23,25 @@ class Service
         if (is_array($url)) {
             $url = Functions::flattenSingleValue($url);
         }
-        $url = trim(StringHelper::convertToString($url, false));
+        if (!is_string($url)) {
+            return ExcelError::VALUE();
+        }
+        $url = trim($url);
         if (mb_strlen($url) > 2048) {
             return ExcelError::VALUE(); // Invalid URL length
         }
+
         $parsed = parse_url($url);
         $scheme = $parsed['scheme'] ?? '';
         if ($scheme !== 'http' && $scheme !== 'https') {
             return ExcelError::VALUE(); // Invalid protocol
         }
+
         $domainWhiteList = $cell?->getWorksheet()->getParent()?->getDomainWhiteList() ?? [];
         $host = $parsed['host'] ?? '';
         if (!in_array($host, $domainWhiteList, true)) {
             return ($cell === null) ? null : Functions::NOT_YET_IMPLEMENTED; // will be converted to oldCalculatedValue or null
         }
-
         // Get results from the webservice
         $ctxArray = [
             'http' => [
@@ -49,6 +52,7 @@ class Service
         if ($scheme === 'https') {
             $ctxArray['ssl'] = ['crypto_method' => STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT];
         }
+
         $ctx = stream_context_create($ctxArray);
         $output = @file_get_contents($url, false, $ctx);
         if ($output === false || mb_strlen($output) > 32767) {

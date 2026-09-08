@@ -45,13 +45,11 @@ class Percentiles
         $mValueCount = count($mArgs);
         if ($mValueCount > 0) {
             sort($mArgs);
-            /** @var float[] $mArgs */
             $count = Counts::COUNT($mArgs);
             $index = $entry * ($count - 1);
-            $indexFloor = floor($index);
-            $iBase = (int) $indexFloor;
-            if ($index == $indexFloor) {
-                return $mArgs[$iBase];
+            $iBase = floor($index);
+            if ($index == $iBase) {
+                return $mArgs[$index];
             }
             $iNext = $iBase + 1;
             $iProportion = $index - $iBase;
@@ -89,7 +87,6 @@ class Percentiles
             return $e->getMessage();
         }
 
-        /** @var array<float|int|numeric-string> */
         $valueSet = self::rankFilterValues($valueSet);
         $valueCount = count($valueSet);
         if ($valueCount == 0) {
@@ -104,7 +101,6 @@ class Percentiles
 
         $pos = array_search($value, $valueSet);
         if ($pos === false) {
-            /** @var float[] $valueSet */
             $pos = 0;
             $testValue = $valueSet[0];
             while ($testValue < $value) {
@@ -173,7 +169,6 @@ class Percentiles
             return $e->getMessage();
         }
 
-        /** @var array<float|int|numeric-string> */
         $valueSet = self::rankFilterValues($valueSet);
         if ($order === self::RANK_SORT_DESCENDING) {
             rsort($valueSet, SORT_NUMERIC);
@@ -189,11 +184,6 @@ class Percentiles
         return ++$pos;
     }
 
-    /**
-     * @param mixed[] $dataSet
-     *
-     * @return mixed[]
-     */
     protected static function percentileFilterValues(array $dataSet): array
     {
         return array_filter(
@@ -202,11 +192,6 @@ class Percentiles
         );
     }
 
-    /**
-     * @param mixed[] $dataSet
-     *
-     * @return mixed[]
-     */
     protected static function rankFilterValues(array $dataSet): array
     {
         return array_filter(

@@ -6,6 +6,7 @@ namespace Pinova\Integrations\Woocommerce;
 use Exception;
 use Pinova\API\RestAPI;
 use Pinova\Channels\SMS;
+use Pinova\Identity\IdentityConflictException;
 use Pinova\Objects\Identifier;
 use Pinova\Services\OTPService;
 use Pinova\Services\UserService;
@@ -94,7 +95,11 @@ class API extends RestAPI {
 			}
 		}
 
-		$user_id = UserService::match( $mobile );
+		try {
+			$user_id = UserService::match( $mobile, true, true );
+		} catch ( IdentityConflictException $conflict ) {
+			return self::response( false, __( 'این شناسه بین چند حساب تعارض دارد و باید توسط مدیر بررسی شود.', 'pinova' ), [], 409 );
+		}
 
 		if ( $user_id ) {
 			return self::response( false, sprintf( __( 'کاربر با تلفن همراه %s وجود دارد.', 'pinova' ), $mobile->get_value() ), [], 409 );
@@ -102,7 +107,11 @@ class API extends RestAPI {
 
 		if ( ! empty( $email ) ) {
 
-			$user_id = UserService::match( $email );
+			try {
+				$user_id = UserService::match( $email, true, true );
+			} catch ( IdentityConflictException $conflict ) {
+				return self::response( false, __( 'این شناسه بین چند حساب تعارض دارد و باید توسط مدیر بررسی شود.', 'pinova' ), [], 409 );
+			}
 
 			$email = $email->get_value();
 

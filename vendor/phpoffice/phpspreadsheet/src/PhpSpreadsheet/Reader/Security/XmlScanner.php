@@ -64,7 +64,7 @@ class XmlScanner
 
     private function findCharSet(string $xml): string
     {
-        if (str_starts_with($xml, "\x4c\x6f\xa7\x94")) {
+        if (substr($xml, 0, 4) === "\x4c\x6f\xa7\x94") {
             throw new Reader\Exception('EBCDIC encoding not permitted');
         }
         $encoding = Reader\Csv::guessEncodingBom('', $xml);
@@ -87,7 +87,7 @@ class XmlScanner
     public function scan($xml): string
     {
         // Don't rely purely on libxml_disable_entity_loader()
-        $pattern = '/\0*' . implode('\0*', mb_str_split($this->pattern, 1, 'UTF-8')) . '\0*/';
+        $pattern = '/\0*' . implode('\0*', str_split($this->pattern)) . '\0*/';
 
         $xml = "$xml";
         if (preg_match($pattern, $xml)) {
@@ -102,7 +102,6 @@ class XmlScanner
         if ($this->callback !== null) {
             $xml = call_user_func($this->callback, $xml);
         }
-        /** @var string $xml */
 
         return $xml;
     }

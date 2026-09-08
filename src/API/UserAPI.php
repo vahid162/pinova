@@ -10,6 +10,9 @@ use Pinova\Exceptions\SendOTPException;
 use Pinova\Helper;
 use Pinova\Helpers\IP;
 use Pinova\Helpers\JWT;
+use Pinova\Identity\IdentityRepository;
+use Pinova\Identity\IdentityConflictException;
+use Pinova\Identity\IdentityResolver;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
 use Pinova\Pinova;
@@ -121,18 +124,13 @@ class UserAPI extends RestAPI {
 		$force_otp  = boolval( $request->get_param( 'force_otp' ) );
 		$forget     = boolval( $request->get_param( 'forget' ) );
 
-		$user_id = UserService::match( $identifier );
-		$user    = $user_id ? get_userdata( $user_id ) : false;
-
-		if ( $user instanceof WP_User && UserService::is_native_only( $user ) ) {
-			return self::response(
-				false,
-				__( 'برای این حساب از صفحهٔ ورود بومی وردپرس استفاده کنید.', 'pinova' ),
-				[ 'native_login_url' => wp_login_url( Helper::get_login_back_url() ) ],
-				403
-			);
+		try {
+			$user_id = UserService::match( $identifier, true, false );
+		} catch ( IdentityConflictException $conflict ) {
+			return self::uniform_failure( $started );
 		}
-
+		$user         = $user_id ? get_userdata( $user_id ) : false;
+		$native_only  = $user instanceof WP_User && UserService::is_native_only( $user );
 		$login_method = ( $identifier->is_mobile() || $force_otp || $forget ) ? 'otp' : 'password';
 		$data         = [
 			'login_method' => $login_method,
@@ -145,6 +143,17 @@ class UserAPI extends RestAPI {
 
 		if ( $identifier->is_username() ) {
 			return self::uniform_failure( $started );
+		}
+
+		if ( $native_only ) {
+			$data['jwt'] = self::decoy_otp_jwt();
+			self::minimum_response_time( $started );
+
+			return self::response(
+				true,
+				__( 'اگر حسابی با این شناسه وجود داشته باشد، کد تأیید ارسال می‌شود.', 'pinova' ),
+				$data
+			);
 		}
 
 		if ( ! $user_id && ( $forget || ! Pinova::users_can_register() || $identifier->is_email() ) ) {
@@ -228,27 +237,38 @@ class UserAPI extends RestAPI {
 			);
 		}
 
-		$user_id = UserService::match( $identifier );
+		try {
+			$user_id = UserService::match( $identifier, true, true );
+		} catch ( IdentityConflictException $conflict ) {
+			return self::password_failure( $started );
+		}
 		$user    = $user_id ? get_userdata( $user_id ) : false;
 
 		if ( $user instanceof WP_User && UserService::is_native_only( $user ) ) {
-			return self::response(
-				false,
-				__( 'برای این حساب از صفحهٔ ورود بومی وردپرس استفاده کنید.', 'pinova' ),
-				[ 'native_login_url' => wp_login_url( Helper::get_login_back_url() ) ],
-				403
-			);
+			return self::password_failure( $started );
 		}
 
 		$authenticated = UserService::authenticate_password( $user_id, $password, true );
 
 		if ( is_wp_error( $authenticated ) ) {
-			self::minimum_response_time( $started );
-
-			return self::response( false, __( 'اطلاعات ورود معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::password_failure( $started );
 		}
 
 		update_user_meta( $authenticated->ID, 'pinova_login_method', 'password' );
+
+		if ( IdentityRepository::is_ready() ) {
+			try {
+				IdentityResolver::claim(
+					$identifier,
+					$authenticated->ID,
+					$identifier->is_username(),
+					'password'
+				);
+			} catch ( Exception $e ) {
+				// Authentication succeeded; a pre-existing conflict remains blocked and recorded.
+			}
+		}
+
 		do_action( 'pinova/user_logged_in', $authenticated->ID );
 
 		return self::response( true, __( 'ورود با موفقیت انجام شد.', 'pinova' ) );
@@ -271,12 +291,7 @@ class UserAPI extends RestAPI {
 		}
 
 		if ( UserService::is_native_only( $user ) ) {
-			return self::response(
-				false,
-				__( 'برای این حساب از صفحهٔ ورود بومی وردپرس استفاده کنید.', 'pinova' ),
-				[ 'native_login_url' => wp_login_url( Helper::get_login_back_url() ) ],
-				403
-			);
+			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
 		UserService::login( $user->ID, 'otp' );
@@ -301,7 +316,7 @@ class UserAPI extends RestAPI {
 		}
 
 		if ( UserService::is_native_only( $user ) ) {
-			return self::response( false, __( 'بازیابی رمز این حساب فقط از مسیر بومی وردپرس مجاز است.', 'pinova' ), [], 403 );
+			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
 		clean_user_cache( $user->ID );
@@ -431,6 +446,12 @@ class UserAPI extends RestAPI {
 		self::minimum_response_time( $started );
 
 		return self::response( false, __( 'امکان پردازش درخواست ورود وجود ندارد.', 'pinova' ), [], 400 );
+	}
+
+	private static function password_failure( float $started ): WP_REST_Response {
+		self::minimum_response_time( $started );
+
+		return self::response( false, __( 'اطلاعات ورود معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 	}
 
 	private static function minimum_response_time( float $started ): void {

@@ -4,6 +4,7 @@ namespace Pinova;
 
 use Pinova\Admin\Menu;
 use Pinova\Admin\Settings;
+use Pinova\Identity\IdentityManager;
 use Pinova\Services\APIService;
 use Pinova\Services\RateLimitService;
 use Pinova\Services\SMSService;
@@ -32,6 +33,7 @@ class Pinova {
 	}
 
 	public function autoload() {
+		IdentityManager::boot();
 		new Menu();
 		new APIService();
 		new SMSService();

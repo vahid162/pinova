@@ -106,4 +106,9 @@ class Version extends \Nabik\Utils\V1\Version {
 		Install::create_wordpress_tables();
 	}
 
+	public function update_130() {
+		Install::create_wordpress_tables();
+		Install::grant_capabilities();
+	}
+
 }

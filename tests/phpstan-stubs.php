@@ -4,7 +4,7 @@ namespace {
 	const PINOVA_DIR = __DIR__ . '/..';
 	const PINOVA_FILE = '';
 	const PINOVA_URL = '';
-	const PINOVA_VERSION = '1.2.3';
+	const PINOVA_VERSION = '1.3.0';
 	const DB_HOST = '';
 	const DB_NAME = '';
 	const DB_USER = '';
@@ -46,6 +46,22 @@ namespace {
 			return null;
 		}
 	}
+
+	class WP_CLI {
+		public static function add_command( string $name, string $class_name ): void {}
+
+		public static function error( string $message ): never {
+			throw new \RuntimeException( $message );
+		}
+
+		public static function success( string $message ): void {}
+
+		public static function log( string $message ): void {}
+	}
+}
+
+namespace WP_CLI\Utils {
+	function format_items( string $format, array $items, array $fields ): void {}
 }
 
 namespace Automattic\Jetpack {

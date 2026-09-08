@@ -4,6 +4,7 @@ namespace Pinova\Integrations\Wordpress;
 
 use Pinova\Objects\Mobile;
 use Pinova\Objects\Identifier;
+use Pinova\Identity\IdentityConflictException;
 use Pinova\Pinova;
 use Pinova\Services\UserService;
 use WP_Comment;
@@ -52,7 +53,11 @@ class Load {
 			return $user;
 		}
 
-		$user_id = UserService::match( $identifier );
+		try {
+			$user_id = UserService::match( $identifier, true, true );
+		} catch ( IdentityConflictException $conflict ) {
+			return new WP_Error( 'pinova_identity_conflict', __( 'اطلاعات ورود معتبر نمی‌باشد.', 'pinova' ) );
+		}
 		$matched = $user_id ? get_userdata( $user_id ) : false;
 
 		if ( ! $matched instanceof WP_User ) {
@@ -79,7 +84,7 @@ class Load {
 		return $classes;
 	}
 
-	public function get_pinova_mobile( $value, int $object_id, string $meta_key ): ?string {
+	public function get_pinova_mobile( $value, int $object_id, string $meta_key ) {
 
 		if ( $meta_key != 'pinova_mobile' ) {
 			return $value;

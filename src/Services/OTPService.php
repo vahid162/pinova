@@ -7,6 +7,8 @@ use Exception;
 use Pinova\Exceptions\SendOTPException;
 use Pinova\Helpers\IP;
 use Pinova\Helpers\JWT;
+use Pinova\Identity\IdentityRepository;
+use Pinova\Identity\IdentityResolver;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
 use Pinova\Pinova;
@@ -78,7 +80,15 @@ class OTPService {
 
 		$otp->markVerified();
 
-		return UserService::get_or_create( $otp );
+		$user = UserService::get_or_create( $otp );
+
+		if ( IdentityRepository::is_ready() ) {
+			$user_id = IdentityResolver::canonical_user_id( $user->ID );
+			IdentityResolver::claim( new Identifier( $otp->identifier ), $user_id, true, 'otp' );
+			$user = new \WP_User( $user_id );
+		}
+
+		return $user;
 	}
 
 	public static function generate_code(): int {

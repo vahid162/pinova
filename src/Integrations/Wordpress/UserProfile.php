@@ -4,6 +4,9 @@ namespace Pinova\Integrations\Wordpress;
 
 use Pinova\Integrations\Wordpress\Exports\Excel;
 use Pinova\Integrations\Wordpress\Exports\VCF;
+use Pinova\Identity\IdentityConflictException;
+use Pinova\Identity\IdentityRepository;
+use Pinova\Identity\IdentityResolver;
 use Pinova\Objects\Identifier;
 use Pinova\Objects\Mobile;
 use Pinova\Pinova;
@@ -46,7 +49,7 @@ class UserProfile {
 	 * @return void
 	 */
 	public function render_mobile_field( WP_User $profile_user ): void {
-		$phone = get_user_meta( $profile_user->ID, 'pinova_mobile', true );
+		$phone = UserService::get_mobile( $profile_user->ID ) ?: '';
 
 		?>
 		<table class="form-table">
@@ -64,7 +67,7 @@ class UserProfile {
 					       value="<?php echo esc_attr( $phone ); ?>"
 					>
 					<p class="description" id="mobile-description">
-						<?php _e( 'با تغییر تلفن همراه، <strong>نام کاربری شما تغییر خواهد کرد.</strong> لطفاً پس از تغییر، با تلفن همراه جدید وارد شوید.', 'pinova' ); ?>
+						<?php _e( 'تغییر تلفن همراه، نام کاربری وردپرس را تغییر نمی‌دهد. شمارهٔ جدید تا زمان تأیید به‌عنوان شناسهٔ تأییدنشده ذخیره می‌شود.', 'pinova' ); ?>
 					</p>
 				</td>
 			</tr>
@@ -97,7 +100,15 @@ class UserProfile {
 			return $errors;
 		}
 
-		$existing_user_id = UserService::get_by_mobile( $mobile->get_value() );
+		try {
+			$existing_user_id = IdentityRepository::is_ready()
+				? IdentityResolver::resolve( $mobile )
+				: UserService::get_by_mobile( $mobile->get_value() );
+		} catch ( IdentityConflictException $conflict ) {
+			$errors->add( 'user_mobile_conflict', __( 'این تلفن همراه بین چند حساب تعارض دارد و باید ابتدا توسط مدیر بررسی شود.', 'pinova' ) );
+
+			return $errors;
+		}
 
 		if ( is_int( $existing_user_id ) && $existing_user_id !== $user_id ) {
 
@@ -159,7 +170,21 @@ class UserProfile {
 			return;
 		}
 
-		update_user_meta( $user_id, 'pinova_mobile', $identifier->get_value() );
+		if ( IdentityRepository::is_ready() ) {
+			try {
+				IdentityRepository::replace_user_type(
+					$user_id,
+					$identifier->get_type(),
+					$identifier->get_value(),
+					null,
+					'admin_profile'
+				);
+			} catch ( IdentityConflictException $conflict ) {
+				return;
+			}
+		} else {
+			update_user_meta( $user_id, 'pinova_mobile', $identifier->get_value() );
+		}
 	}
 
 	/**

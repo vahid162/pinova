@@ -124,10 +124,15 @@ class VCF {
 
 			}
 
-			$mobiles = array_values( array_unique( $mobiles ) );
-			$mobiles = apply_filters( 'pinova/export_users_vcf_mobiles', $mobiles, $user_id );
+			$mobiles = array_values( array_unique( array_filter( $mobiles ) ) );
+			$mobiles = (array) apply_filters( 'pinova/export_users_vcf_mobiles', $mobiles, $user_id );
 
 			foreach ( $mobiles as $index => $mobile ) {
+				if ( ! is_scalar( $mobile ) ) {
+					continue;
+				}
+
+				$mobile = self::escape( (string) $mobile );
 
 				$type = $index === 0 ? 'CELL' : 'X-PHONE' . $index;
 

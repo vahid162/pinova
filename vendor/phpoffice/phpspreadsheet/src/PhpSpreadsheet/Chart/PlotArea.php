@@ -17,7 +17,7 @@ class PlotArea
      *     First is position in %.
      *     Second is ChartColor.
      *
-     * @var array<array{float, ChartColor}>
+     * @var array[]
      */
     private array $gradientFillStops = [];
 
@@ -37,8 +37,6 @@ class PlotArea
      * @var DataSeries[]
      */
     private array $plotSeries;
-
-    private ?DataTable $dataTable = null;
 
     /**
      * Create a new PlotArea.
@@ -128,7 +126,6 @@ class PlotArea
         return $this->noFill;
     }
 
-    /** @param array<array{float, ChartColor}> $gradientFillStops */
     public function setGradientFillProperties(array $gradientFillStops, ?float $gradientFillAngle): self
     {
         $this->gradientFillStops = $gradientFillStops;
@@ -147,8 +144,6 @@ class PlotArea
 
     /**
      * Get gradientFillStops.
-     *
-     * @return array<array{float, ChartColor}>
      */
     public function getGradientFillStops(): array
     {
@@ -195,18 +190,6 @@ class PlotArea
         $this->useDownBars = $useDownBars;
 
         return $this;
-    }
-
-    public function setDataTable(DataTable $dataTable): self
-    {
-        $this->dataTable = $dataTable;
-
-        return $this;
-    }
-
-    public function getDataTable(): ?DataTable
-    {
-        return $this->dataTable;
     }
 
     /**

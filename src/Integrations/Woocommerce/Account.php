@@ -2,6 +2,9 @@
 
 namespace Pinova\Integrations\Woocommerce;
 
+use Pinova\Identity\IdentityConflictException;
+use Pinova\Identity\IdentityRepository;
+use Pinova\Identity\IdentityResolver;
 use Pinova\Objects\Identifier;
 use Pinova\Objects\Mobile;
 use Pinova\Services\FirewallService;
@@ -28,7 +31,7 @@ class Account {
 
 	public function render_mobile_field() {
 		$user_id = get_current_user_id();
-		$mobile  = get_user_meta( $user_id, 'pinova_mobile', true );
+		$mobile  = UserService::get_mobile( $user_id ) ?: '';
 		?>
 
 		<p class="woocommerce-form-row woocommerce-form-row--wide form-row form-row-wide">
@@ -41,9 +44,7 @@ class Account {
 			       value="<?php echo esc_attr( $mobile ); ?>"
 			>
 			<span id="pinova_mobile_description">
-				با تغییر تلفن همراه،
-				<strong>نام کاربری شما تغییر خواهد کرد.</strong>
-				لطفاً پس از تغییر، با تلفن همراه جدید وارد شوید.
+				تغییر تلفن همراه، نام کاربری وردپرس را تغییر نمی‌دهد. شمارهٔ جدید تا زمان تأیید به‌عنوان شناسهٔ تأییدنشده ذخیره می‌شود.
 			</span>
 		</p>
 		<br>
@@ -75,7 +76,15 @@ class Account {
 			return;
 		}
 
-		$existing_user_id = UserService::get_by_mobile( $identifier->get_value() );
+		try {
+			$existing_user_id = IdentityRepository::is_ready()
+				? IdentityResolver::resolve( $identifier )
+				: UserService::get_by_mobile( $identifier->get_value() );
+		} catch ( IdentityConflictException $conflict ) {
+			$errors->add( 'mobile_conflict', __( 'این تلفن همراه بین چند حساب تعارض دارد و باید ابتدا توسط مدیر بررسی شود.', 'pinova' ) );
+
+			return;
+		}
 
 		if ( is_int( $existing_user_id ) && $existing_user_id !== $user->ID ) {
 			$errors->add( 'mobile_duplicate', sprintf(
@@ -99,6 +108,20 @@ class Account {
 			return;
 		}
 
-		UserService::update_username( $user_id, $identifier->get_value() );
+		if ( IdentityRepository::is_ready() ) {
+			try {
+				IdentityRepository::replace_user_type(
+					$user_id,
+					$identifier->get_type(),
+					$identifier->get_value(),
+					null,
+					'woocommerce_account'
+				);
+			} catch ( IdentityConflictException $conflict ) {
+				return;
+			}
+		} else {
+			update_user_meta( $user_id, 'pinova_mobile', $identifier->get_value() );
+		}
 	}
 }

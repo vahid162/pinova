@@ -280,38 +280,27 @@ pinovaAlpine.data("pinovaLoginModal", ()=>({
                 const responseData = result.data;
                 this.forms.loginByPassword.inputs.identifier.value = this.forms.authenticate.inputs.identifier.value;
 
-                if(responseData.has_account){
-                    if(nextStepName === "forgotPassword"){
-                        this.changeStep("forgotPassword");
-                        this.forms.forgotPassword.inputs.jwt.value = responseData.jwt;
-                        this.forms.forgotPassword.inputs.code.value = '';
-                        this.forms.forgotPassword.msg = result.message;
-                        if(!this.time.timerInterval){
-                            this.time.timeLeft = responseData.ttl * 1000;
-                            this.startTime();
-                        }
-                    }else if(nextStepName === "loginByOtp" || responseData.login_method === 'otp'){
-                        this.changeStep("loginByOtp");
-                        this.forms.loginByOtp.inputs.jwt.value = responseData.jwt;
-                        this.forms.loginByOtp.inputs.code.value = '';
-                        this.forms.loginByOtp.msg = result.message;
-                        if(!this.time.timerInterval){
-                            this.time.timeLeft = responseData.ttl * 1000;
-                            this.startTime();
-                        }
-                    }else if(responseData.login_method === 'password'){
-                        this.changeStep('loginByPassword');
-                    }
 
-                }else{
-                    this.changeStep('signIn');
+                if(nextStepName === "forgotPassword"){
+                    this.changeStep("forgotPassword");
+                    this.forms.forgotPassword.inputs.jwt.value = responseData.jwt;
+                    this.forms.forgotPassword.inputs.code.value = '';
+                    this.forms.forgotPassword.msg = result.message;
                     if(!this.time.timerInterval){
                         this.time.timeLeft = responseData.ttl * 1000;
                         this.startTime();
                     }
-                    this.forms.signIn.inputs.jwt.value = responseData.jwt;
-                    this.forms.signIn.inputs.code.value = '';
-                    this.forms.signIn.msg = result.message;
+                }else if(nextStepName === "loginByOtp" || responseData.login_method === 'otp'){
+                    this.changeStep("loginByOtp");
+                    this.forms.loginByOtp.inputs.jwt.value = responseData.jwt;
+                    this.forms.loginByOtp.inputs.code.value = '';
+                    this.forms.loginByOtp.msg = result.message;
+                    if(!this.time.timerInterval){
+                        this.time.timeLeft = responseData.ttl * 1000;
+                        this.startTime();
+                    }
+                }else if(responseData.login_method === 'password'){
+                    this.changeStep('loginByPassword');
                 }
 
             }else{

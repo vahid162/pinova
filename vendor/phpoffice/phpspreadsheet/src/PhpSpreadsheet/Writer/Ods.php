@@ -86,12 +86,6 @@ class Ods extends BaseWriter
         return $this->writerPartThumbnails;
     }
 
-    /** @param array<string, callable> $additionalNumberFormats */
-    public function useAdditionalNumberFormats(array $additionalNumberFormats): void
-    {
-        $this->writerPartContent->additionalNumberFormats = $additionalNumberFormats;
-    }
-
     /**
      * Save PhpSpreadsheet to file.
      *

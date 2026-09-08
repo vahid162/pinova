@@ -9,12 +9,6 @@ class NumberFormatter extends BaseFormatter
 {
     private const NUMBER_REGEX = '/(0+)(\.?)(0*)/';
 
-    /**
-     * @param string[] $numbers
-     * @param string[] $masks
-     *
-     * @return mixed[]
-     */
     private static function mergeComplexNumberFormatMasks(array $numbers, array $masks): array
     {
         $decimalCount = strlen($numbers[1]);
@@ -55,8 +49,10 @@ class NumberFormatter extends BaseFormatter
                 $number = floor($numberFloat / $divisor);
                 $mask = substr_replace($mask, $blockValue, $offset, $size);
             }
+            /** @var string $numberString */
+            $numberString = $number;
             if ($number > 0) {
-                $mask = substr_replace($mask, "$number", $offset, 0);
+                $mask = substr_replace($mask, $numberString, $offset, 0);
             }
             $result = $mask;
         }
@@ -85,7 +81,6 @@ class NumberFormatter extends BaseFormatter
             if (count($masks) > 2) {
                 $masks = self::mergeComplexNumberFormatMasks($numbers, $masks);
             }
-            /** @var string[] $masks */
             $integerPart = self::complexNumberFormatMask($numbers[0], $masks[0], false);
             $numlen = strlen($numbers[1]);
             $msklen = strlen($masks[1]);
@@ -137,7 +132,6 @@ class NumberFormatter extends BaseFormatter
         return $s;
     }
 
-    /** @param string[] $matches */
     private static function formatStraightNumericValue(mixed $value, string $format, array $matches, bool $useThousands): string
     {
         /** @var float $valueFloat */
@@ -146,7 +140,7 @@ class NumberFormatter extends BaseFormatter
         $dec = $matches[2];
         $right = $matches[3];
 
-        // minimum width of formatted number (including dot)
+        // minimun width of formatted number (including dot)
         $minWidth = strlen($left) + strlen($dec) + strlen($right);
         if ($useThousands) {
             $value = number_format(
@@ -165,10 +159,9 @@ class NumberFormatter extends BaseFormatter
             $size = $decimals + 3;
 
             return sprintf("%{$size}.{$decimals}E", $valueFloat);
-        }
-        if (preg_match('/0([^\d\.]+)0/', $format) || substr_count($format, '.') > 1) {
+        } elseif (preg_match('/0([^\d\.]+)0/', $format) || substr_count($format, '.') > 1) {
             if ($valueFloat == floor($valueFloat) && substr_count($format, '.') === 1) {
-                $value *= 10 ** strlen(explode('.', $format)[1]); //* @phpstan-ignore-line
+                $value *= 10 ** strlen(explode('.', $format)[1]);
             }
 
             $result = self::complexNumberFormatMask($value, $format);
@@ -262,7 +255,6 @@ class NumberFormatter extends BaseFormatter
         return (string) $value;
     }
 
-    /** @param mixed[]|string $value */
     private static function makeString(array|string $value): string
     {
         return is_array($value) ? '' : "$value";
@@ -278,7 +270,7 @@ class NumberFormatter extends BaseFormatter
         $preDecimal = $postDecimal = '';
         $pregArray = preg_split('/\.(?=(?:[^"]*"[^"]*")*[^"]*\Z)/miu', $baseFormat . '.?');
         if (is_array($pregArray)) {
-            $preDecimal = $pregArray[0];
+            $preDecimal = $pregArray[0] ?? '';
             $postDecimal = $pregArray[1] ?? '';
         }
 

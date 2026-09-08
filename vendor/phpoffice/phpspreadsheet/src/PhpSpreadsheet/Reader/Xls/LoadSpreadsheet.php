@@ -2,7 +2,6 @@
 
 namespace PhpOffice\PhpSpreadsheet\Reader\Xls;
 
-use PhpOffice\PhpSpreadsheet\Cell\AddressRange;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\NamedRange;
@@ -27,18 +26,18 @@ class LoadSpreadsheet extends Xls
         $xls->loadOLE($filename);
 
         // Initialisations
-        $xls->spreadsheet = $this->newSpreadsheet();
-        $xls->spreadsheet->setValueBinder($xls->valueBinder);
+        $xls->spreadsheet = new Spreadsheet();
+        $xls->spreadsheet->setValueBinder($this->valueBinder);
         $xls->spreadsheet->removeSheetByIndex(0); // remove 1st sheet
         if (!$xls->readDataOnly) {
             $xls->spreadsheet->removeCellStyleXfByIndex(0); // remove the default style
             $xls->spreadsheet->removeCellXfByIndex(0); // remove the default style
         }
 
-        // Read the summary information stream (containing metadata)
+        // Read the summary information stream (containing meta data)
         $xls->readSummaryInformation();
 
-        // Read the Additional document summary information stream (containing application-specific metadata)
+        // Read the Additional document summary information stream (containing application-specific meta data)
         $xls->readDocumentSummaryInformation();
 
         // total byte size of Excel data (workbook global substream + sheet substreams)
@@ -385,7 +384,6 @@ class LoadSpreadsheet extends Xls
 
                         break;
                     case self::XLS_TYPE_CFHEADER:
-                        /** @var string[] */
                         $cellRangeAddresses = $xls->readCFHeader();
 
                         break;
@@ -436,7 +434,7 @@ class LoadSpreadsheet extends Xls
 
                 // get all spContainers in one long array, so they can be mapped to OBJ records
                 /** @var SpContainer[] $allSpContainers */
-                $allSpContainers = $escherWorksheet->getDgContainerOrThrow()->getSpgrContainerOrThrow()->getAllSpContainers();
+                $allSpContainers = method_exists($escherWorksheet, 'getDgContainer') ? $escherWorksheet->getDgContainer()->getSpgrContainer()->getAllSpContainers() : [];
             }
 
             // treat OBJ records
@@ -468,7 +466,6 @@ class LoadSpreadsheet extends Xls
                     $offsetX = (int) ($startOffsetX * SharedXls::sizeCol($xls->phpSheet, $startColumn) / 1024);
                     $offsetY = (int) ($startOffsetY * SharedXls::sizeRow($xls->phpSheet, $startRow) / 256);
 
-                    /** @var int[] $obj */
                     switch ($obj['otObjType']) {
                         case 0x19:
                             // Note
@@ -477,7 +474,7 @@ class LoadSpreadsheet extends Xls
 
                                 if (isset($xls->textObjects[$obj['idObjID']])) {
                                     $textObject = $xls->textObjects[$obj['idObjID']];
-                                    $xls->cellNotes[$obj['idObjID']]['objTextData'] = $textObject; //* @phpstan-ignore-line
+                                    $xls->cellNotes[$obj['idObjID']]['objTextData'] = $textObject;
                                 }
                             }
 
@@ -485,20 +482,18 @@ class LoadSpreadsheet extends Xls
                         case 0x08:
                             // picture
                             // get index to BSE entry (1-based)
-                            /** @var int */
                             $BSEindex = $spContainer->getOPT(0x0104);
 
                             // If there is no BSE Index, we will fail here and other fields are not read.
                             // Fix by checking here.
                             // TODO: Why is there no BSE Index? Is this a new Office Version? Password protected field?
-                            // More likely: an incompatible picture
+                            // More likely : a uncompatible picture
                             if (!$BSEindex) {
                                 continue 2;
                             }
 
                             if ($escherWorkbook) {
-                                /** @var BSE[] */
-                                $BSECollection = $escherWorkbook->getDggContainerOrThrow()->getBstoreContainerOrThrow()->getBSECollection();
+                                $BSECollection = method_exists($escherWorkbook, 'getDggContainer') ? $escherWorkbook->getDggContainer()->getBstoreContainer()->getBSECollection() : [];
                                 $BSE = $BSECollection[$BSEindex - 1];
                                 $blipType = $BSE->getBlipType();
 
@@ -550,11 +545,8 @@ class LoadSpreadsheet extends Xls
                 foreach ($xls->sharedFormulaParts as $cell => $baseCell) {
                     /** @var int $row */
                     [$column, $row] = Coordinate::coordinateFromString($cell);
-                    /** @var string $baseCell */
-                    if ($xls->readFilter->readCell($column, $row, $xls->phpSheet->getTitle())) {
-                        /** @var string */
-                        $temp = $xls->sharedFormulas[$baseCell];
-                        $formula = $xls->getFormulaFromStructure($temp, $cell);
+                    if (($xls->getReadFilter() !== null) && $xls->getReadFilter()->readCell($column, $row, $xls->phpSheet->getTitle())) {
+                        $formula = $xls->getFormulaFromStructure($xls->sharedFormulas[$baseCell], $cell);
                         $xls->phpSheet->getCell($cell)->setValueExplicit('=' . $formula, DataType::TYPE_FORMULA);
                     }
                 }
@@ -562,7 +554,6 @@ class LoadSpreadsheet extends Xls
 
             if (!empty($xls->cellNotes)) {
                 foreach ($xls->cellNotes as $note => $noteDetails) {
-                    /** @var array{author: string, cellRef: string, objTextData?: mixed[]} $noteDetails */
                     if (!isset($noteDetails['objTextData'])) {
                         if (isset($xls->textObjects[$note])) {
                             $textObject = $xls->textObjects[$note];
@@ -572,14 +563,7 @@ class LoadSpreadsheet extends Xls
                         }
                     }
                     $cellAddress = str_replace('$', '', $noteDetails['cellRef']);
-                    /** @var string */
-                    $tempDetails = $noteDetails['objTextData']['text'];
-                    $xls->phpSheet
-                        ->getComment($cellAddress)
-                        ->setAuthor($noteDetails['author'])
-                        ->setText(
-                            $xls->parseRichText($tempDetails)
-                        );
+                    $xls->phpSheet->getComment($cellAddress)->setAuthor($noteDetails['author'])->setText($xls->parseRichText($noteDetails['objTextData']['text']));
                 }
             }
             if ($selectedCells !== '') {
@@ -595,7 +579,6 @@ class LoadSpreadsheet extends Xls
 
         // add the named ranges (defined names)
         foreach ($xls->definedname as $definedName) {
-            /** @var array{isBuiltInName: int, name: string, formula: string, scope: int} $definedName */
             if ($definedName['isBuiltInName']) {
                 switch ($definedName['name']) {
                     case pack('C', 0x06):
@@ -610,8 +593,8 @@ class LoadSpreadsheet extends Xls
                             // $range should look like one of these
                             //        Foo!$C$7:$J$66
                             //        Bar!$A$1:$IV$2
-                            $explodes = Worksheet::extractSheetTitle($range, true, true);
-                            $sheetName = (string) $explodes[0];
+                            $explodes = Worksheet::extractSheetTitle($range, true);
+                            $sheetName = trim($explodes[0], "'");
                             if (!str_contains($explodes[1], ':')) {
                                 $explodes[1] = $explodes[1] . ':' . $explodes[1];
                             }
@@ -639,9 +622,8 @@ class LoadSpreadsheet extends Xls
                             //        Sheet!$A$1:$B$65536
                             //        Sheet!$A$1:$IV$2
                             if (str_contains($range, '!')) {
-                                $explodes = Worksheet::extractSheetTitle($range, true, true);
-                                $docSheet = $xls->spreadsheet->getSheetByName($explodes[0]);
-                                if ($docSheet) {
+                                $explodes = Worksheet::extractSheetTitle($range, true);
+                                if ($docSheet = $xls->spreadsheet->getSheetByName($explodes[0])) {
                                     $extractedRange = $explodes[1];
                                     $extractedRange = str_replace('$', '', $extractedRange);
 
@@ -649,13 +631,11 @@ class LoadSpreadsheet extends Xls
                                     if (count($coordinateStrings) == 2) {
                                         [$firstColumn, $firstRow] = Coordinate::coordinateFromString($coordinateStrings[0]);
                                         [$lastColumn, $lastRow] = Coordinate::coordinateFromString($coordinateStrings[1]);
-                                        $firstRow = (int) $firstRow;
-                                        $lastRow = (int) $lastRow;
 
                                         if ($firstColumn == 'A' && $lastColumn == 'IV') {
                                             // then we have repeating rows
                                             $docSheet->getPageSetup()->setRowsToRepeatAtTop([$firstRow, $lastRow]);
-                                        } elseif ($firstRow === 1 && $lastRow === AddressRange::MAX_ROW_XLS) {
+                                        } elseif ($firstRow == 1 && $lastRow == 65536) {
                                             // then we have repeating columns
                                             $docSheet->getPageSetup()->setColumnsToRepeatAtLeft([$firstColumn, $lastColumn]);
                                         }
@@ -668,11 +648,14 @@ class LoadSpreadsheet extends Xls
                 }
             } else {
                 // Extract range
+                /** @var non-empty-string $formula */
                 $formula = $definedName['formula'];
                 if (str_contains($formula, '!')) {
-                    $explodes = Worksheet::extractSheetTitle($formula, true, true);
-                    $docSheet = $xls->spreadsheet->getSheetByName($explodes[0]);
-                    if ($docSheet) {
+                    $explodes = Worksheet::extractSheetTitle($formula, true);
+                    if (
+                        ($docSheet = $xls->spreadsheet->getSheetByName($explodes[0]))
+                        || ($docSheet = $xls->spreadsheet->getSheetByName(trim($explodes[0], "'")))
+                    ) {
                         $extractedRange = $explodes[1];
 
                         $localOnly = ($definedName['scope'] === 0) ? false : true;

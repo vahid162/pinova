@@ -66,8 +66,6 @@ class FunctionPrefix
         . '|var[.]s'
         . '|weibull[.]dist'
         . '|z[.]test'
-        // probably added with Excel 2010 but not properly documented
-        . '|base'
         // functions added with Excel 2013
         . '|acot'
         . '|acoth'
@@ -218,18 +216,6 @@ class FunctionPrefix
      */
     public static function addFunctionPrefixStripEquals(string $functionString): string
     {
-        $functionString = Preg::replace(
-            [
-                '/\b(CEILING|FLOOR)[.]ODS\s*[(]/',
-                '/\b(CEILING|FLOOR)[.]XCL\s*[(]/',
-            ],
-            [
-                '$1.MATH(',
-                '$1(',
-            ],
-            $functionString
-        );
-
         return self::addFunctionPrefix(substr($functionString, 1));
     }
 }

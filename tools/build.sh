@@ -11,7 +11,12 @@ mkdir -p "${stage_dir}"
 
 tar -C "${project_dir}" \
   --exclude='.git' \
+  --exclude='.github' \
+  --exclude='.gitignore' \
+  --exclude='.activated' \
   --exclude='.build' \
+  --exclude='.phpstan.cache' \
+  --exclude='.phpunit.result.cache' \
   --exclude='node_modules' \
   --exclude='vendor' \
   --exclude='tests' \
@@ -45,9 +50,19 @@ if [[ "${PINOVA_IGNORE_FILEINFO:-0}" == "1" ]]; then
   install_args+=(--ignore-platform-req=ext-fileinfo)
 fi
 
-"${composer_command[@]}" install "${install_args[@]}"
+if [[ "${PINOVA_IGNORE_GD:-0}" == "1" ]]; then
+  install_args+=(--ignore-platform-req=ext-gd)
+fi
+
+COMPOSER_ROOT_VERSION="${COMPOSER_ROOT_VERSION:-${version}}" "${composer_command[@]}" install "${install_args[@]}"
 
 rm "${stage_dir}/composer.json" "${stage_dir}/composer.lock"
 
-( cd "${build_dir}" && zip -qr "pinova-${version}.zip" pinova )
+source_date_epoch="${SOURCE_DATE_EPOCH:-946684800}"
+find "${stage_dir}" -exec touch -d "@${source_date_epoch}" {} +
+
+(
+  cd "${build_dir}"
+  LC_ALL=C find pinova -type f -print | LC_ALL=C sort | zip -Xq "pinova-${version}.zip" -@
+)
 echo "Built ${build_dir}/pinova-${version}.zip"

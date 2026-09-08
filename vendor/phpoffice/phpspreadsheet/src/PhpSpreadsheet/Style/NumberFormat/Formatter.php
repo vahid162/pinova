@@ -5,7 +5,6 @@ namespace PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Calculation\Calculation;
 use PhpOffice\PhpSpreadsheet\Reader\Xls\Color\BIFF8;
 use PhpOffice\PhpSpreadsheet\RichText\RichText;
-use PhpOffice\PhpSpreadsheet\Shared\StringHelper;
 use PhpOffice\PhpSpreadsheet\Style\Color;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 
@@ -44,12 +43,7 @@ class Formatter extends BaseFormatter
         };
     }
 
-    /**
-     * @param float|int|numeric-string $value value to be formatted
-     * @param string[] $sections
-     *
-     * @return array{string, string, float|int|numeric-string}
-     */
+    /** @param float|int|numeric-string $value value to be formatted */
     private static function splitFormatForSectionSelection(array $sections, mixed $value): array
     {
         // Extract the relevant section depending on whether number is positive, negative, or zero?
@@ -115,15 +109,14 @@ class Formatter extends BaseFormatter
     /**
      * Convert a value in a pre-defined format to a PHP string.
      *
-     * @param null|array<mixed>|bool|float|int|RichText|string $value Value to format
+     * @param null|array|bool|float|int|RichText|string $value Value to format
      * @param string $format Format code: see = self::FORMAT_* for predefined values;
      *                          or can be any valid MS Excel custom format string
-     * @param null|callable(string, string): string $callBack Callback function for additional formatting of string
-     * @param bool $lessFloatPrecision If true, unstyled floats will be converted to a more human-friendly but less computationally accurate value
+     * @param null|array|callable $callBack Callback function for additional formatting of string
      *
      * @return string Formatted string
      */
-    public static function toFormattedString($value, string $format, ?callable $callBack = null, bool $lessFloatPrecision = false): string
+    public static function toFormattedString($value, string $format, null|array|callable $callBack = null): string
     {
         while (is_array($value)) {
             $value = array_shift($value);
@@ -136,7 +129,7 @@ class Formatter extends BaseFormatter
         $formatx = str_replace('\"', self::QUOTE_REPLACEMENT, $format);
         if (preg_match(self::SECTION_SPLIT, $format) === 0 && preg_match(self::SYMBOL_AT, $formatx) === 1) {
             if (!str_contains($format, '"')) {
-                $temp = str_replace('@', StringHelper::convertToString($value, lessFloatPrecision: $lessFloatPrecision), $format);
+                $temp = str_replace('@', $value, $format);
                 if (is_callable($callBack)) {
                     $temp = $callBack($temp, $format);
                 }
@@ -147,12 +140,13 @@ class Formatter extends BaseFormatter
             $value = str_replace(
                 ['$', '"'],
                 ['\$', self::QUOTE_REPLACEMENT],
-                StringHelper::convertToString($value, lessFloatPrecision: $lessFloatPrecision)
+                (string) $value
             );
             $temp = preg_replace(self::SYMBOL_AT, $value, $formatx) ?? $value;
             if (is_callable($callBack)) {
                 $temp = $callBack($temp, $formatx);
             }
+            /** @var string $temp */
 
             return str_replace(
                 ['"', self::QUOTE_REPLACEMENT],
@@ -163,25 +157,13 @@ class Formatter extends BaseFormatter
 
         // If we have a text value, return it "as is"
         if (!is_numeric($value)) {
-            $temp = StringHelper::convertToString($value, lessFloatPrecision: $lessFloatPrecision);
-            if (is_callable($callBack)) {
-                $sections = preg_split(self::SECTION_SPLIT, $format) ?: [$format];
-                $temp = $callBack($temp, $sections[3] ?? $sections[0]);
-            }
-
-            return $temp;
+            return (string) $value;
         }
 
         // For 'General' format code, we just pass the value although this is not entirely the way Excel does it,
         // it seems to round numbers to a total of 10 digits.
         if (($format === NumberFormat::FORMAT_GENERAL) || ($format === NumberFormat::FORMAT_TEXT)) {
-            if (is_float($value) && $lessFloatPrecision) {
-                return self::adjustSeparators((string) $value);
-            }
-
-            return self::adjustSeparators(
-                StringHelper::convertToString($value, lessFloatPrecision: $lessFloatPrecision)
-            );
+            return self::adjustSeparators((string) $value);
         }
 
         // Ignore square-$-brackets prefix in format string, like "[$-411]ge.m.d", "[$-010419]0%", etc
@@ -196,15 +178,14 @@ class Formatter extends BaseFormatter
         // Convert any other escaped characters to quoted strings, e.g. (\T to "T")
         $format = (string) preg_replace('/(\\\(((.)(?!((AM\/PM)|(A\/P))))|([^ ])))(?=(?:[^"]|"[^"]*")*$)/ui', '"${2}"', $format);
 
-        // Get the sections, there can be up to four sections, separated with a semicolon (but only if not a quoted literal)
+        // Get the sections, there can be up to four sections, separated with a semi-colon (but only if not a quoted literal)
         $sections = preg_split(self::SECTION_SPLIT, $format) ?: [];
 
         [$colors, $format, $value] = self::splitFormatForSectionSelection($sections, $value);
 
         // In Excel formats, "_" is used to add spacing,
         //    The following character indicates the size of the spacing, which we can't do in HTML, so we just use a standard space
-        $temp = $format;
-        $format = (string) preg_replace('/_.?/ui', ' ', $temp);
+        $format = (string) preg_replace('/_.?/ui', ' ', $format);
 
         // Let's begin inspecting the format and converting the value to a formatted string
         if (
@@ -216,19 +197,15 @@ class Formatter extends BaseFormatter
             && (preg_match('/[0\?#]\.(?![^\[]*\])/miu', $format) === 0)
         ) {
             // datetime format
-            /** @var float|int */
-            $temp = $value;
-            $value = DateFormatter::format($temp, $format);
+            $value = DateFormatter::format($value, $format);
         } else {
             if (str_starts_with($format, '"') && str_ends_with($format, '"') && substr_count($format, '"') === 2) {
                 $value = substr($format, 1, -1);
             } elseif (preg_match('/[0#, ]%/', $format)) {
                 // % number format - avoid weird '-0' problem
-                $temp = $value;
-                $value = PercentageFormatter::format(0 + (float) $temp, $format);
+                $value = PercentageFormatter::format(0 + (float) $value, $format);
             } else {
-                $temp = $value;
-                $value = NumberFormatter::format($temp, $format);
+                $value = NumberFormatter::format($value, $format);
             }
         }
 

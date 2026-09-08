@@ -4,6 +4,8 @@
     <file>src/Exceptions/RateLimitException.php</file>
     <file>src/Helpers/IP.php</file>
     <file>src/Services/RateLimitService.php</file>
+    <file>src/Identity</file>
+    <file>src/CLI</file>
     <exclude-pattern>vendor/*</exclude-pattern>
     <arg name="extensions" value="php"/>
     <arg value="sp"/>
@@ -20,5 +22,12 @@
         <exclude name="Universal.Operators.DisallowShortTernary"/>
         <exclude name="WordPress.NamingConventions.ValidHookName.UseUnderscores"/>
         <exclude name="WordPress.Security.EscapeOutput.ExceptionNotEscaped"/>
+    </rule>
+    <rule ref="WordPress.WP.Capabilities">
+        <properties>
+            <property name="custom_capabilities" type="array">
+                <element value="manage_pinova_identities"/>
+            </property>
+        </properties>
     </rule>
 </ruleset>

@@ -3,8 +3,11 @@
 namespace Pinova\Services;
 
 use Exception;
-use Nabik_Net_Database;
 use Pinova\Helpers\JWT;
+use Pinova\Identity\IdentityConflictException;
+use Pinova\Identity\IdentityRegistrationService;
+use Pinova\Identity\IdentityRepository;
+use Pinova\Identity\IdentityResolver;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
 use Pinova\Objects\Mobile;
@@ -20,6 +23,14 @@ class UserService {
 	 * @return int|null
 	 */
 	public static function get_by_email( string $email ): ?int {
+		if ( IdentityRepository::is_ready() ) {
+			try {
+				return IdentityResolver::resolve( new Identifier( $email ) );
+			} catch ( IdentityConflictException $conflict ) {
+				return null;
+			}
+		}
+
 		return email_exists( $email ) ?? null;
 	}
 
@@ -29,6 +40,16 @@ class UserService {
 	 * @return int|null
 	 */
 	public static function get_by_mobile( $mobile ): ?int {
+		if ( IdentityRepository::is_ready() ) {
+			try {
+				$value = $mobile instanceof Mobile ? $mobile->get_formatted() : (string) $mobile;
+
+				return IdentityResolver::resolve( new Identifier( $value ) );
+			} catch ( IdentityConflictException $conflict ) {
+				return null;
+			}
+		}
+
 		global $wpdb;
 
 		if ( ! is_a( $mobile, Mobile::class ) ) {
@@ -84,6 +105,14 @@ class UserService {
 	}
 
 	public static function get_by_username( string $username ): ?int {
+		if ( IdentityRepository::is_ready() ) {
+			try {
+				return IdentityResolver::resolve( new Identifier( $username ) );
+			} catch ( IdentityConflictException $conflict ) {
+				return null;
+			}
+		}
+
 		return username_exists( $username ) ?? null;
 	}
 
@@ -93,6 +122,15 @@ class UserService {
 	 * @return string|null
 	 */
 	public static function get_mobile( int $user_id ): ?string {
+		if ( IdentityRepository::is_ready() ) {
+			$user_id = IdentityResolver::canonical_user_id( $user_id );
+
+			foreach ( IdentityRepository::for_user( $user_id ) as $identity ) {
+				if ( 'mobile' === $identity['type'] && 'active' === $identity['status'] ) {
+					return (string) $identity['normalized_value'];
+				}
+			}
+		}
 
 		$user = get_userdata( $user_id );
 
@@ -106,9 +144,32 @@ class UserService {
 			return $mobile->get_formatted();
 		}
 
-		foreach ( self::mobile_possible_meta_keys() as $possible_meta_key ) {
+		$meta_keys = array_values(
+			array_unique(
+				array_merge( self::mobile_possible_meta_keys(), [ 'pinova_mobile', 'billing_phone', 'shipping_phone' ] )
+			)
+		);
+		global $wpdb;
+		$placeholders = implode( ', ', array_fill( 0, count( $meta_keys ), '%s' ) );
+		$parameters   = array_merge( [ $wpdb->usermeta, $user_id ], $meta_keys );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Only placeholder tokens are constructed here.
+		$query      = "SELECT `meta_value` FROM %i WHERE `user_id` = %d AND `meta_key` IN ({$placeholders}) ORDER BY `umeta_id` ASC";
+		$raw_values = (array) $wpdb->get_col(
+			$wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The constructed query contains placeholders only.
+				$query,
+				...$parameters
+			)
+		);
 
-			$mobile = new Mobile( strval( $user->get( $possible_meta_key ) ) );
+		foreach ( $raw_values as $raw_value ) {
+			$raw_value = maybe_unserialize( $raw_value );
+
+			if ( ! is_scalar( $raw_value ) ) {
+				continue;
+			}
+
+			$mobile = new Mobile( (string) $raw_value );
 
 			if ( $mobile->is_valid() ) {
 				return $mobile->get_formatted();
@@ -119,7 +180,19 @@ class UserService {
 		return null;
 	}
 
-	public static function match( Identifier $identifier ): ?int {
+	/** @throws IdentityConflictException */
+	public static function match( Identifier $identifier, bool $throw_on_conflict = false, bool $record_conflict = true ): ?int {
+		if ( IdentityRepository::is_ready() ) {
+			try {
+				return IdentityResolver::resolve( $identifier, $record_conflict );
+			} catch ( IdentityConflictException $conflict ) {
+				if ( $throw_on_conflict ) {
+					throw $conflict;
+				}
+
+				return null;
+			}
+		}
 
 		if ( $identifier->is_email() ) {
 			return UserService::get_by_email( $identifier->get_value() );
@@ -137,26 +210,21 @@ class UserService {
 	}
 
 	public static function update_username( int $user_id, string $username ): bool {
+		unset( $user_id, $username );
+		_deprecated_function( __METHOD__, '1.3.0', 'IdentityRepository::replace_user_type' );
 
-		$username = sanitize_user( $username, true );
-
-		try {
-			$username_updated = (bool) Nabik_Net_Database::DB()
-			                                             ->table( 'users' )
-			                                             ->where( 'ID', $user_id )
-			                                             ->update( [ 'user_login' => $username ] );
-		} catch ( Exception $e ) {
-			return false;
-		}
-
-		if ( $username_updated ) {
-			do_action( 'pinova/username_updated', $user_id );
-		}
-
-		return $username_updated;
+		return false;
 	}
 
 	public static function login( int $user_id, ?string $login_method = null ) {
+		if ( IdentityRepository::is_ready() ) {
+			$user_id = IdentityResolver::canonical_user_id( $user_id );
+		}
+
+		if ( get_user_meta( $user_id, 'pinova_account_disabled', true ) ) {
+			return;
+		}
+
 		clean_user_cache( $user_id );
 		wp_clear_auth_cookie();
 		wp_set_auth_cookie( $user_id, true );
@@ -217,7 +285,7 @@ class UserService {
 	 * @return int
 	 * @throws Exception
 	 */
-	public static function create( $mobile, string $email = '', array $userdata = [] ): int {
+	public static function create( $mobile, string $email = '', array $userdata = [], bool $mobile_verified = false ): int {
 		global $wpdb;
 
 		if ( ! is_a( $mobile, Mobile::class ) ) {
@@ -245,6 +313,12 @@ class UserService {
 
 		if ( '' === $requested_role ) {
 			throw new Exception( __( 'هیچ نقش امنی برای ثبت‌نام پیکربندی نشده است.', 'pinova' ) );
+		}
+
+		$userdata['role'] = $requested_role;
+
+		if ( IdentityRepository::is_ready() ) {
+			return IdentityRegistrationService::create( $mobile, $email, $userdata, $mobile_verified );
 		}
 
 		$username = $mobile->get_sanitized_username();
@@ -328,7 +402,7 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function create_by_otp( OTP $otp ): int {
-		return self::create( $otp->identifier );
+		return self::create( $otp->identifier, '', [], true );
 	}
 
 	/**

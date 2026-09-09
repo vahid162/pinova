@@ -10,33 +10,41 @@ use WP_User;
 class VCF {
 
 	private const ACTION = 'pinova_export_users_vcf';
+	private const NONCE_ACTION = 'pinova_export_users_vcf';
 
 	public function __construct() {
 		add_action( 'admin_footer', [ $this, 'inject_export_button' ] );
-		add_action( 'admin_init', [ $this, 'handle_export' ] );
+		add_action( 'admin_post_' . self::ACTION, [ $this, 'handle_export' ] );
 	}
 
 	public function handle_export(): void {
-
-		if ( ( $_GET['action'] ?? '' ) !== self::ACTION ) {
-			return;
+		if ( ! current_user_can( 'list_users' ) ) {
+			wp_die( esc_html__( 'شما اجازهٔ دریافت خروجی کاربران را ندارید.', 'pinova' ), '', [ 'response' => 403 ] );
 		}
 
-		$this->output(
-			$this->generate(
-				ExportUsers::get_users()
-			)
-		);
+		check_admin_referer( self::NONCE_ACTION );
+
+		try {
+			$this->output( $this->generate( ExportUsers::get_users() ) );
+		} catch ( \RuntimeException $e ) {
+			wp_die( esc_html( $e->getMessage() ) );
+		}
 
 		exit;
 	}
 
 	public function inject_export_button(): void {
+		global $pagenow;
+
+		if ( 'users.php' !== $pagenow || ! current_user_can( 'list_users' ) ) {
+			return;
+		}
 
 		$export_url = add_query_arg(
 			array_merge( $_GET, [ 'action' => self::ACTION ] ),
-			admin_url( 'users.php' )
+			admin_url( 'admin-post.php' )
 		);
+		$export_url = wp_nonce_url( $export_url, self::NONCE_ACTION );
 		?>
 		<script>
             document.addEventListener("DOMContentLoaded", function () {
@@ -64,17 +72,17 @@ class VCF {
 	public function generate( array $users ): string {
 
 		$cards     = [];
-		$site_name = get_bloginfo( 'name' );
-		$site_url  = get_site_url();
+		$site_name = self::escape( (string) get_bloginfo( 'name' ) );
+		$site_url  = self::escape( (string) get_site_url() );
 
 		foreach ( $users as $user ) {
 
 			$user_id = $user->get( 'ID' );
 
-			$first_name   = $user->get( 'first_name' );
-			$last_name    = $user->get( 'last_name' );
-			$display_name = $user->get( 'display_name' );
-			$user_login   = $user->get( 'user_login' );
+			$first_name   = self::escape( (string) $user->get( 'first_name' ) );
+			$last_name    = self::escape( (string) $user->get( 'last_name' ) );
+			$display_name = self::escape( (string) $user->get( 'display_name' ) );
+			$user_login   = self::escape( (string) $user->get( 'user_login' ) );
 
 			$full_name = ! empty( $first_name ) || ! empty( $last_name )
 				? trim( "$first_name $last_name" )
@@ -90,7 +98,7 @@ class VCF {
 			$card['name']      = "N:{$last_name};{$first_name};;;";
 			$card['full_name'] = "FN:{$full_name}";
 
-			$company  = $user->get( 'billing_company' );
+			$company  = self::escape( (string) $user->get( 'billing_company' ) );
 			$org_name = ! empty( $company ) ? "{$company};{$site_name}" : $site_name;
 
 			$card['organization'] = "ORG:{$org_name}";
@@ -136,14 +144,14 @@ class VCF {
 			$email = $user->get( 'user_email' );
 
 			if ( is_email( $email ) ) {
-				$card['email'] = "EMAIL;TYPE=INTERNET:{$email}";
+				$card['email'] = 'EMAIL;TYPE=INTERNET:' . self::escape( $email );
 			}
 
-			$address_1 = $user->get( 'billing_address_1' );
-			$city      = ExportUsers::state_city_name( $user->get( 'billing_city' ) );
-			$state     = ExportUsers::state_city_name( $user->get( 'billing_state' ) );
-			$post      = $user->get( 'billing_postcode' );
-			$country   = $user->get( 'billing_country' );
+			$address_1 = self::escape( (string) $user->get( 'billing_address_1' ) );
+			$city      = self::escape( ExportUsers::state_city_name( (string) $user->get( 'billing_city' ) ) );
+			$state     = self::escape( ExportUsers::state_city_name( (string) $user->get( 'billing_state' ) ) );
+			$post      = self::escape( (string) $user->get( 'billing_postcode' ) );
+			$country   = self::escape( (string) $user->get( 'billing_country' ) );
 
 			if ( strtolower( $country ) === 'ir' ) {
 				$country = 'ایران';
@@ -155,13 +163,13 @@ class VCF {
 
 			$card['site_url'] = "URL;TYPE=WORK:{$site_url}";
 
-			$edit_profile_url = get_edit_user_link( $user_id );
+			$edit_profile_url = self::escape( (string) get_edit_user_link( $user_id ) );
 
 			if ( ! empty( $edit_profile_url ) ) {
 				$card['edit_profile_url'] = "URL;TYPE=WORK:{$edit_profile_url}";
 			}
 
-			$user_url = $user->get( 'user_url' );
+			$user_url = self::escape( (string) $user->get( 'user_url' ) );
 
 			if ( ! empty( $user_url ) ) {
 				$card['user_url'] = "URL;TYPE=HOME:{$user_url}";
@@ -173,7 +181,7 @@ class VCF {
 			$description = $user->get( 'description' );
 
 			if ( ! empty( $description ) ) {
-				$card['note'] = 'NOTE:' . $description;
+				$card['note'] = 'NOTE:' . self::escape( $description );
 			}
 
 			$registered = $user->get( 'user_registered' );
@@ -186,7 +194,7 @@ class VCF {
 
 			}
 
-			$roles         = ExportUsers::translate_roles( $user->roles );
+			$roles         = array_map( [ self::class, 'escape' ], ExportUsers::translate_roles( $user->roles ) );
 			$card['roles'] = "X-WP-Roles:" . implode( ',', $roles );
 
 			if ( ! empty( $roles ) ) {
@@ -199,9 +207,7 @@ class VCF {
 			$note_fallback[]     = "نام نمایشی: {$display_name}";
 			$note_fallback[]     = "شناسه کاربر: {$user_id}";
 
-			if ( ! empty( $note_fallback ) ) {
-				$card['note_fallback'] = 'NOTE:' . implode( '\n', $note_fallback );
-			}
+			$card['note_fallback'] = 'NOTE:' . implode( '\n', $note_fallback );
 
 			$card['vcard_end'] = 'END:VCARD';
 
@@ -211,6 +217,17 @@ class VCF {
 		}
 
 		return implode( "\r\n", $cards );
+	}
+
+	private static function escape( string $value ): string {
+		$value = str_replace( "\r\n", "\n", $value );
+		$value = str_replace( "\r", "\n", $value );
+
+		return str_replace(
+			[ '\\', "\n", ';', ',' ],
+			[ '\\\\', '\\n', '\\;', '\\,' ],
+			$value
+		);
 	}
 
 	protected function output( string $contents ): void {

@@ -13,13 +13,6 @@ class Install extends \Nabik\Utils\V1\Install {
 
 	public static function create_tables() {
 
-		try {
-			Nabik_Net_Database::Schema()->table( 'users', function ( Blueprint $table ) {
-				$table->unique( 'user_login', 'user_login_pinova_unique' );
-			} );
-		} catch ( \Exception $e ) {
-		}
-
 		if ( ! Nabik_Net_Database::Schema()->hasTable( 'pinova_otp' ) ) {
 
 			Nabik_Net_Database::Schema()->create( 'pinova_otp', function ( Blueprint $table ) {
@@ -49,6 +42,30 @@ class Install extends \Nabik\Utils\V1\Install {
 
 		}
 
+		self::create_wordpress_tables();
+
+	}
+
+	public static function create_wordpress_tables(): void {
+		global $wpdb;
+
+		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+		$charset_collate = $wpdb->get_charset_collate();
+		$rate_limits     = $wpdb->prefix . 'pinova_rate_limits';
+
+		dbDelta(
+			"CREATE TABLE {$rate_limits} (
+				bucket_key char(64) NOT NULL,
+				scope varchar(32) NOT NULL,
+				hits int unsigned NOT NULL DEFAULT 0,
+				reset_at datetime NOT NULL,
+				updated_at datetime NOT NULL,
+				PRIMARY KEY  (bucket_key),
+				KEY reset_at (reset_at),
+				KEY scope_reset (scope, reset_at)
+			) {$charset_collate};"
+		);
 	}
 
 }

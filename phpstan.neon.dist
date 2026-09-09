@@ -1,0 +1,20 @@
+includes:
+  - vendor/szepeviktor/phpstan-wordpress/extension.neon
+
+parameters:
+  level: 5
+  parallel:
+    maximumNumberOfProcesses: 1
+  paths:
+    - src
+    - utils
+  excludePaths:
+    analyse:
+      - vendor
+  bootstrapFiles:
+    - vendor/autoload.php
+  scanFiles:
+    - vendor/php-stubs/woocommerce-stubs/woocommerce-stubs.php
+    - vendor/php-stubs/woocommerce-stubs/woocommerce-packages-stubs.php
+    - tests/phpstan-stubs.php
+  treatPhpDocTypesAsCertain: false

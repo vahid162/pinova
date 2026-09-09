@@ -10,6 +10,7 @@ use Pinova\Services\OTPService;
 use Pinova\Services\UserService;
 use Pinova\Services\ValidationService;
 use WP_REST_Request;
+use WP_REST_Response;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -38,9 +39,9 @@ class AdminAPI extends RestAPI {
 	/**
 	 * @param WP_REST_Request $request
 	 *
-	 * @return void
+	 * @return WP_REST_Response
 	 */
-	public function test_sms( WP_REST_Request $request ): void {
+	public function test_sms( WP_REST_Request $request ): WP_REST_Response {
 
 		/** @var Identifier $identifier */
 		$identifier = $request->get_param( 'identifier' );
@@ -59,7 +60,7 @@ class AdminAPI extends RestAPI {
 			$success = false;
 		}
 
-		self::response( $success, $message );
+		return self::response( $success, $message, [], $success ? 200 : 503 );
 	}
 
 	/**

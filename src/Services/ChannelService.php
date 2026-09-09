@@ -24,13 +24,12 @@ class ChannelService {
 
 		foreach ( $channels as $channel => &$success ) {
 
-			if ( method_exists( self::class, 'send_' . $channel ) ) {
+			if ( in_array( $channel, [ 'sms', 'bale', 'call', 'email' ], true ) ) {
 
 				try {
-					$success = self::{'send_' . $channel}( $identifier, $code );
-				} catch ( Exception $e ) {
-					error_log( $e->getMessage() );
-					// @todo Shit :) Log $e->getMessage() anyway
+					$success = self::send_channel( $channel, $identifier, $code );
+				} catch ( \Throwable $e ) {
+					do_action( 'pinova/channel_send_failed', sanitize_key( (string) $channel ) );
 				}
 
 			}
@@ -47,6 +46,22 @@ class ChannelService {
 		$otp->save();
 
 		return $successful_channels;
+	}
+
+	/** @throws \Throwable */
+	private static function send_channel( string $channel, Identifier $identifier, int $code ): bool {
+		switch ( $channel ) {
+			case 'sms':
+				return self::send_sms( $identifier, $code );
+			case 'bale':
+				return self::send_bale( $identifier, $code );
+			case 'call':
+				return self::send_call( $identifier, $code );
+			case 'email':
+				return self::send_email( $identifier, $code );
+			default:
+				return false;
+		}
 	}
 
 	/**
@@ -127,7 +142,7 @@ class ChannelService {
 		return $channels;
 	}
 
-	public static function get_message( array $successful_channels, Identifier $identifier, ?int $user_id ): string {
+	public static function get_message( array $successful_channels, Identifier $identifier, ?int $user_id = null ): string {
 
 		$channel_labels = [
 			'bale'  => sprintf(
@@ -148,7 +163,7 @@ class ChannelService {
 
 		return sprintf(
 			__( 'کد %s از طریق %s به <span style="text-align: left !important;" dir="ltr">%s</span> ارسال شد.', 'pinova' ),
-			$user_id ? 'تایید' : 'عضویت',
+			'تایید',
 			implode( ' و ', array_values( $successful_channels ) ),
 			$identifier->get_value()
 		);

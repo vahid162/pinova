@@ -9,6 +9,7 @@ use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
 use Pinova\Objects\Mobile;
 use Pinova\Pinova;
+use WP_Error;
 use WP_User;
 
 class UserService {
@@ -165,7 +166,37 @@ class UserService {
 			update_user_meta( $user_id, 'pinova_login_method', $login_method );
 		}
 
+		$user = get_userdata( $user_id );
+
+		if ( $user instanceof WP_User ) {
+			do_action( 'wp_login', $user->user_login, $user );
+		}
+
 		do_action( 'pinova/user_logged_in', $user_id );
+	}
+
+	/**
+	 * Authenticate an already-resolved user through WordPress' native pipeline.
+	 *
+	 * @return WP_User|WP_Error
+	 */
+	public static function authenticate_password( ?int $user_id, string $password, bool $remember = true ) {
+		$user = $user_id ? get_userdata( $user_id ) : false;
+
+		$credentials = [
+			'user_login'    => $user instanceof WP_User ? $user->user_login : 'pinova-invalid-user-' . wp_generate_password( 20, false ),
+			'user_password' => $password,
+			'remember'      => $remember,
+		];
+
+		return wp_signon( $credentials, is_ssl() );
+	}
+
+	public static function is_native_only( WP_User $user ): bool {
+		$roles = Pinova::get_option( 'advanced.native_only_roles', [ 'administrator' ] );
+		$roles = is_array( $roles ) ? array_map( 'sanitize_key', $roles ) : [ 'administrator' ];
+
+		return (bool) array_intersect( $roles, (array) $user->roles );
 	}
 
 	public static function logout() {
@@ -205,6 +236,17 @@ class UserService {
 			'meta_input' => [],
 		] );
 
+		$allowed_roles = self::allowed_registration_roles();
+		$requested_role = sanitize_key( (string) ( $userdata['role'] ?? get_option( 'default_role', 'subscriber' ) ) );
+
+		if ( ! isset( $allowed_roles[ $requested_role ] ) ) {
+			$requested_role = isset( $allowed_roles['subscriber'] ) ? 'subscriber' : (string) array_key_first( $allowed_roles );
+		}
+
+		if ( '' === $requested_role ) {
+			throw new Exception( __( 'هیچ نقش امنی برای ثبت‌نام پیکربندی نشده است.', 'pinova' ) );
+		}
+
 		$username = $mobile->get_sanitized_username();
 
 		if ( is_email( $email ) ) {
@@ -214,14 +256,12 @@ class UserService {
 		$userdata['user_login']               = $username;
 		$userdata['user_pass']                = wp_generate_password();
 		$userdata['user_nicename']            = wp_generate_password( 12, false ); // @todo edit nicename in profile
+		$userdata['role']                     = $requested_role;
 		$userdata['meta_input']['created_by'] = 'pinova';
 
 		$user_id = wp_insert_user( $userdata );
 
 		if ( is_wp_error( $user_id ) ) {
-
-			error_log( $user_id->get_error_message() );
-
 			throw new Exception( 'خطایی در زمان ایجاد کاربر رخ داده است.' );
 		} elseif ( empty ( $user_id ) ) {
 			throw new Exception( 'خطایی در زمان ایجاد کاربر رخ داده است!' );
@@ -253,6 +293,35 @@ class UserService {
 		$mobile_possible_meta_keys = apply_filters( 'pinova/mobile_possible_meta_keys', $mobile_possible_meta_keys );
 
 		return array_unique( array_filter( $mobile_possible_meta_keys ) );
+	}
+
+	public static function allowed_registration_roles(): array {
+		$allowed = [];
+		$denied_capabilities = [
+			'manage_options',
+			'promote_users',
+			'edit_users',
+			'delete_users',
+			'create_users',
+			'install_plugins',
+			'activate_plugins',
+			'edit_plugins',
+			'edit_theme_options',
+			'manage_woocommerce',
+			'edit_shop_orders',
+		];
+
+		foreach ( wp_roles()->roles as $slug => $role ) {
+			$capabilities = array_keys( array_filter( (array) ( $role['capabilities'] ?? [] ) ) );
+
+			if ( array_intersect( $denied_capabilities, $capabilities ) ) {
+				continue;
+			}
+
+			$allowed[ $slug ] = $role['name'];
+		}
+
+		return apply_filters( 'pinova/allowed_registration_roles', $allowed );
 	}
 
 	/**

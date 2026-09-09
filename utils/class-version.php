@@ -90,7 +90,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Version' ) ) {
 
 						update_option( $this->version_key, $major . '.' . $minor . '.' . $patch, false );
 
-					} catch ( Exception $e ) {
+					} catch ( \Exception $e ) {
 						wp_die( $e->getMessage() );
 					}
 

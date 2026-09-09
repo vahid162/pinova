@@ -1,7 +1,7 @@
 <?php
 
 use Illuminate\Container\Container;
-use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\Connection;
 use Illuminate\Database\ConnectionResolver;
 use Illuminate\Database\Connectors\ConnectionFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -53,8 +53,14 @@ if ( ! class_exists( 'Nabik_Net_Database' ) ) {
 			self::Schema()::defaultStringLength( 191 );
 		}
 
-		public static function DB(): ConnectionInterface {
-			return Model::getConnectionResolver()->connection();
+		public static function DB(): Connection {
+			$connection = Model::getConnectionResolver()->connection();
+
+			if ( ! $connection instanceof Connection ) {
+				throw new \RuntimeException( 'Unsupported database connection.' );
+			}
+
+			return $connection;
 		}
 
 		public static function Schema(): Builder {

@@ -33,6 +33,7 @@ class Workbook extends WriterPart
 
         // workbook
         $objWriter->startElement('workbook');
+        $objWriter->writeAttribute('xml:space', 'preserve');
         $objWriter->writeAttribute('xmlns', Namespaces::MAIN);
         $objWriter->writeAttribute('xmlns:r', Namespaces::SCHEMA_OFFICE_DOCUMENT);
 
@@ -125,35 +126,18 @@ class Workbook extends WriterPart
      */
     private function writeWorkbookProtection(XMLWriter $objWriter, Spreadsheet $spreadsheet): void
     {
-        $security = $spreadsheet->getSecurity();
-        if ($security->isSecurityEnabled()) {
+        if ($spreadsheet->getSecurity()->isSecurityEnabled()) {
             $objWriter->startElement('workbookProtection');
-            $objWriter->writeAttribute('lockRevision', ($security->getLockRevision() ? 'true' : 'false'));
-            $objWriter->writeAttribute('lockStructure', ($security->getLockStructure() ? 'true' : 'false'));
-            $objWriter->writeAttribute('lockWindows', ($security->getLockWindows() ? 'true' : 'false'));
+            $objWriter->writeAttribute('lockRevision', ($spreadsheet->getSecurity()->getLockRevision() ? 'true' : 'false'));
+            $objWriter->writeAttribute('lockStructure', ($spreadsheet->getSecurity()->getLockStructure() ? 'true' : 'false'));
+            $objWriter->writeAttribute('lockWindows', ($spreadsheet->getSecurity()->getLockWindows() ? 'true' : 'false'));
 
-            if ($security->getRevisionsPassword() !== '') {
-                $objWriter->writeAttribute('revisionsPassword', $security->getRevisionsPassword());
-            } else {
-                $hashValue = $security->getRevisionsHashValue();
-                if ($hashValue !== '') {
-                    $objWriter->writeAttribute('revisionsAlgorithmName', $security->getRevisionsAlgorithmName());
-                    $objWriter->writeAttribute('revisionsHashValue', $hashValue);
-                    $objWriter->writeAttribute('revisionsSaltValue', $security->getRevisionsSaltValue());
-                    $objWriter->writeAttribute('revisionsSpinCount', (string) $security->getRevisionsSpinCount());
-                }
+            if ($spreadsheet->getSecurity()->getRevisionsPassword() != '') {
+                $objWriter->writeAttribute('revisionsPassword', $spreadsheet->getSecurity()->getRevisionsPassword());
             }
 
-            if ($security->getWorkbookPassword() !== '') {
-                $objWriter->writeAttribute('workbookPassword', $security->getWorkbookPassword());
-            } else {
-                $hashValue = $security->getWorkbookHashValue();
-                if ($hashValue !== '') {
-                    $objWriter->writeAttribute('workbookAlgorithmName', $security->getWorkbookAlgorithmName());
-                    $objWriter->writeAttribute('workbookHashValue', $hashValue);
-                    $objWriter->writeAttribute('workbookSaltValue', $security->getWorkbookSaltValue());
-                    $objWriter->writeAttribute('workbookSpinCount', (string) $security->getWorkbookSpinCount());
-                }
+            if ($spreadsheet->getSecurity()->getWorkbookPassword() != '') {
+                $objWriter->writeAttribute('workbookPassword', $spreadsheet->getSecurity()->getWorkbookPassword());
             }
 
             $objWriter->endElement();

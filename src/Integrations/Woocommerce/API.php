@@ -12,6 +12,7 @@ use Pinova\Services\UserService;
 use Pinova\Services\ValidationService;
 use WC_Customer;
 use WP_REST_Request;
+use WP_REST_Response;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -68,9 +69,9 @@ class API extends RestAPI {
 	/**
 	 * @param WP_REST_Request $request
 	 *
-	 * @return void
+	 * @return WP_REST_Response
 	 */
-	public function create_customer( WP_REST_Request $request ): void {
+	public function create_customer( WP_REST_Request $request ): WP_REST_Response {
 		/** @var Identifier $mobile */
 		$mobile = $request->get_param( 'mobile' );
 
@@ -83,11 +84,20 @@ class API extends RestAPI {
 
 		/** @var array $order_data */
 		$order_data = $request->get_param( 'order_data' );
+		$order      = null;
+
+		if ( $order_id ) {
+			$order = wc_get_order( $order_id );
+
+			if ( ! $order || ! current_user_can( 'edit_shop_order', $order_id ) ) {
+				return self::response( false, __( 'سفارش انتخاب‌شده معتبر نیست یا اجازهٔ ویرایش آن را ندارید.', 'pinova' ), [], 403 );
+			}
+		}
 
 		$user_id = UserService::match( $mobile );
 
 		if ( $user_id ) {
-			self::response( false, sprintf( __( 'کاربر با تلفن همراه %s وجود دارد.', 'pinova' ), $mobile->get_value() ) );
+			return self::response( false, sprintf( __( 'کاربر با تلفن همراه %s وجود دارد.', 'pinova' ), $mobile->get_value() ), [], 409 );
 		}
 
 		if ( ! empty( $email ) ) {
@@ -97,9 +107,20 @@ class API extends RestAPI {
 			$email = $email->get_value();
 
 			if ( $user_id ) {
-				self::response( false, sprintf( __( 'کاربر با ایمیل %s وجود دارد.', 'pinova' ), $email ) );
+				return self::response( false, sprintf( __( 'کاربر با ایمیل %s وجود دارد.', 'pinova' ), $email ), [], 409 );
 			}
 
+		}
+
+		$invalid_fields = $this->invalid_order_fields( $order_data );
+
+		if ( $invalid_fields ) {
+			return self::response(
+				false,
+				__( 'دادهٔ سفارش شامل فیلدهای پشتیبانی‌نشده است.', 'pinova' ),
+				[ 'invalid_fields' => $invalid_fields ],
+				400
+			);
 		}
 
 		try {
@@ -107,41 +128,27 @@ class API extends RestAPI {
 			$user_id = UserService::create( $mobile->get_value(), $email, [
 				'first_name' => $first_name,
 				'last_name'  => $last_name,
+				'role'       => 'customer',
 			] );
 
 			$customer = new WC_Customer( $user_id );
+			$customer->set_role( 'customer' );
 			$customer->set_billing_first_name( $first_name );
 			$customer->set_billing_last_name( $last_name );
 			$customer->set_billing_email( $email );
 
-			foreach ( $order_data as $meta => $value ) {
-
-				if ( empty( $value ) ) {
-					continue;
-				}
-
-				$meta = ltrim( $meta, '_' );
-
-				if ( method_exists( $customer, "set_{$meta}" ) ) {
-					$customer->{"set_{$meta}"}( $value );
-				} else {
-					$customer->update_meta_data( $meta, $value );
-				}
-
-			}
+			$this->apply_allowed_order_data( $customer, $order_data );
 
 			$customer->save();
 
-			if ( $order_id ) {
-
-				$order = wc_get_order( $order_id );
+			if ( $order ) {
 				$order->set_customer_id( $customer->get_id() );
 				$order->save();
 
 			}
 
 		} catch ( Exception $e ) {
-			self::response( false, $e->getMessage() );
+			return self::response( false, $e->getMessage(), [], 500 );
 		}
 
 		$message = sprintf(
@@ -151,13 +158,63 @@ class API extends RestAPI {
 			$mobile->get_value()
 		);
 
-		self::response( true, $message, [
+		return self::response( true, $message, [
 			'user_id' => $user_id,
 		] );
 	}
 
 	public function permission_callback( WP_REST_Request $request ): bool {
 		return current_user_can( self::ROUTE_PERMISSION[ $request->get_route() ] ?? 'manage_woocommerce' );
+	}
+
+	private function apply_allowed_order_data( WC_Customer $customer, array $order_data ): void {
+		foreach ( $order_data as $raw_key => $raw_value ) {
+			$key    = ltrim( sanitize_key( (string) $raw_key ), '_' );
+			$value  = 'billing_email' === $key ? sanitize_email( (string) $raw_value ) : sanitize_text_field( (string) $raw_value );
+			$setter = 'set_' . $key;
+
+			if ( '' !== $value && is_callable( [ $customer, $setter ] ) ) {
+				$customer->{$setter}( $value );
+			}
+		}
+	}
+
+	private function invalid_order_fields( array $order_data ): array {
+		$allowed_fields = [
+			'billing_company',
+			'billing_country',
+			'billing_address_1',
+			'billing_address_2',
+			'billing_city',
+			'billing_state',
+			'billing_postcode',
+			'billing_phone',
+			'billing_email',
+			'shipping_first_name',
+			'shipping_last_name',
+			'shipping_company',
+			'shipping_country',
+			'shipping_address_1',
+			'shipping_address_2',
+			'shipping_city',
+			'shipping_state',
+			'shipping_postcode',
+			'shipping_phone',
+		];
+
+		$invalid_fields = [];
+
+		foreach ( $order_data as $raw_key => $raw_value ) {
+			$key = ltrim( sanitize_key( (string) $raw_key ), '_' );
+
+			if ( ! in_array( $key, $allowed_fields, true ) || ! is_scalar( $raw_value ) ) {
+				$invalid_fields[] = sanitize_key( (string) $raw_key );
+				continue;
+			}
+
+		}
+
+		return array_values( array_unique( array_filter( $invalid_fields ) ) );
 	}
 
 }

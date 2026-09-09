@@ -5,6 +5,7 @@ namespace Pinova;
 use Pinova\Admin\Menu;
 use Pinova\Admin\Settings;
 use Pinova\Services\APIService;
+use Pinova\Services\RateLimitService;
 use Pinova\Services\SMSService;
 use Pinova\Services\UserService;
 
@@ -37,10 +38,30 @@ class Pinova {
 	}
 
 	public function init_hooks() {
+		add_action( 'init', [ $this, 'register_rewrite_rules' ] );
+		add_action( 'init', [ $this, 'schedule_cleanup' ] );
+		add_action( 'pinova_rate_limit_cleanup', [ RateLimitService::class, 'cleanup' ] );
 		add_action( 'template_redirect', [ $this, 'handle_urls' ] );
 		add_filter( 'logout_url', [ $this, 'logout_url' ], 10, 2 );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin' ] );
-		add_filter( 'wp_script_attributes', [ $this, 'add_script_type_module' ], 99, 2 );
+		add_filter( 'wp_script_attributes', [ $this, 'add_script_type_module' ], 99 );
+	}
+
+	public function schedule_cleanup(): void {
+		if ( ! wp_next_scheduled( 'pinova_rate_limit_cleanup' ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'pinova_rate_limit_cleanup' );
+		}
+	}
+
+	public function register_rewrite_rules(): void {
+		add_rewrite_rule( '^login/?$', 'index.php?pinova_login=1', 'top' );
+		add_rewrite_rule( '^logout/?$', 'index.php?pinova_logout=1', 'top' );
+		add_filter( 'query_vars', static function ( array $vars ): array {
+			$vars[] = 'pinova_login';
+			$vars[] = 'pinova_logout';
+
+			return $vars;
+		} );
 	}
 
 	public static function handle_urls() {
@@ -57,7 +78,7 @@ class Pinova {
 			exit;
 		}
 
-		if ( $wp->request === 'login' ) {
+		if ( $wp->request === 'login' || get_query_var( 'pinova_login' ) ) {
 
 			if ( get_current_user_id() ) {
 				Helper::redirect_to( Helper::get_login_back_url() );
@@ -69,7 +90,7 @@ class Pinova {
 			exit;
 		}
 
-		if ( $wp->request === 'logout' ) {
+		if ( $wp->request === 'logout' || get_query_var( 'pinova_logout' ) ) {
 			self::logout();
 		}
 

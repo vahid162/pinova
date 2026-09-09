@@ -2,11 +2,13 @@
 
 namespace Pinova\Integrations\Wordpress;
 
-use Pinova\Helper;
 use Pinova\Objects\Mobile;
+use Pinova\Objects\Identifier;
 use Pinova\Pinova;
 use Pinova\Services\UserService;
 use WP_Comment;
+use WP_Error;
+use WP_User;
 
 class Load {
 
@@ -25,20 +27,39 @@ class Load {
 		new UsersList();
 		new UserProfile();
 
-		add_action( 'login_form_logout', [ Pinova::class, 'logout' ] );
-		add_action( 'login_form_login', [ $this, 'wp_login_to_pinova_login' ] );
-		add_action( 'login_form_register', [ $this, 'wp_login_to_pinova_login' ] );
-		add_action( 'login_form_lostpassword', [ $this, 'wp_login_to_pinova_login' ] );
-		add_action( 'login_form_retrievepassword', [ $this, 'wp_login_to_pinova_login' ] );
-
 		add_filter( 'comment_class', [ $this, 'comment_class_nicename_to_id' ], 10, 4 );
 
 		add_filter( 'get_user_metadata', [ $this, 'get_pinova_mobile' ], 10, 3 );
+		add_filter( 'authenticate', [ $this, 'authenticate_mobile' ], 19, 3 );
 		add_action( 'update_option_pinova_general', [ $this, 'sync_user_settings' ], 10, 2 );
 	}
 
-	public function wp_login_to_pinova_login() {
-		Helper::redirect_to( Pinova::get_login_url( $_GET['redirect_to'] ?? null ) );
+	/**
+	 * Resolve a mobile number to the immutable WordPress login before the
+	 * standard username/password and security-plugin authentication filters run.
+	 *
+	 * @param WP_User|WP_Error|null $user
+	 * @return WP_User|WP_Error|null
+	 */
+	public function authenticate_mobile( $user, string $username, string $password ) {
+		if ( $user instanceof WP_User || $user instanceof WP_Error || '' === $username || '' === $password ) {
+			return $user;
+		}
+
+		$identifier = new Identifier( $username );
+
+		if ( ! $identifier->is_mobile() ) {
+			return $user;
+		}
+
+		$user_id = UserService::match( $identifier );
+		$matched = $user_id ? get_userdata( $user_id ) : false;
+
+		if ( ! $matched instanceof WP_User ) {
+			return $user;
+		}
+
+		return wp_authenticate_username_password( null, $matched->user_login, $password );
 	}
 
 	public function comment_class_nicename_to_id( array $classes, $css_class, int $comment_ID, WP_Comment $comment ): array {

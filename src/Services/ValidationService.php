@@ -2,26 +2,27 @@
 
 namespace Pinova\Services;
 
-use Pinova\API\RestAPI;
 use Pinova\Helpers\Number;
 use Pinova\Helpers\Password;
 use Pinova\Objects\Identifier;
 use Pinova\Objects\Mobile;
 use WP_REST_Request;
+use WP_Error;
 
 class ValidationService {
 
-	public static function identifier( string $param, WP_REST_Request $request, string $key ): bool {
+	/** @return bool|WP_Error */
+	public static function identifier( string $param, WP_REST_Request $request, string $key ) {
 		$identifier = new Identifier( $param );
 
 		if ( ! $identifier->is_valid() ) {
-			RestAPI::response( false, __( 'ایمیل یا تلفن همراه معتبر نمی‌باشد.', 'pinova' ) );
+			return new WP_Error( 'pinova_invalid_identifier', __( 'ایمیل، تلفن همراه یا نام کاربری معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
 		$is_blocked = FirewallService::is_blocked( $identifier->get_value() );
 
 		if ( $is_blocked ) {
-			RestAPI::response( false, __( 'ایمیل یا تلفن همراه مسدود شده است.', 'pinova' ) );
+			return new WP_Error( 'pinova_blocked_identifier', __( 'ایمیل یا تلفن همراه مسدود شده است.', 'pinova' ) );
 		}
 
 		$request->set_param( 'identifier', $identifier );
@@ -29,17 +30,18 @@ class ValidationService {
 		return true;
 	}
 
-	public static function mobile( string $param, WP_REST_Request $request, string $key ): bool {
+	/** @return bool|WP_Error */
+	public static function mobile( string $param, WP_REST_Request $request, string $key ) {
 		$mobile = new Identifier( $param );
 
 		if ( ! $mobile->is_mobile() ) {
-			RestAPI::response( false, __( 'تلفن همراه معتبر نمی‌باشد.', 'pinova' ) );
+			return new WP_Error( 'pinova_invalid_mobile', __( 'تلفن همراه معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
 		$is_blocked = FirewallService::is_blocked( $mobile->get_value() );
 
 		if ( $is_blocked ) {
-			RestAPI::response( false, __( 'تلفن همراه مسدود شده است.', 'pinova' ) );
+			return new WP_Error( 'pinova_blocked_mobile', __( 'تلفن همراه مسدود شده است.', 'pinova' ) );
 		}
 
 		$request->set_param( 'mobile', $mobile );
@@ -47,7 +49,8 @@ class ValidationService {
 		return true;
 	}
 
-	public static function email( string $param, WP_REST_Request $request, string $key ): bool {
+	/** @return bool|WP_Error */
+	public static function email( string $param, WP_REST_Request $request, string $key ) {
 		// Email is optional with default value of '', empty string skips conversion validation
 		if ( $param === '' ) {
 			return true;
@@ -56,13 +59,13 @@ class ValidationService {
 		$email = new Identifier( $param );
 
 		if ( ! $email->is_email() ) {
-			RestAPI::response( false, __( 'ایمیل معتبر نمی‌باشد.', 'pinova' ) );
+			return new WP_Error( 'pinova_invalid_email', __( 'ایمیل معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
 		$is_blocked = FirewallService::is_blocked( $email->get_value() );
 
 		if ( $is_blocked ) {
-			RestAPI::response( false, __( 'ایمیل مسدود شده است.', 'pinova' ) );
+			return new WP_Error( 'pinova_blocked_email', __( 'ایمیل مسدود شده است.', 'pinova' ) );
 		}
 
 		$request->set_param( 'email', $email );
@@ -70,42 +73,45 @@ class ValidationService {
 		return true;
 	}
 
-	public static function password( string $param, WP_REST_Request $request, string $key ): bool {
+	/** @return bool|WP_Error */
+	public static function password( string $param, WP_REST_Request $request, string $key ) {
 
 		if ( empty( $param ) ) {
-			RestAPI::response( false, __( 'لطفا رمز عبور خود را وارد نمایید.', 'pinova' ) );
+			return new WP_Error( 'pinova_empty_password', __( 'لطفا رمز عبور خود را وارد نمایید.', 'pinova' ) );
 		}
 
 		return true;
 	}
 
-	public static function code( string $param, WP_REST_Request $request, string $key ): bool {
+	/** @return bool|WP_Error */
+	public static function code( string $param, WP_REST_Request $request, string $key ) {
+		$code = Number::en( $param );
 
-		$code = intval( $param );
-
-		if ( empty( $code ) ) {
-			RestAPI::response( false, __( 'کد وارد شده نامعتبر است.', 'pinova' ) );
+		if ( ! preg_match( '/^[0-9]+$/', $code ) ) {
+			return new WP_Error( 'pinova_invalid_code', __( 'کد وارد شده نامعتبر است.', 'pinova' ) );
 		}
 
-		$request->set_param( 'code', Number::en( $code ) );
+		$request->set_param( 'code', $code );
 
 		return true;
 	}
 
-	public static function reset_key( string $param, WP_REST_Request $request, string $key ): bool {
+	/** @return bool|WP_Error */
+	public static function reset_key( string $param, WP_REST_Request $request, string $key ) {
 
-		if ( empty( $param ) || ! is_string( $param ) ) {
-			RestAPI::response( false, __( 'کلید بازنشانی نامعتبر است.', 'pinova' ) );
+		if ( empty( $param ) ) {
+			return new WP_Error( 'pinova_invalid_reset_key', __( 'کلید بازنشانی نامعتبر است.', 'pinova' ) );
 		}
 
 		return true;
 	}
 
-	public static function new_password( string $param, WP_REST_Request $request, string $key ): bool {
+	/** @return bool|WP_Error */
+	public static function new_password( string $param, WP_REST_Request $request, string $key ) {
 		$validation = Password::validate( $param );
 
 		if ( ! $validation['valid'] ) {
-			RestAPI::response( false, __( 'رمزعبور ضعیف است.', 'pinova' ), [ 'errors' => $validation['errors'] ] );
+			return new WP_Error( 'pinova_weak_password', __( 'رمزعبور ضعیف است.', 'pinova' ), [ 'errors' => $validation['errors'] ] );
 		}
 
 		return true;

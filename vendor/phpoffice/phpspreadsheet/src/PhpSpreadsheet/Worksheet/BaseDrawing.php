@@ -137,10 +137,6 @@ class BaseDrawing implements IComparable
      */
     protected ?int $opacity = null;
 
-    protected bool $inCell = false;
-
-    protected int $index = 0;
-
     /**
      * Create a new BaseDrawing.
      */
@@ -207,30 +203,20 @@ class BaseDrawing implements IComparable
                 if (!($this instanceof Drawing && $this->getPath() === '')) {
                     $this->worksheet->getCell($this->coordinates);
                 }
-                if ($this->inCell) {
-                    $this->worksheet->getInCellDrawingCollection()
-                        ->append($this);
-                } else {
-                    $this->worksheet->getDrawingCollection()
-                        ->append($this);
-                }
+                $this->worksheet->getDrawingCollection()
+                    ->append($this);
             }
         } else {
             if ($overrideOld) {
                 // Remove drawing from old Worksheet
-                $collections = [
-                    $this->worksheet->getDrawingCollection(),
-                    $this->worksheet->getInCellDrawingCollection(),
-                ];
+                $iterator = $this->worksheet->getDrawingCollection()->getIterator();
 
-                foreach ($collections as $collection) {
-                    foreach ($collection as $key => $drawing) {
-                        if ($drawing->getHashCode() === $this->getHashCode()) {
-                            $collection->offsetUnset($key);
-                            $this->worksheet = null;
+                while ($iterator->valid()) {
+                    if ($iterator->current()->getHashCode() === $this->getHashCode()) {
+                        $this->worksheet->getDrawingCollection()->offsetUnset($iterator->key());
+                        $this->worksheet = null;
 
-                            break 2; // break both loops
-                        }
+                        break;
                     }
                 }
 
@@ -585,29 +571,5 @@ class BaseDrawing implements IComparable
     public function getOpacity(): ?int
     {
         return $this->opacity;
-    }
-
-    public function setInCell(bool $inCell): self
-    {
-        $this->inCell = $inCell;
-
-        return $this;
-    }
-
-    public function isInCell(): ?bool
-    {
-        return $this->inCell;
-    }
-
-    public function setIndex(int $index): self
-    {
-        $this->index = $index;
-
-        return $this;
-    }
-
-    public function getIndex(): int
-    {
-        return $this->index;
     }
 }

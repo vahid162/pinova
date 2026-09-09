@@ -3,6 +3,7 @@
 namespace Pinova\Admin;
 
 use Pinova\Services\SMSService;
+use Pinova\Services\UserService;
 
 class Settings extends \Nabik\Utils\V1\Settings {
 
@@ -17,7 +18,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 	}
 
 	/**
-	 * @return no-return
+	 * @return void
 	 */
 	public static function render(): void {
 
@@ -72,19 +73,14 @@ class Settings extends \Nabik\Utils\V1\Settings {
 	 */
 	public function get_fields(): array {
 
-		$roles = [];
-
-		foreach ( array_reverse( get_editable_roles() ) as $id => $role ) {
-
-			$can_manage_options = $role['capabilities']['manage_options'] ?? false;
-			$can_shop_manager   = $role['capabilities']['shop_manager'] ?? false;
-
-			if ( $can_manage_options || $can_shop_manager ) {
-				continue;
-			}
-
-			$roles[ $id ] = $role['name'] . ' - ' . translate_user_role( $role['name'] );
-		}
+		$roles = array_map(
+			static fn( string $name ): string => $name . ' - ' . translate_user_role( $name ),
+			UserService::allowed_registration_roles()
+		);
+		$all_roles = array_map(
+			static fn( array $role ): string => $role['name'] . ' - ' . translate_user_role( $role['name'] ),
+			get_editable_roles()
+		);
 
 		$settings_fields = [
 			'pinova_general'    => [
@@ -112,6 +108,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'type'    => 'select',
 					'options' => $roles,
 					'default' => get_option( 'default_role' ),
+					'sanitize_callback' => [ self::class, 'sanitize_registration_role' ],
 				],
 				[
 					'id'    => 'woocommerce',
@@ -244,11 +241,92 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					],
 					'default' => 'otp',
 				],
+				[
+					'id'          => 'native_only_roles',
+					'label'       => 'نقش‌های ورود بومی',
+					'type'        => 'select2',
+					'options'     => $all_roles,
+					'default'     => [ 'administrator' ],
+					'attributes'  => [ 'multiple' => true ],
+					'desc'        => 'این نقش‌ها فقط از wp-login.php و سازوکار رمز/2FA وردپرس وارد می‌شوند. پیش‌فرض: مدیرکل.',
+					'sanitize_callback' => [ self::class, 'sanitize_native_only_roles' ],
+				],
+				[
+					'id'      => 'trusted_proxy_header',
+					'label'   => 'هدر پروکسی مورد اعتماد',
+					'type'    => 'select',
+					'options' => [
+						''                          => 'غیرفعال (فقط REMOTE_ADDR)',
+						'HTTP_X_FORWARDED_FOR'      => 'X-Forwarded-For',
+						'HTTP_CF_CONNECTING_IP'     => 'CF-Connecting-IP',
+						'HTTP_X_REAL_IP'            => 'X-Real-IP',
+					],
+					'default' => '',
+					'sanitize_callback' => [ self::class, 'sanitize_proxy_header' ],
+				],
+				[
+					'id'      => 'trusted_proxy_cidrs',
+					'label'   => 'CIDR پروکسی‌های مورد اعتماد',
+					'type'    => 'textarea',
+					'desc'    => 'در هر خط یک IPv4/IPv6 یا CIDR وارد کنید. تا وقتی هدر و CIDR هر دو تنظیم نشده‌اند، فقط REMOTE_ADDR استفاده می‌شود.',
+					'default' => '',
+					'sanitize_callback' => [ self::class, 'sanitize_proxy_cidrs' ],
+				],
 				// @todo add firewall options here
 			],
 		];
 
 		return apply_filters( 'pinova/settings_fields', $settings_fields );
+	}
+
+	public static function sanitize_registration_role( $role ): string {
+		$role    = sanitize_key( (string) $role );
+		$allowed = UserService::allowed_registration_roles();
+
+		if ( isset( $allowed[ $role ] ) ) {
+			return $role;
+		}
+
+		return isset( $allowed['subscriber'] ) ? 'subscriber' : (string) array_key_first( $allowed );
+	}
+
+	public static function sanitize_native_only_roles( $roles ): array {
+		$registered = array_keys( wp_roles()->roles );
+		$roles      = is_array( $roles ) ? array_map( 'sanitize_key', $roles ) : [];
+		$roles      = array_values( array_intersect( $roles, $registered ) );
+
+		return $roles ?: [ 'administrator' ];
+	}
+
+	public static function sanitize_proxy_header( $header ): string {
+		$header = strtoupper( sanitize_key( (string) $header ) );
+		$header = str_replace( '-', '_', $header );
+
+		return in_array( $header, [ 'HTTP_X_FORWARDED_FOR', 'HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP' ], true )
+			? $header
+			: '';
+	}
+
+	public static function sanitize_proxy_cidrs( $value ): string {
+		$valid = [];
+		$rows  = preg_split( '/[\r\n,]+/', (string) $value ) ?: [];
+
+		foreach ( $rows as $row ) {
+			[ $network, $prefix ] = array_pad( explode( '/', trim( $row ), 2 ), 2, null );
+
+			if ( false === filter_var( $network, FILTER_VALIDATE_IP ) ) {
+				continue;
+			}
+
+			$max_bits = false !== filter_var( $network, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 ) ? 128 : 32;
+			$prefix   = null === $prefix ? $max_bits : (int) $prefix;
+
+			if ( $prefix >= 0 && $prefix <= $max_bits ) {
+				$valid[] = $network . '/' . $prefix;
+			}
+		}
+
+		return implode( "\n", array_values( array_unique( $valid ) ) );
 	}
 
 	public static function render_field( array $field, string $section ): string {

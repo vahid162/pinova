@@ -6,7 +6,6 @@ use PhpOffice\PhpSpreadsheet\Chart\Chart;
 use PhpOffice\PhpSpreadsheet\Chart\Renderer\MtJpGraphRenderer;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Settings;
-use PhpOffice\PhpSpreadsheet\Shared\StringHelper;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\IWriter;
@@ -36,7 +35,7 @@ class Sample
      */
     public function getScriptFilename(): string
     {
-        return basename(StringHelper::convertToString($_SERVER['SCRIPT_FILENAME']), '.php');
+        return basename($_SERVER['SCRIPT_FILENAME'], '.php');
     }
 
     /**
@@ -131,19 +130,14 @@ class Sample
             $callStartTime = microtime(true);
             $writer->save($path);
             $this->logWrite($writer, $path, $callStartTime);
-            $this->addDownloadLink($path);
+            if ($this->isCli() === false) {
+                // @codeCoverageIgnoreStart
+                echo '<a href="/download.php?type=' . pathinfo($path, PATHINFO_EXTENSION) . '&name=' . basename($path) . '">Download ' . basename($path) . '</a><br />';
+                // @codeCoverageIgnoreEnd
+            }
         }
 
         $this->logEndingNotes();
-    }
-
-    public function addDownloadLink(string $path): void
-    {
-        if ($this->isCli() === false) {
-            // @codeCoverageIgnoreStart
-            echo '<a href="/download.php?type=' . pathinfo($path, PATHINFO_EXTENSION) . '&name=' . basename($path) . '">Download ' . basename($path) . '</a><br />';
-            // @codeCoverageIgnoreEnd
-        }
     }
 
     protected function isDirOrMkdir(string $folder): bool
@@ -190,10 +184,10 @@ class Sample
         return $temporaryFilename . '.' . $extension;
     }
 
-    public function log(mixed $message): void
+    public function log(string $message): void
     {
         $eol = $this->isCli() ? PHP_EOL : '<br />';
-        echo ($this->isCli() ? date('H:i:s ') : '') . StringHelper::convertToString($message) . $eol;
+        echo ($this->isCli() ? date('H:i:s ') : '') . $message . $eol;
     }
 
     /**
@@ -246,16 +240,9 @@ class Sample
             : $this->log(sprintf('Function: %s() - %s.', rtrim($functionName, '()'), rtrim($description, '.')));
     }
 
-    /** @param mixed[][] $matrix */
-    public function displayGrid(array $matrix, null|bool|TextGridRightAlign $numbersRight = null): void
+    public function displayGrid(array $matrix): void
     {
         $renderer = new TextGrid($matrix, $this->isCli());
-        if (is_bool($numbersRight)) {
-            $numbersRight = $numbersRight ? TextGridRightAlign::numeric : TextGridRightAlign::none;
-        }
-        if ($numbersRight !== null) {
-            $renderer->setNumbersRight($numbersRight);
-        }
         echo $renderer->render();
     }
 

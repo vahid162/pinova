@@ -16,7 +16,7 @@ class Menu {
 
 	public function admin_menu() {
 
-		add_menu_page( 'پینوا', 'پینوا', 'manage_options', 'pinova', null, PINOVA_URL . 'assets/images/pinova.svg', '55.8' );
+		add_menu_page( 'پینوا', 'پینوا', 'manage_options', 'pinova', '__return_null', PINOVA_URL . 'assets/images/pinova.svg', 55.8 );
 
 		$submenus = [
 			10 => [

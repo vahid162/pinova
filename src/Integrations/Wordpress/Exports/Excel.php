@@ -22,17 +22,19 @@ class Excel {
 	private const ACTION = 'pinova_export_users_excel';
 
 	private const FONT_FAMILY = 'Vazirmatn';
+	private const NONCE_ACTION = 'pinova_export_users_excel';
 
 	public function __construct() {
 		add_action( 'admin_footer', [ $this, 'inject_export_button' ] );
-		add_action( 'admin_init', [ $this, 'handle_export' ] );
+		add_action( 'admin_post_' . self::ACTION, [ $this, 'handle_export' ] );
 	}
 
 	public function handle_export(): void {
-
-		if ( ( $_GET['action'] ?? '' ) !== self::ACTION ) {
-			return;
+		if ( ! current_user_can( 'list_users' ) ) {
+			wp_die( esc_html__( 'شما اجازهٔ دریافت خروجی کاربران را ندارید.', 'pinova' ), '', [ 'response' => 403 ] );
 		}
+
+		check_admin_referer( self::NONCE_ACTION );
 
 		try {
 			$this->output(
@@ -40,8 +42,7 @@ class Excel {
 					ExportUsers::get_users()
 				)
 			);
-		} catch ( PhpOfficeWriterException $e ) {
-		} catch ( PhpOfficeException $e ) {
+		} catch ( PhpOfficeWriterException | PhpOfficeException | \RuntimeException $e ) {
 			wp_die( 'خطا در ایجاد فایل اکسل: ' . esc_html( $e->getMessage() ) );
 		}
 
@@ -49,11 +50,17 @@ class Excel {
 	}
 
 	public function inject_export_button(): void {
+		global $pagenow;
+
+		if ( 'users.php' !== $pagenow || ! current_user_can( 'list_users' ) ) {
+			return;
+		}
 
 		$export_url = add_query_arg(
 			array_merge( $_GET, [ 'action' => self::ACTION ] ),
-			admin_url( 'users.php' )
+			admin_url( 'admin-post.php' )
 		);
+		$export_url = wp_nonce_url( $export_url, self::NONCE_ACTION );
 		?>
 		<script>
             document.addEventListener("DOMContentLoaded", function () {
@@ -103,7 +110,16 @@ class Excel {
 		$sheet       = $spreadsheet->getActiveSheet();
 
 		$metadata = $this->build_metadata();
-		$sheet->fromArray( $metadata, null, 'A2' );
+
+		foreach ( $metadata as $index => $row ) {
+			foreach ( $row as $column_index => $value ) {
+				$sheet->setCellValueExplicit(
+					[ $column_index + 1, $index + 2 ],
+					(string) $value,
+					DataType::TYPE_STRING
+				);
+			}
+		}
 
 		$meta_start_row = 2;
 
@@ -361,7 +377,7 @@ class Excel {
 
 				$cell_coordinates = [ $current_column_index, $current_row_index ];
 
-				if ( in_array( $column_key, [ 'login', 'mobile' ], true ) ) {
+					if ( 'id' !== $column_key ) {
 
 					$sheet->setCellValueExplicit(
 						$cell_coordinates,
@@ -396,7 +412,7 @@ class Excel {
 	/**
 	 * @throws PhpOfficeException
 	 */
-	private function apply_table_styles( WorkSheet $sheet, int $table_start_row, string $last_column, int $last_row ): void {
+	private function apply_table_styles( Worksheet $sheet, int $table_start_row, string $last_column, int $last_row ): void {
 
 		$data_range   = "A{$table_start_row}:{$last_column}{$last_row}";
 		$header_range = "A{$table_start_row}:{$last_column}{$table_start_row}";

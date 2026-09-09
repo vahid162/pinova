@@ -59,9 +59,6 @@ class Drawing extends BaseDrawing
      */
     public function getExtension(): string
     {
-        if (Preg::isMatch('~^data:image/([^;]+);base64,~', $this->path, $matches)) {
-            return $matches[1];
-        }
         $exploded = explode('.', basename($this->path));
 
         return $exploded[count($exploded) - 1];
@@ -117,7 +114,11 @@ class Drawing extends BaseDrawing
                 }
             }
         // Check if a URL has been passed. https://stackoverflow.com/a/2058596/1252979
-        } elseif (filter_var($path, FILTER_VALIDATE_URL) || (preg_match('/^([\w\s\x00-\x1f]+):/u', $path) && !preg_match('/^([\w]+):/u', $path))) {
+        } elseif (
+            filter_var($path, FILTER_VALIDATE_URL)
+            || Preg::isMatch('~^phar://~i', $path)
+            || (Preg::isMatch('/^([\w.\s\x00-\x1f]+):/', $path) && !Preg::isMatch('/^([\w.]+):/', $path))
+        ) {
             if (!Preg::isMatch('/^(http|https|file|ftp|s3):/', $path)) {
                 throw new PhpSpreadsheetException('Invalid protocol for linked drawing');
             }
@@ -204,6 +205,20 @@ class Drawing extends BaseDrawing
     }
 
     /**
+     * Set isURL.
+     *
+     * @return $this
+     *
+     * @deprecated 3.7.0 not needed, property is set by setPath
+     */
+    public function setIsURL(bool $isUrl): self
+    {
+        $this->isUrl = $isUrl;
+
+        return $this;
+    }
+
+    /**
      * Get hash code.
      *
      * @return string Hash code
@@ -230,7 +245,7 @@ class Drawing extends BaseDrawing
     }
 
     /**
-     * Get Image file extension for Save.
+     * Get Image file extention for Save.
      */
     public function getImageFileExtensionForSave(bool $includeDot = true): string
     {

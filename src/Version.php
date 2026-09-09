@@ -102,4 +102,8 @@ class Version extends \Nabik\Utils\V1\Version {
 		Nabik_Net_Database::DB()->statement( $query );
 	}
 
+	public function update_123() {
+		Install::create_wordpress_tables();
+	}
+
 }

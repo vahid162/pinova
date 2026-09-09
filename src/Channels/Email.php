@@ -35,7 +35,7 @@ class Email implements ChannelInterface {
 		return wp_mail(
 			$identifier,
 			get_bloginfo( 'name' ) . ' - کد تایید',
-			str_replace( array_keys( $tags ), array_values( $tags ), $content ),
+			str_replace( array_map( 'strval', array_keys( $tags ) ), array_map( 'strval', array_values( $tags ) ), $content ),
 			[
 				'content-type: text/html',
 			]

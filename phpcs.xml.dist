@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<ruleset name="Pinova">
+    <description>WordPress coding standards for Pinova.</description>
+    <file>src/Exceptions/RateLimitException.php</file>
+    <file>src/Helpers/IP.php</file>
+    <file>src/Services/RateLimitService.php</file>
+    <exclude-pattern>vendor/*</exclude-pattern>
+    <arg name="extensions" value="php"/>
+    <arg value="sp"/>
+    <rule ref="WordPress-Core">
+        <exclude name="WordPress.Files.FileName"/>
+        <exclude name="Universal.Arrays.DisallowShortArraySyntax"/>
+        <exclude name="Universal.Operators.DisallowShortTernary"/>
+        <exclude name="WordPress.NamingConventions.ValidHookName.UseUnderscores"/>
+        <exclude name="WordPress.Security.EscapeOutput.ExceptionNotEscaped"/>
+    </rule>
+    <rule ref="WordPress-Extra">
+        <exclude name="WordPress.Files.FileName"/>
+        <exclude name="Universal.Arrays.DisallowShortArraySyntax"/>
+        <exclude name="Universal.Operators.DisallowShortTernary"/>
+        <exclude name="WordPress.NamingConventions.ValidHookName.UseUnderscores"/>
+        <exclude name="WordPress.Security.EscapeOutput.ExceptionNotEscaped"/>
+    </rule>
+</ruleset>

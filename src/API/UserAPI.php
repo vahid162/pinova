@@ -5,8 +5,10 @@ namespace Pinova\API;
 
 use Carbon\Carbon;
 use Exception;
+use Pinova\Exceptions\RateLimitException;
 use Pinova\Exceptions\SendOTPException;
 use Pinova\Helper;
+use Pinova\Helpers\IP;
 use Pinova\Helpers\JWT;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
@@ -14,9 +16,13 @@ use Pinova\Pinova;
 use Pinova\Services\ChannelService;
 use Pinova\Services\FirewallService;
 use Pinova\Services\OTPService;
+use Pinova\Services\RateLimitService;
 use Pinova\Services\UserService;
 use Pinova\Services\ValidationService;
 use WP_REST_Request;
+use WP_REST_Response;
+use WP_Error;
+use WP_User;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -105,175 +111,155 @@ class UserAPI extends RestAPI {
 	/**
 	 * @param WP_REST_Request $request
 	 *
-	 * @return void
+	 * @return WP_REST_Response
 	 */
-	public function authenticate( WP_REST_Request $request ): void {
+	public function authenticate( WP_REST_Request $request ): WP_REST_Response {
+		$started = microtime( true );
 
 		/** @var Identifier $identifier */
 		$identifier = $request->get_param( 'identifier' );
 		$force_otp  = boolval( $request->get_param( 'force_otp' ) );
 		$forget     = boolval( $request->get_param( 'forget' ) );
 
-		$data = [
-			'has_password' => false,
-			'has_account'  => false,
-			'login_method' => 'otp',
+		$user_id = UserService::match( $identifier );
+		$user    = $user_id ? get_userdata( $user_id ) : false;
+
+		if ( $user instanceof WP_User && UserService::is_native_only( $user ) ) {
+			return self::response(
+				false,
+				__( 'برای این حساب از صفحهٔ ورود بومی وردپرس استفاده کنید.', 'pinova' ),
+				[ 'native_login_url' => wp_login_url( Helper::get_login_back_url() ) ],
+				403
+			);
+		}
+
+		$login_method = ( $identifier->is_mobile() || $force_otp || $forget ) ? 'otp' : 'password';
+		$data         = [
+			'login_method' => $login_method,
 			'ttl'          => JWT::DEFAULT_TTL,
 		];
 
-		$user_id = UserService::match( $identifier );
-		// @todo set attempt, prevent user enumeration
-
-		if ( $user_id ) {
-
-			$data['has_account'] = true;
-
-			$user = get_user_by( 'id', $user_id );
-
-			$data['has_password'] = ! str_starts_with( $user->user_pass, 'NO_PASSWORD_' );
-
-			if ( $identifier->is_email() || $identifier->is_username() ) {
-				$data['login_method'] = 'password';
-			}
-
-			if ( $user->get( 'pinova_login_method' ) == 'password' ) {
-				$data['login_method'] = 'password';
-			}
-
-			if ( $data['has_password'] && Pinova::get_option( 'advanced.default_login_method' ) == 'password' ) {
-				$data['login_method'] = 'password';
-			}
-
-		} elseif ( $forget ) {
-			self::response( false, __( 'حساب کاربری یافت نشد.', 'pinova' ) );
-		} elseif ( ! Pinova::users_can_register() ) {
-			self::response( false, __( 'عضویت در سایت غیرفعال است.', 'pinova' ) );
-		} elseif ( $identifier->is_email() ) {
-			self::response( false, __( 'حساب کاربری با این ایمیل وجود ندارد. برای عضویت از تلفن همراه استفاده کنید.', 'pinova' ) );
+		if ( 'password' === $login_method ) {
+			return self::response( true, null, $data );
 		}
 
-		$force_otp = $force_otp || $forget;
-
-		if ( $force_otp ) {
-			$data['login_method'] = 'otp';
+		if ( $identifier->is_username() ) {
+			return self::uniform_failure( $started );
 		}
 
-		$message = null;
+		if ( ! $user_id && ( $forget || ! Pinova::users_can_register() || $identifier->is_email() ) ) {
+			$data['jwt'] = self::decoy_otp_jwt();
+			self::minimum_response_time( $started );
 
-		if ( $data['login_method'] == 'otp' ) {
-
-			if ( $identifier->is_username() ) {
-				self::response( false, __( 'برای دریافت کد تایید، از تلفن همراه یا ایمیل استفاده کنید.', 'pinova' ) );
-			}
-
-			/** @var OTP $current_otp */
-			$current_otp = OTP::query()
-			                  ->where( 'identifier', $identifier->get_value() )
-			                  ->where( 'expires_at', '>', Carbon::now() )
-			                  ->first();
-
-			if ( $current_otp ) {
-
-				$ttl = $current_otp->expires_at->diffInSeconds();
-
-				if ( $current_otp->isVerified() ) {
-
-					if ( $force_otp ) {
-						self::response( false, sprintf( 'برای دریافت کد تایید %d ثانیه دیگر تلاش کنید.', $ttl ) );
-					} elseif ( $data['has_password'] ) {
-						$data['login_method'] = 'password';
-					}
-
-				} else {
-
-					$data['ttl'] = $ttl;
-					$data['jwt'] = JWT::encode( [
-						'otp_id' => $current_otp->id,
-					], $ttl );
-
-				}
-
-				$message = ChannelService::get_message( $current_otp->channels, $identifier, $user_id );
-
-			} else {
-
-				try {
-
-					$type = OTP::TYPE_REGISTER;
-
-					if ( $user_id ) {
-						$type = OTP::TYPE_LOGIN;
-
-						if ( $forget ) {
-							$type = OTP::TYPE_FORGET;
-						}
-					}
-
-					$channels = ChannelService::get_channels( $identifier );
-
-					[
-						$data['jwt'],
-						$successful_channels,
-					] = OTPService::create( $identifier, $channels, $type, $user_id );
-
-					$message = ChannelService::get_message( $successful_channels, $identifier, $user_id );
-
-				} catch ( SendOTPException $e ) {
-
-					if ( $force_otp ) {
-						self::response( false, $e->getMessage() );
-					} elseif ( $data['has_password'] ) {
-						$data['login_method'] = 'password';
-					} else {
-						self::response( false, $e->getMessage() );
-					}
-
-				} catch ( Exception $e ) {
-					self::response( false, $e->getMessage() );
-				}
-
-			}
-
+			return self::response(
+				true,
+				__( 'اگر حسابی با این شناسه وجود داشته باشد، کد تأیید ارسال می‌شود.', 'pinova' ),
+				$data
+			);
 		}
 
-		self::response( true, $message, $data );
+		/** @var OTP|null $current_otp */
+		$current_otp = OTP::query()
+			->where( 'identifier', $identifier->get_value() )
+			->whereNull( 'verified_at' )
+			->where( 'expires_at', '>', Carbon::now() )
+			->first();
+
+		if ( $current_otp ) {
+			$ttl         = max( 1, $current_otp->expires_at->diffInSeconds() );
+			$data['ttl'] = $ttl;
+			$data['jwt'] = JWT::encode( [ 'otp_id' => $current_otp->id ], $ttl );
+
+			return self::response( true, ChannelService::get_message( $current_otp->channels, $identifier ), $data );
+		}
+
+		try {
+			$type = $user_id ? OTP::TYPE_LOGIN : OTP::TYPE_REGISTER;
+
+			if ( $forget ) {
+				$type = OTP::TYPE_FORGET;
+			}
+
+			[ $data['jwt'], $successful_channels ] = OTPService::create(
+				$identifier,
+				ChannelService::get_channels( $identifier ),
+				$type,
+				$user_id
+			);
+			$message = ChannelService::get_message( $successful_channels, $identifier );
+		} catch ( RateLimitException $e ) {
+			return self::response(
+				false,
+				__( 'تعداد درخواست‌ها بیش از حد مجاز است. کمی بعد دوباره تلاش کنید.', 'pinova' ),
+				[],
+				429,
+				[ 'Retry-After' => $e->get_retry_after() ]
+			);
+		} catch ( SendOTPException $e ) {
+			return self::response( false, $e->getMessage(), [], 503 );
+		} catch ( Exception $e ) {
+			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 500 );
+		}
+
+		return self::response( true, $message, $data );
 	}
 
 	/**
 	 * @param WP_REST_Request $request
 	 *
-	 * @return void
+	 * @return WP_REST_Response
 	 */
-	public function login_password( WP_REST_Request $request ): void {
+	public function login_password( WP_REST_Request $request ): WP_REST_Response {
+		$started = microtime( true );
 
 		/** @var Identifier $identifier */
 		$identifier = $request->get_param( 'identifier' );
-		$password   = $request->get_param( 'password' );
+		$password   = (string) $request->get_param( 'password' );
+
+		try {
+			RateLimitService::password( IP::get(), $identifier->get_value() );
+		} catch ( RateLimitException $e ) {
+			return self::response(
+				false,
+				__( 'تعداد تلاش‌های ورود بیش از حد مجاز است. کمی بعد دوباره تلاش کنید.', 'pinova' ),
+				[],
+				429,
+				[ 'Retry-After' => $e->get_retry_after() ]
+			);
+		}
 
 		$user_id = UserService::match( $identifier );
-		// @todo set attempt, prevent user enumeration
+		$user    = $user_id ? get_userdata( $user_id ) : false;
 
-		if ( ! $user_id ) {
-			self::response( false, __( 'اطلاعات ورود معتبر نمی‌باشد.', 'pinova' ) );
+		if ( $user instanceof WP_User && UserService::is_native_only( $user ) ) {
+			return self::response(
+				false,
+				__( 'برای این حساب از صفحهٔ ورود بومی وردپرس استفاده کنید.', 'pinova' ),
+				[ 'native_login_url' => wp_login_url( Helper::get_login_back_url() ) ],
+				403
+			);
 		}
 
-		$user = get_user_by( 'id', $user_id );
+		$authenticated = UserService::authenticate_password( $user_id, $password, true );
 
-		if ( ! wp_check_password( $password, $user->user_pass, $user->ID ) ) {
-			self::response( false, __( 'اطلاعات ورود معتبر نمی‌باشد.', 'pinova' ) );
+		if ( is_wp_error( $authenticated ) ) {
+			self::minimum_response_time( $started );
+
+			return self::response( false, __( 'اطلاعات ورود معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
-		UserService::login( $user_id, 'password' );
+		update_user_meta( $authenticated->ID, 'pinova_login_method', 'password' );
+		do_action( 'pinova/user_logged_in', $authenticated->ID );
 
-		self::response( true, __( 'ورود با موفقیت انجام شد.', 'pinova' ) );
+		return self::response( true, __( 'ورود با موفقیت انجام شد.', 'pinova' ) );
 	}
 
 	/**
 	 * @param WP_REST_Request $request
 	 *
-	 * @return void
+	 * @return WP_REST_Response
 	 */
-	public function login_otp( WP_REST_Request $request ): void {
+	public function login_otp( WP_REST_Request $request ): WP_REST_Response {
 
 		$jwt  = $request->get_param( 'jwt' );
 		$code = $request->get_param( 'code' );
@@ -281,20 +267,29 @@ class UserAPI extends RestAPI {
 		try {
 			$user = OTPService::verify( $jwt, $code );
 		} catch ( Exception $e ) {
-			self::response( false, $e->getMessage() );
+			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+		}
+
+		if ( UserService::is_native_only( $user ) ) {
+			return self::response(
+				false,
+				__( 'برای این حساب از صفحهٔ ورود بومی وردپرس استفاده کنید.', 'pinova' ),
+				[ 'native_login_url' => wp_login_url( Helper::get_login_back_url() ) ],
+				403
+			);
 		}
 
 		UserService::login( $user->ID, 'otp' );
 
-		self::response( true, __( 'ورود با موفقیت انجام شد.', 'pinova' ) );
+		return self::response( true, __( 'ورود با موفقیت انجام شد.', 'pinova' ) );
 	}
 
 	/**
 	 * @param WP_REST_Request $request
 	 *
-	 * @return void
+	 * @return WP_REST_Response
 	 */
-	public function forgot_verify( WP_REST_Request $request ): void {
+	public function forgot_verify( WP_REST_Request $request ): WP_REST_Response {
 
 		$jwt  = $request->get_param( 'jwt' );
 		$code = $request->get_param( 'code' );
@@ -302,13 +297,21 @@ class UserAPI extends RestAPI {
 		try {
 			$user = OTPService::verify( $jwt, $code );
 		} catch ( Exception $e ) {
-			self::response( false, $e->getMessage() );
+			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+		}
+
+		if ( UserService::is_native_only( $user ) ) {
+			return self::response( false, __( 'بازیابی رمز این حساب فقط از مسیر بومی وردپرس مجاز است.', 'pinova' ), [], 403 );
 		}
 
 		clean_user_cache( $user->ID );
 		$reset_key = get_password_reset_key( $user );
 
-		self::response( true, null, [
+		if ( is_wp_error( $reset_key ) ) {
+			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
+		}
+
+		return self::response( true, null, [
 			'jwt'       => UserService::generate_jwt( $user->ID ),
 			'reset_key' => $reset_key,
 		] );
@@ -317,38 +320,42 @@ class UserAPI extends RestAPI {
 	/**
 	 * @param WP_REST_Request $request
 	 *
-	 * @return void
+	 * @return WP_REST_Response
 	 */
-	public function forgot_change( WP_REST_Request $request ): void {
+	public function forgot_change( WP_REST_Request $request ): WP_REST_Response {
 
 		$jwt              = $request->get_param( 'jwt' );
 		$reset_key        = $request->get_param( 'reset_key' );
 		$password         = $request->get_param( 'password_1' );
 		$password_confirm = $request->get_param( 'password_2' );
 
-		if ( $password !== $password_confirm ) {
-			self::response( false, __( 'رمز عبور و تکرار رمز عبور یکسان نیستند.', 'pinova' ) );
+		if ( ! hash_equals( (string) $password, (string) $password_confirm ) ) {
+			return self::response( false, __( 'رمز عبور و تکرار رمز عبور یکسان نیستند.', 'pinova' ), [], 400 );
 		}
 
 		try {
 			$user_id = UserService::parse_jwt( $jwt );
 		} catch ( Exception $e ) {
-			self::response( false, $e->getMessage() );
+			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
 		$user = get_user_by( 'id', $user_id );
 
+		if ( ! $user instanceof WP_User || UserService::is_native_only( $user ) ) {
+			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+		}
+
 		$user = check_password_reset_key( $reset_key, $user->user_login );
 
 		if ( is_wp_error( $user ) ) {
-			self::response( false, $user->get_error_message() );
+			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
 		reset_password( $user, $password );
 
 		UserService::login( $user_id, 'password' );
 
-		self::response( true, __( 'رمزعبور با موفقیت بازنشانی شد و به سیستم وارد شدید.', 'pinova' ) );
+		return self::response( true, __( 'رمزعبور با موفقیت بازنشانی شد و به سیستم وارد شدید.', 'pinova' ) );
 	}
 
 	/**
@@ -356,12 +363,12 @@ class UserAPI extends RestAPI {
 	 *
 	 * @param WP_REST_Request $request
 	 *
-	 * @return bool
+	 * @return bool|WP_Error
 	 */
-	public function permission_callback_logout( WP_REST_Request $request ): bool {
+	public function permission_callback_logout( WP_REST_Request $request ) {
 
 		if ( ! is_user_logged_in() ) {
-			self::response( false, __( 'در ابتدا وارد شوید.', 'pinova' ) );
+			return new WP_Error( 'pinova_login_required', __( 'در ابتدا وارد شوید.', 'pinova' ), [ 'status' => 401 ] );
 		}
 
 		return true;
@@ -373,16 +380,16 @@ class UserAPI extends RestAPI {
 	 *
 	 * @param WP_REST_Request $request
 	 *
-	 * @return bool
+	 * @return bool|WP_Error
 	 */
-	public function permission_callback( WP_REST_Request $request ): bool {
+	public function permission_callback( WP_REST_Request $request ) {
 
 		if ( is_user_logged_in() ) {
-			self::response( false, __( 'شما وارد شده اید.', 'pinova' ) );
+			return new WP_Error( 'pinova_already_logged_in', __( 'شما وارد شده‌اید.', 'pinova' ), [ 'status' => 403 ] );
 		}
 
 		if ( FirewallService::is_ip_blocked() ) {
-			self::response( false, __( 'آدرس آی.پی شما مسدود شده است.', 'pinova' ) );
+			return new WP_Error( 'pinova_ip_blocked', __( 'آدرس آی.پی شما مسدود شده است.', 'pinova' ), [ 'status' => 403 ] );
 		}
 
 		return true;
@@ -393,15 +400,45 @@ class UserAPI extends RestAPI {
 	 * @param string|null $message
 	 * @param array       $data
 	 *
-	 * @return no-return
+	 * @param int         $status
+	 * @param array       $headers
+	 *
+	 * @return WP_REST_Response
 	 */
-	public static function response( bool $success, ?string $message = null, array $data = [] ): void {
+	public static function response(
+		bool $success,
+		?string $message = null,
+		array $data = [],
+		int $status = 200,
+		array $headers = []
+	): WP_REST_Response {
 
 		if ( $success ) {
 			$data['back_url'] = Helper::get_login_back_url();
 		}
 
-		parent::response( $success, $message, $data );
+		return parent::response( $success, $message, $data, $status, $headers );
+	}
+
+	private static function decoy_otp_jwt(): string {
+		return JWT::encode( [
+			'otp_id' => 0,
+			'nonce'  => wp_generate_password( 20, false ),
+		] );
+	}
+
+	private static function uniform_failure( float $started ): WP_REST_Response {
+		self::minimum_response_time( $started );
+
+		return self::response( false, __( 'امکان پردازش درخواست ورود وجود ندارد.', 'pinova' ), [], 400 );
+	}
+
+	private static function minimum_response_time( float $started ): void {
+		$remaining = 0.35 - ( microtime( true ) - $started );
+
+		if ( $remaining > 0 ) {
+			usleep( (int) ( $remaining * 1000000 ) );
+		}
 	}
 
 }

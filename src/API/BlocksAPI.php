@@ -111,7 +111,7 @@ class BlocksAPI extends RestAPI {
 		] );
 		$users = collect( $users->get_results() );
 
-		self::response( true, null, [
+		return self::response( true, null, [
 			'users' => $users->pluck( 'display_name', 'ID' )->toArray(),
 		] );
 	}
@@ -127,12 +127,12 @@ class BlocksAPI extends RestAPI {
 		$page     = max( 1, $request->get_param( 'page' ) );
 		$per_page = max( 1, $request->get_param( 'per_page' ) );
 
-		$timezone = wp_timezone_string();
+		$timezone = wp_timezone();
 
 		if ( ! empty( $from_date ) ) {
 			$from_date = verta()
 				->timestamp( intval( $from_date ) )
-				->timezone( $timezone )
+				->setTimezone( $timezone )
 				->startDay()
 				->toCarbon()
 				->utc();
@@ -141,7 +141,7 @@ class BlocksAPI extends RestAPI {
 		if ( ! empty( $to_date ) ) {
 			$to_date = verta()
 				->timestamp( intval( $to_date ) )
-				->timezone( $timezone )
+				->setTimezone( $timezone )
 				->endDay()
 				->toCarbon()
 				->utc();
@@ -189,7 +189,7 @@ class BlocksAPI extends RestAPI {
 			->map( [ $this, 'resource' ] )
 			->toArray();
 
-		self::response( true, null, [
+		return self::response( true, null, [
 			'blocks'       => $blocks,
 			'current_page' => intval( $page ),
 			'total_items'  => intval( $total_items ),
@@ -205,27 +205,27 @@ class BlocksAPI extends RestAPI {
 			$blocked_until = null;
 		} else {
 
-			$timezone = wp_timezone_string();
+			$timezone = wp_timezone();
 
 			$blocked_until = verta()
 				->timestamp( intval( $blocked_until ) )
-				->timezone( $timezone )
+				->setTimezone( $timezone )
 				->endDay()
 				->toCarbon()
 				->utc();
 
 			if ( $blocked_until->isPast() ) {
-				self::response( false, __( 'تاریخ مسدودیت باید در آینده باشد.', 'pinova' ) );
+				return self::response( false, __( 'تاریخ مسدودیت باید در آینده باشد.', 'pinova' ), [], 400 );
 			}
 		}
 
 		$identifier = $this->expand_identifier( $raw_identifier );
 
 		if ( empty( $identifier ) ) {
-			self::response( false, __( 'شناسه وارد شده معتبر نمی‌باشد.', 'pinova' ) );
+			return self::response( false, __( 'شناسه وارد شده معتبر نمی‌باشد.', 'pinova' ), [], 400 );
 		}
 
-		/**@var Block $block */
+		/** @var Block $block */
 		$block = Block::query()->updateOrCreate( [
 			'identifier' => $identifier,
 		], [
@@ -233,7 +233,7 @@ class BlocksAPI extends RestAPI {
 			'blocked_until' => $blocked_until,
 		] );
 
-		self::response( true, sprintf( 'شناسه %s با موفقیت مسدود شد.', $identifier ), [
+		return self::response( true, sprintf( 'شناسه %s با موفقیت مسدود شد.', $identifier ), [
 			'block_id' => $block->id,
 			'blocks'   => $this->blocks(),
 		] );
@@ -249,18 +249,18 @@ class BlocksAPI extends RestAPI {
 			$block = Block::query()->findOrFail( $block_id );
 
 		} catch ( \Exception $e ) {
-			self::response( false, $e->getMessage() );
+			return self::response( false, $e->getMessage(), [], 404 );
 		}
 
 		if ( empty( $block->blocked_by ) ) {
-			self::response( false, 'مسدودی‌های سیستمی قابل حذف نیستند.', [
+			return self::response( false, 'مسدودی‌های سیستمی قابل حذف نیستند.', [
 				'blocks' => $this->blocks(),
-			] );
+			], 403 );
 		}
 
 		$block->delete();
 
-		self::response( true, 'شناسه با موفقیت رفع مسدودی شد.', [
+		return self::response( true, 'شناسه با موفقیت رفع مسدودی شد.', [
 			'blocks' => $this->blocks(),
 		] );
 	}

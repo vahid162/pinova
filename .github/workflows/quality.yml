@@ -87,7 +87,7 @@ jobs:
           WC_VERSION: ${{ matrix.wc }}
       - run: npm run env:start -- --update
       - name: Install PDO MySQL in the disposable test container
-        run: npx wp-env run tests-cli sudo docker-php-ext-install pdo_mysql
+        run: npx wp-env run tests-cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
       - run: npm run test:integration
         env:
           PINOVA_TEST_HPOS: ${{ matrix.hpos }}

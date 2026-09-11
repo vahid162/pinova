@@ -46,7 +46,7 @@ class UserProfile {
 	 * @return void
 	 */
 	public function render_mobile_field( WP_User $profile_user ): void {
-		$phone = get_user_meta( $profile_user->ID, 'pinova_mobile', true );
+		$phone = UserService::get_mobile( $profile_user->ID ) ?: '';
 
 		?>
 		<table class="form-table">
@@ -64,7 +64,7 @@ class UserProfile {
 					       value="<?php echo esc_attr( $phone ); ?>"
 					>
 					<p class="description" id="mobile-description">
-						<?php _e( 'با تغییر تلفن همراه، <strong>نام کاربری شما تغییر خواهد کرد.</strong> لطفاً پس از تغییر، با تلفن همراه جدید وارد شوید.', 'pinova' ); ?>
+						<?php esc_html_e( 'تغییر تلفن همراه، نام کاربری وردپرس را تغییر نمی‌دهد. پس از ذخیره، شمارهٔ جدید برای ورود پینوا استفاده می‌شود.', 'pinova' ); ?>
 					</p>
 				</td>
 			</tr>
@@ -97,9 +97,7 @@ class UserProfile {
 			return $errors;
 		}
 
-		$existing_user_id = UserService::get_by_mobile( $mobile->get_value() );
-
-		if ( is_int( $existing_user_id ) && $existing_user_id !== $user_id ) {
+		if ( ! UserService::mobile_is_available_for_user( $mobile->get_value(), $user_id ) ) {
 
 			$errors->add( 'user_mobile_duplicate', sprintf(
 				__( 'با تلفن همراه %s یک حساب کاربری وجود دارد، لفطا تلفن همراه دیگری وارد نمایید.', 'pinova' ),

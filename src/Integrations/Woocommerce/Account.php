@@ -3,11 +3,9 @@
 namespace Pinova\Integrations\Woocommerce;
 
 use Pinova\Objects\Identifier;
-use Pinova\Objects\Mobile;
 use Pinova\Services\FirewallService;
 use Pinova\Services\UserService;
 use stdClass;
-use WC_Customer;
 use WP_Error;
 
 class Account {
@@ -28,12 +26,12 @@ class Account {
 
 	public function render_mobile_field() {
 		$user_id = get_current_user_id();
-		$mobile  = get_user_meta( $user_id, 'pinova_mobile', true );
+		$mobile  = UserService::get_mobile( $user_id ) ?: '';
 		?>
 
 		<p class="woocommerce-form-row woocommerce-form-row--wide form-row form-row-wide">
 			<label for="pinova_mobile">
-				<?php _e( 'تلفن همراه', 'pinova' ); ?>
+				<?php esc_html_e( 'تلفن همراه', 'pinova' ); ?>
 				<span class="required" aria-hidden="true">*</span>
 			</label>
 			<input type="tel" class="woocommerce-Input woocommerce-Input--text input-text"
@@ -41,9 +39,7 @@ class Account {
 			       value="<?php echo esc_attr( $mobile ); ?>"
 			>
 			<span id="pinova_mobile_description">
-				با تغییر تلفن همراه،
-				<strong>نام کاربری شما تغییر خواهد کرد.</strong>
-				لطفاً پس از تغییر، با تلفن همراه جدید وارد شوید.
+				<?php esc_html_e( 'تغییر تلفن همراه، نام کاربری وردپرس را تغییر نمی‌دهد. پس از ذخیره، شمارهٔ جدید برای ورود پینوا استفاده می‌شود.', 'pinova' ); ?>
 			</span>
 		</p>
 		<br>
@@ -75,9 +71,7 @@ class Account {
 			return;
 		}
 
-		$existing_user_id = UserService::get_by_mobile( $identifier->get_value() );
-
-		if ( is_int( $existing_user_id ) && $existing_user_id !== $user->ID ) {
+		if ( ! UserService::mobile_is_available_for_user( $identifier->get_value(), (int) $user->ID ) ) {
 			$errors->add( 'mobile_duplicate', sprintf(
 				__( 'با تلفن همراه %s یک حساب کاربری وجود دارد، لطفاً تلفن همراه دیگری وارد نمایید.', 'pinova' ),
 				$identifier->get_value()
@@ -91,14 +85,23 @@ class Account {
 			return;
 		}
 
-		$mobile = sanitize_user( $_POST['pinova_mobile'] ?? '' );
-
+		// WooCommerce verifies its account-details nonce before firing this save hook.
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing
+		$mobile     = sanitize_text_field( wp_unslash( $_POST['pinova_mobile'] ?? '' ) );
 		$identifier = new Identifier( $mobile );
 
-		if ( get_user_meta( $user_id, 'pinova_mobile', true ) === $identifier->get_value() ) {
+		if ( ! $identifier->is_mobile() || FirewallService::is_blocked( $identifier->get_value() ) ) {
 			return;
 		}
 
-		UserService::update_username( $user_id, $identifier->get_value() );
+		if ( ! UserService::mobile_is_available_for_user( $identifier->get_value(), $user_id ) ) {
+			return;
+		}
+
+		if ( UserService::get_mobile( $user_id ) === $identifier->get_value() ) {
+			return;
+		}
+
+		update_user_meta( $user_id, 'pinova_mobile', $identifier->get_value() );
 	}
 }

@@ -1,4 +1,5 @@
 /.build/
+/.activated
 /.phpunit.result.cache
 /.phpstan.cache
 /node_modules/
@@ -9,4 +10,3 @@
 /vendor/squizlabs/
 /vendor/wp-coding-standards/
 /vendor/szepeviktor/
-

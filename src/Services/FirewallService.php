@@ -3,6 +3,7 @@
 namespace Pinova\Services;
 
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Pinova\Helpers\IP;
 use Pinova\Models\Block;
 
@@ -35,7 +36,10 @@ class FirewallService {
 		/** @var Block $blockList */
 		$blockList = Block::query()
 		                  ->where( 'identifier', $identifier )
-		                  ->where( 'blocked_until', '>', Carbon::now() )
+		                  ->where( static function ( Builder $query ): void {
+			                  $query->whereNull( 'blocked_until' )
+			                        ->orWhere( 'blocked_until', '>', Carbon::now() );
+		                  } )
 		                  ->first();
 
 		return $blockList;

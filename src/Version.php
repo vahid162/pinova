@@ -79,27 +79,8 @@ class Version extends \Nabik\Utils\V1\Version {
 	}
 
 	public function update_115() {
-		global $wpdb;
-
-		$indexes = Nabik_Net_Database::DB()->select( "SHOW INDEX FROM `{$wpdb->users}`" );
-
-		$email_unique_indexes = collect( $indexes )
-			->where( 'Non_unique', 0 )
-			->where( 'Column_name', 'user_email' )
-			->pluck( 'Key_name' );
-
-		foreach ( $email_unique_indexes as $email_unique_index ) {
-			Nabik_Net_Database::DB()->statement( sprintf( "ALTER TABLE `{$wpdb->users}` DROP INDEX `%s`", $email_unique_index ) );
-		}
-
-		Nabik_Net_Database::DB()->statement( "UPDATE `{$wpdb->users}` SET `user_email` = '' WHERE `user_email` IS NULL" );
-
-		Nabik_Net_Database::DB()->statement( "ALTER TABLE `{$wpdb->users}` MODIFY COLUMN `user_email` VARCHAR(100) NOT NULL DEFAULT ''" );
-
-		$site_host = parse_url( site_url(), PHP_URL_HOST );
-		$query     = sprintf( "UPDATE `%s` SET `user_email` = '' WHERE `user_email` LIKE 'nomail%%%s'", $wpdb->users, $site_host );
-
-		Nabik_Net_Database::DB()->statement( $query );
+		// Intentionally retained as a no-op so upgrades can advance past 1.1.5
+		// without altering columns, indexes, or user data in WordPress core tables.
 	}
 
 	public function update_123() {

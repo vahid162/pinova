@@ -12,6 +12,7 @@ class Menu {
 		add_filter( 'plugin_row_meta', [ $this, 'plugin_row_meta' ], 10, 2 );
 
 		Settings::instance();
+		new Logs();
 	}
 
 	public function admin_menu() {
@@ -32,6 +33,12 @@ class Menu {
 				'callback'   => function () {
 					include PINOVA_DIR . '/templates/admin/blocks.php';
 				},
+			],
+			30 => [
+				'title'      => 'گزارش‌ها',
+				'capability' => 'manage_options',
+				'slug'       => 'pinova-logs',
+				'callback'   => [ Logs::class, 'render' ],
 			],
 		];
 

@@ -10,6 +10,7 @@ use Pinova\Exceptions\SendOTPException;
 use Pinova\Helper;
 use Pinova\Helpers\IP;
 use Pinova\Helpers\JWT;
+use Pinova\Logging\Logger;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
 use Pinova\Pinova;
@@ -200,6 +201,15 @@ class UserAPI extends RestAPI {
 		} catch ( SendOTPException $e ) {
 			return self::response( false, $e->getMessage(), [], 503 );
 		} catch ( Exception $e ) {
+			Logger::instance()->error(
+				'auth.request_failed',
+				[
+					'identifier_type'        => $identifier->get_type(),
+					'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
+					'operation'              => 'authenticate',
+					'exception'              => $e,
+				]
+			);
 			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 500 );
 		}
 
@@ -234,17 +244,43 @@ class UserAPI extends RestAPI {
 		$user    = $user_id ? get_userdata( $user_id ) : false;
 
 		if ( $user instanceof WP_User && UserService::is_native_only( $user ) ) {
+			Logger::instance()->notice(
+				'auth.password_failed',
+				[
+					'user_id'         => $user->ID,
+					'identifier_type' => $identifier->get_type(),
+					'auth_method'     => 'password',
+					'reason'          => 'native_only_policy',
+				]
+			);
 			return self::password_failure( $started );
 		}
 
 		$authenticated = UserService::authenticate_password( $user_id, $password, true );
 
 		if ( is_wp_error( $authenticated ) ) {
+			Logger::instance()->notice(
+				'auth.password_failed',
+				[
+					'user_id'                => $user_id,
+					'identifier_type'        => $identifier->get_type(),
+					'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
+					'auth_method'            => 'password',
+					'reason'                 => 'authentication_rejected',
+				]
+			);
 			return self::password_failure( $started );
 		}
 
 		update_user_meta( $authenticated->ID, 'pinova_login_method', 'password' );
 		do_action( 'pinova/user_logged_in', $authenticated->ID );
+		Logger::instance()->info(
+			'auth.password_succeeded',
+			[
+				'user_id'     => $authenticated->ID,
+				'auth_method' => 'password',
+			]
+		);
 
 		return self::response( true, __( 'ورود با موفقیت انجام شد.', 'pinova' ) );
 	}

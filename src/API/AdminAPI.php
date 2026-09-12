@@ -5,6 +5,7 @@ namespace Pinova\API;
 
 use Exception;
 use Pinova\Channels\SMS;
+use Pinova\Logging\Logger;
 use Pinova\Objects\Identifier;
 use Pinova\Services\OTPService;
 use Pinova\Services\UserService;
@@ -54,10 +55,27 @@ class AdminAPI extends RestAPI {
 
 			$message = sprintf( "کد تایید «%d» با موفقیت پیامک شد.", $code );
 			$success = true;
+			Logger::instance()->notice(
+				'admin.sms_test_succeeded',
+				[
+					'user_id'                => get_current_user_id(),
+					'identifier_type'        => $identifier->get_type(),
+					'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
+				]
+			);
 
 		} catch ( Exception $e ) {
 			$message = $e->getMessage();
 			$success = false;
+			Logger::instance()->error(
+				'admin.sms_test_failed',
+				[
+					'user_id'                => get_current_user_id(),
+					'identifier_type'        => $identifier->get_type(),
+					'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
+					'exception'              => $e,
+				]
+			);
 		}
 
 		return self::response( $success, $message, [], $success ? 200 : 503 );

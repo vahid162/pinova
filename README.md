@@ -6,7 +6,7 @@
 - مخزن توسعه: [github.com/vahid162/pinova](https://github.com/vahid162/pinova)
 - مجوز: GPLv3
 
-> **وضعیت انتشار:** شاخهٔ `main` شامل خط اصلاحی ۱.۲.۳ است. نسخه‌های GitHub با پسوند RC آزمایشی و به‌صورت Pre-release هستند. نصب روی production باید پس از کنترل artifact، بکاپ و تست برنامه‌ریزی‌شده انجام شود.
+> **وضعیت انتشار:** نسخهٔ ۱.۲.۳ RC3 آخرین پیش‌انتشار خط امنیتی روی GitHub است. سامانهٔ گزارش‌گیری ساخت‌یافته به‌عنوان ۱.۲.۴ در branch توسعه قرار دارد و تا عبور از review، CI و انتشار یک RC جدید، نسخهٔ production محسوب نمی‌شود.
 
 ## امکانات نسخهٔ ۱.۲.۳
 
@@ -22,6 +22,21 @@
 - REST response استاندارد با envelope سازگار `{success,message,data}`
 
 نسخهٔ ۱.۲.۳ برای جلوگیری از تخریب بیشتر Identity طراحی شده است، اما چند حساب موجود را خودکار merge نمی‌کند. Identity Resolver، audit، migration، merge و rollback به خط توسعهٔ جداگانهٔ ۱.۳ تعلق دارند و هنوز ویژگی منتشرشدهٔ ۱.۲.۳ نیستند.
+
+## گزارش‌گیری ساخت‌یافته در ۱.۲.۴
+
+پینوا رخدادهای عملیاتی مهم ورود، OTP، ارسال کانال، تعارض موبایل، rate limit، مسدودی‌ها و خروجی کاربران را با event code ثابت ثبت می‌کند. این زیرساخت دائمی است، اما رکوردهای آن موقت‌اند و به‌طور پیش‌فرض بعد از ۱۴ روز به‌صورت batch حذف می‌شوند.
+
+- ذخیره در جدول مستقل `wp_pinova_logs` (با prefix واقعی سایت) و نمایش در **پینوا ← گزارش‌ها**
+- سطح پیش‌فرض `warning`؛ سطح‌های `info` و `notice` از تنظیمات قابل انتخاب‌اند
+- Debug فقط در پنجرهٔ تشخیصی ۱۵ دقیقه، یک ساعت یا ۲۴ ساعت و با انقضای خودکار
+- `X-Pinova-Correlation-ID` روی پاسخ‌های REST برای تطبیق خطای کاربر با رخداد سرور
+- context مبتنی بر allowlist؛ ایمیل، موبایل، username، IP، OTP، password، token، cookie، reset key، متن exception و stack trace ذخیره نمی‌شوند
+- شناسه‌های لازم برای مقایسه با HMAC کلیددار و کوتاه‌شده fingerprint می‌شوند؛ User ID ممکن است برای عیب‌یابی داخلی ثبت شود
+- fallback امن به logger ووکامرس و سپس PHP error log فقط وقتی جدول اختصاصی در دسترس نیست
+- جلوگیری از log amplification؛ rate limit فقط لحظهٔ ورود به وضعیت محدودشده را در هر window ثبت می‌کند
+
+Retention بین ۱ تا ۹۰ روز محدود است و مدیر می‌تواند گزارش‌های موجود را با nonce از صفحهٔ مدیریت پاک کند. پاک‌سازی نیز یک رخداد مدیریتی تازه ثبت می‌کند. جزئیات قرارداد توسعه در `.agents/skills/pinova-development/references/logging.md` است.
 
 ## نیازمندی‌ها
 
@@ -52,9 +67,9 @@
 مثلاً این سه مقدار فقط وقتی یک حساب محسوب می‌شوند که همگی به یک User ID واحد متصل باشند:
 
 ```text
-mahdavi162
-gpante.ir@gmail.com
-09370159434
+sample_user
+user@example.test
+09120000000
 ```
 
 قواعد ایمنی:
@@ -71,6 +86,8 @@ gpante.ir@gmail.com
 pinova.php                         bootstrap و metadata افزونه
 src/API/                          endpointهای REST
 src/Services/                     کاربر، OTP، امنیت، rate limit و کانال‌ها
+src/Logging/                      logger، context امن، persistence و retention
+src/Admin/Logs.php                نمایش و پاک‌سازی کنترل‌شدهٔ گزارش‌ها
 src/Objects/                      Identifier و نرمال‌سازی موبایل
 src/Integrations/Wordpress/       پروفایل، فهرست کاربران و export
 src/Integrations/Woocommerce/     حساب، checkout و ساخت محدود مشتری
@@ -91,7 +108,7 @@ composer install --no-interaction --prefer-dist
 npm install --ignore-scripts
 ```
 
-تست‌های integration با `@wordpress/env` در کانتینرهای جدا اجرا می‌شوند و نباید به فایل یا دیتابیس production متصل شوند.
+تست‌های integration با `@wordpress/env` در کانتینرهای جدا اجرا می‌شوند و نباید به فایل یا دیتابیس production متصل شوند. worktree، کانتینر، volume و دیتابیس آزمایشی موجود متعلق به همان task است؛ task تازه باید محیطی با نام یکتا بسازد و بدون مجوز صریح محیط قبلی را stop، update، prune یا حذف نکند.
 
 ## کنترل کیفیت
 
@@ -167,10 +184,11 @@ bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tre
 ## امنیت و production
 
 - OTP، password، token، reset key و شناسهٔ کامل کاربر را log نکنید.
+- فقط event code ثابت و context allowlist‌شده ثبت کنید؛ متن exception و trace نیز نباید وارد log شود.
 - redirect خارجی باید با `wp_validate_redirect()` و host مجاز محدود شود.
 - فقط `REMOTE_ADDR` پیش‌فرض معتبر است؛ proxy header به trusted CIDR نیاز دارد.
 - migration قدیمی نباید ستون، index یا دادهٔ جدول‌های core را تغییر دهد.
-- توسعه و تست خودکار نباید در `/www/wwwroot/gpante.com/wp-content/plugins/pinova` انجام شود.
+- توسعه و تست خودکار نباید در `<production-wordpress-root>/wp-content/plugins/pinova` انجام شود؛ مسیر واقعی production نباید در مستندات عمومی hard-code شود.
 - RC باید قبل از stable/latest شدن، staging و canary مورد توافق را بگذراند.
 
 ## راهنمای AI و مشارکت‌کنندگان

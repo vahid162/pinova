@@ -4,7 +4,7 @@ namespace {
 	const PINOVA_DIR = __DIR__ . '/..';
 	const PINOVA_FILE = '';
 	const PINOVA_URL = '';
-	const PINOVA_VERSION = '1.2.3';
+	const PINOVA_VERSION = '1.2.4';
 	const DB_HOST = '';
 	const DB_NAME = '';
 	const DB_USER = '';

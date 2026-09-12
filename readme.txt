@@ -4,7 +4,7 @@ Tags: otp,email,sms,login,passwordless
 Requires at least: 6.8
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 1.2.3
+Stable tag: 1.2.4
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -36,6 +36,7 @@ License URI: https://www.gnu.org/licenses/gpl-3.0.html
 * قابلیت مسدودسازی تلفن همراه، ایمیل و آی.پی
 * خروجی اکسل کاربران با تلفن همراه
 * خروجی VCF (مخاطبین) کاربران
+* گزارش‌گیری ساخت‌یافته و امن با Correlation ID و نگهداری محدود
 
 = سامانه‌های پیامکی =
 * [melipayamak - ملی پیامک](https://l.nabik.net/melipayamak?utm_source=pinova "ملی‌پیامک")
@@ -86,6 +87,9 @@ License URI: https://www.gnu.org/licenses/gpl-3.0.html
 = متای شماره موبایل کاربران چیست؟ =
 کلید استاندارد پینوا `pinova_mobile` است. برای حساب‌های قدیمی که هنوز مقدار فیزیکی ندارند، پینوا به‌صورت سازگار شماره را از نام کاربری موبایلی یا متاهای legacy می‌خواند. افزونه‌هایی مانند رهگیری سفارش، تیکت و باشگاه مشتریان می‌توانند همین meta را بخوانند.
 
+= گزارش‌های پینوا کجا هستند و چه داده‌ای ذخیره می‌کنند؟ =
+مدیر سایت می‌تواند گزارش‌ها را از منوی «پینوا ← گزارش‌ها» ببیند. پینوا event code، سطح، Correlation ID، User ID اختیاری و context محدود را نگه می‌دارد؛ OTP، رمز عبور، token، reset key، ایمیل، موبایل، IP و متن خطای provider به‌صورت خام ثبت نمی‌شوند. نگهداری پیش‌فرض ۱۴ روز است و از تنظیمات بین ۱ تا ۹۰ روز قابل تغییر است.
+
 == Installation ==
 1. فایل های افزونه را در مسیر `/wp-content/plugins/pinova` آپلود کنید، یا از صفحه افزونه های وردپرس افزونه را مستقیم نصب کنید
 1. افزونه را از منو افزونه ها فعال کنید
@@ -97,6 +101,14 @@ License URI: https://www.gnu.org/licenses/gpl-3.0.html
 4. ایمیل کد تایید
 
 == Changelog ==
+= 1.2.4 =
+* افزودن logger سازگار با PSR-3 و جدول مستقل گزارش‌های عملیاتی
+* افزودن صفحه مدیریت گزارش‌ها با capability، nonce، فیلتر سطح، صفحه‌بندی و پاک‌سازی امن
+* افزودن Correlation ID به پاسخ‌های REST برای عیب‌یابی قابل ردیابی
+* جلوگیری از ثبت OTP، password، token، شناسهٔ خام، متن exception و stack trace با context allowlist‌شده
+* افزودن fingerprint کلیددار برای شناسه‌ها، retention روزانهٔ ۱ تا ۹۰ روز و Debug زمان‌دار
+* ثبت رخدادهای مهم authentication، OTP، channel، identity conflict، rate limit، block و export بدون log amplification
+* افزودن fallback امن به logger ووکامرس یا PHP error log در صورت در دسترس نبودن جدول اختصاصی
 = 1.2.3 =
 * امن‌سازی خروجی Excel و VCF با capability، nonce، escaping و سقف ۱۰هزار کاربر
 * محدودکردن داده‌های ساخت مشتری ووکامرس به فیلدهای مجاز billing و shipping

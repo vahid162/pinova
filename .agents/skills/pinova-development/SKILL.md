@@ -15,6 +15,7 @@ Work from a repository checkout or disposable worktree, never from an installed 
 2. Read the references needed for the task:
    - [`references/project-map.md`](references/project-map.md) for architecture, legacy identifier behavior, persistence, and source routing.
    - [`references/quality-and-release.md`](references/quality-and-release.md) for CI, tests, packaging, staging, and releases.
+   - [`references/logging.md`](references/logging.md) for structured events, privacy, retention, diagnostics, correlation IDs, and operational review.
    - If identity migration documentation exists on the active 1.3 development branch, read it completely before migration, merge, resume, or rollback work.
 3. Classify the request as read-only review, diagnosis, implementation, migration, release, or production deployment. Permission for one class does not authorize another.
 4. Preserve unrelated changes. Never clean, reset, overwrite, migrate, publish, or deploy to simplify inspection.
@@ -33,6 +34,8 @@ Work from a repository checkout or disposable worktree, never from an installed 
 - Release ZIPs require the repository-pinned Composer 2.10.3. `tools/build.sh` must fail on a different Composer version, export `TZ=UTC`, and normalize staged directories/files to `0755`/`0644`, because Composer-generated autoload formatting, ZIP DOS timestamps, and checkout umasks otherwise vary across build hosts.
 - Integration tests must load the configured WooCommerce checkout before Pinova and exercise real WooCommerce classes. Forward `PINOVA_TEST_HPOS=yes|no` into `tests-cli`; the bootstrap must set the HPOS option in the PHPUnit database, not the separate development database. The disposable `tests-cli` container also needs `pdo_mysql` because Pinova's Illuminate database layer uses PDO even when WordPress itself uses mysqli. When installing it through in-container `sudo`, pass `PHP_INI_DIR=/usr/local/etc/php` explicitly because sudo does not preserve that image environment variable.
 - Never log raw identifiers, OTPs, passwords, reset keys, tokens, or full proxy headers. Use IDs, masked values, event types, and correlation IDs.
+- Runtime logs use stable event codes and the PSR-3 levels through `Pinova\Logging\Logger`. Context is deny-by-default: add a documented allowlist key or keyed fingerprint instead of arbitrary prose. Never persist exception messages or traces. Debug requires an expiring diagnostic window; normal retention is bounded and cleanup is batched.
+- Logging is permanent plugin infrastructure, but individual records are temporary operational data. A logging failure must never interrupt login, OTP, REST, export, or another user request. Repeated attacker-controlled failures must be transition-logged or otherwise throttled to prevent log amplification.
 - Trust only `REMOTE_ADDR` by default. Proxy headers require an immediate peer in an explicitly configured trusted CIDR.
 
 ## Workflows
@@ -45,14 +48,15 @@ Work from a repository checkout or disposable worktree, never from an installed 
 
 ### Change code
 
-1. Branch from the exact affected ref in a separate worktree; do not develop in `/www/wwwroot/gpante.com/wp-content/plugins/pinova`.
+1. Branch from the exact affected ref in a separate worktree; do not develop in `<production-wordpress-root>/wp-content/plugins/pinova`, and do not hard-code the real host path in public documentation.
 2. Add a regression test when practical. Authentication, identifier, database, exports, proxy, redirect, and WooCommerce ownership changes require integration coverage.
 3. Make the smallest coherent change and preserve the REST envelope `{success,message,data}` where compatibility requires it.
 4. For mobile profile changes, store the normalized value in physical `pinova_mobile` meta, validate ownership/conflicts, and keep `user_login` immutable.
-5. Run targeted checks and the proportional suite in the quality reference.
-6. Update public documentation and changelog when behavior changes.
-7. Meaningfully update this `SKILL.md` in the same change set whenever runtime code, schema, dependencies, tests, tooling, CI, commands, integrations, or release behavior changes.
-8. Run `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree` before handoff.
+5. For logging changes, update the event catalogue and privacy allowlist in `references/logging.md`, add a no-secret regression test, and exercise schema upgrade plus retention cleanup.
+6. Run targeted checks and the proportional suite in the quality reference.
+7. Update public documentation and changelog when behavior changes.
+8. Meaningfully update this `SKILL.md` in the same change set whenever runtime code, schema, dependencies, tests, tooling, CI, commands, integrations, or release behavior changes.
+9. Run `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree` before handoff.
 
 ### Migrate or merge identities
 
@@ -67,7 +71,7 @@ Work from a repository checkout or disposable worktree, never from an installed 
 - Release candidates remain pre-releases until staging and canary gates pass. Stable/latest publication needs explicit authorization.
 - Build twice from the exact tag, compare SHA-256, publish the installable ZIP, download it again, and verify checksum, integrity, and top-level `pinova/`.
 - Automated pre-release publication starts only after a successful `Quality` run on an exact `publish/vX.Y.Z-rcN` branch. The publisher validates the plugin version, creates an annotated immutable tag, builds twice, attaches the ZIP and checksum, and redownloads the published asset. Never create that branch until the intended commit is already reviewed and green on `main`.
-- GitHub publication never authorizes installation, configuration changes, or database writes on `gpante.com`.
+- GitHub publication never authorizes installation, configuration changes, or database writes on the production site.
 
 ## Documentation synchronization gate
 

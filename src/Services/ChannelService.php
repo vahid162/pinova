@@ -10,6 +10,7 @@ use Pinova\Channels\Email;
 use Pinova\Channels\SMS;
 use Pinova\Exceptions\SendOTPException;
 use Pinova\Models\OTP;
+use Pinova\Logging\Logger;
 use Pinova\Objects\Identifier;
 
 class ChannelService {
@@ -29,6 +30,17 @@ class ChannelService {
 				try {
 					$success = self::send_channel( $channel, $identifier, $code );
 				} catch ( \Throwable $e ) {
+					Logger::instance()->warning(
+						'otp.channel_send_failed',
+						[
+							'user_id'                => $otp->user_id,
+							'otp_type'               => $otp->type,
+							'channel'                => $channel,
+							'identifier_type'        => $identifier->get_type(),
+							'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
+							'exception'              => $e,
+						]
+					);
 					do_action( 'pinova/channel_send_failed', sanitize_key( (string) $channel ) );
 				}
 

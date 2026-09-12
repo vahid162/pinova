@@ -3,6 +3,8 @@
     <description>WordPress coding standards for Pinova.</description>
     <file>src/Exceptions/RateLimitException.php</file>
     <file>src/Helpers/IP.php</file>
+    <file>src/Logging</file>
+    <file>src/Admin/Logs.php</file>
     <file>src/Services/RateLimitService.php</file>
     <exclude-pattern>vendor/*</exclude-pattern>
     <arg name="extensions" value="php"/>

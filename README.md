@@ -107,7 +107,7 @@ composer audit
 ```bash
 npm run env:configure
 npm run env:start -- --update
-npx wp-env run tests-cli sudo docker-php-ext-install pdo_mysql
+npx wp-env run tests-cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
 PINOVA_TEST_HPOS=no npm run test:integration
 PINOVA_TEST_HPOS=yes npm run test:integration
 npm run env:stop
@@ -130,6 +130,8 @@ sha256sum .build/pinova-<version>.zip
 ```
 
 برای release، ZIP از exact tag دو بار ساخته می‌شود و SHA-256 هر دو build باید یکسان باشد. سپس asset منتشرشده دوباره از GitHub دانلود و کنترل می‌شود.
+
+پیش‌انتشار GitHub فقط از branch کنترل‌شده‌ای مانند `publish/v1.2.3-rc2` انجام می‌شود. این branch باید از commit دقیق، بازبینی‌شده و سبزِ `main` ساخته شود. پس از سبزشدن workflow اصلی، workflow انتشار نسخه را تطبیق می‌دهد، tag حاشیه‌نویسی‌شده و تغییرناپذیر می‌سازد، build را دوبار مقایسه می‌کند، ZIP و checksum را به Release پیوست می‌کند و asset منتشرشده را دوباره دانلود و راستی‌آزمایی می‌کند.
 
 ## فرایند اصلاح باگ
 

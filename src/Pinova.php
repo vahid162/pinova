@@ -4,6 +4,7 @@ namespace Pinova;
 
 use Pinova\Admin\Menu;
 use Pinova\Admin\Settings;
+use Pinova\Logging\LogRepository;
 use Pinova\Services\APIService;
 use Pinova\Services\RateLimitService;
 use Pinova\Services\SMSService;
@@ -41,6 +42,7 @@ class Pinova {
 		add_action( 'init', [ $this, 'register_rewrite_rules' ] );
 		add_action( 'init', [ $this, 'schedule_cleanup' ] );
 		add_action( 'pinova_rate_limit_cleanup', [ RateLimitService::class, 'cleanup' ] );
+		add_action( 'pinova_logging_cleanup', [ $this, 'cleanup_logs' ] );
 		add_action( 'template_redirect', [ $this, 'handle_urls' ] );
 		add_filter( 'logout_url', [ $this, 'logout_url' ], 10, 2 );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin' ] );
@@ -51,6 +53,14 @@ class Pinova {
 		if ( ! wp_next_scheduled( 'pinova_rate_limit_cleanup' ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'pinova_rate_limit_cleanup' );
 		}
+
+		if ( ! wp_next_scheduled( 'pinova_logging_cleanup' ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'pinova_logging_cleanup' );
+		}
+	}
+
+	public function cleanup_logs(): void {
+		LogRepository::cleanup();
 	}
 
 	public function register_rewrite_rules(): void {

@@ -53,6 +53,7 @@ class Install extends \Nabik\Utils\V1\Install {
 
 		$charset_collate = $wpdb->get_charset_collate();
 		$rate_limits     = $wpdb->prefix . 'pinova_rate_limits';
+		$logs            = $wpdb->prefix . 'pinova_logs';
 
 		dbDelta(
 			"CREATE TABLE {$rate_limits} (
@@ -64,6 +65,23 @@ class Install extends \Nabik\Utils\V1\Install {
 				PRIMARY KEY  (bucket_key),
 				KEY reset_at (reset_at),
 				KEY scope_reset (scope, reset_at)
+			) {$charset_collate};"
+		);
+
+		dbDelta(
+			"CREATE TABLE {$logs} (
+				id bigint unsigned NOT NULL AUTO_INCREMENT,
+				created_at datetime NOT NULL,
+				level varchar(12) NOT NULL,
+				event varchar(100) NOT NULL,
+				correlation_id varchar(64) NOT NULL,
+				user_id bigint unsigned NULL,
+				context longtext NOT NULL,
+				PRIMARY KEY  (id),
+				KEY created_at (created_at),
+				KEY level_created (level, created_at),
+				KEY event_created (event, created_at),
+				KEY correlation_id (correlation_id)
 			) {$charset_collate};"
 		);
 	}

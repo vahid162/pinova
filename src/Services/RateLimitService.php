@@ -3,6 +3,7 @@
 namespace Pinova\Services;
 
 use Pinova\Exceptions\RateLimitException;
+use Pinova\Logging\Logger;
 
 class RateLimitService {
 
@@ -53,6 +54,20 @@ class RateLimitService {
 
 		if ( $row && (int) $row->hits > $limit ) {
 			$retry_after = max( 1, strtotime( $row->reset_at . ' UTC' ) - $now );
+
+			// Record the transition into a blocked state once per window. Logging
+			// every rejected request would let an attacker amplify the log table.
+			if ( (int) $row->hits === $limit + 1 ) {
+				Logger::instance()->warning(
+					'security.rate_limited',
+					[
+						'scope'               => $scope,
+						'subject_fingerprint' => Logger::instance()->fingerprint( $subject, 'rate_limit_subject' ),
+						'attempts'            => (int) $row->hits,
+						'retry_after'         => $retry_after,
+					]
+				);
+			}
 			throw new RateLimitException( $retry_after );
 		}
 	}

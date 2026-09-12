@@ -11,6 +11,8 @@ Read this reference when locating code, reviewing authentication or identifiers,
 - `src/Integrations/Wordpress/`: profiles, users list, export authorization, Excel, and VCF.
 - `src/Integrations/Woocommerce/`: login/account/checkout and constrained customer creation.
 - `src/Helpers/IP.php`: client-address and trusted-proxy handling.
+- `src/Logging/`: PSR-3 logger, safe-context allowlist, database handler, retention repository, and fallback handling.
+- `src/Admin/Logs.php`: capability-protected operational log viewer and manual clear action.
 - `src/Install.php`, `src/Version.php`, and `utils/`: additive schema, upgrades, settings, and compatibility helpers.
 - `templates/` and `assets/`: login interface.
 - `tests/`: unit, plugin-load, and security integration coverage.
@@ -25,11 +27,12 @@ A valid physical `pinova_mobile` value is an explicit login-mobile override. It 
 
 Resolution returns a User ID only when the candidate is unambiguous. Multiple legacy accounts matching one mobile return no user and fire `pinova/identity_conflict_detected`. Resolving that conflict and merging ownership is deferred to the reviewed 1.3 workflow.
 
-## Data tables in 1.2.3
+## Data tables in the 1.2.x line
 
 - `pinova_otp`: OTP attempts, channels, expiry, and verification.
 - `pinova_blocks`: temporary or permanent blocked identifiers.
 - `pinova_rate_limits`: atomic hashed rate-limit buckets.
+- `pinova_logs` (1.2.4+): temporary structured operational events, correlation IDs, optional User IDs, and allowlisted JSON context.
 
 Schema changes must be additive and `dbDelta()` compatible. Never alter/drop columns or indexes in `wp_users` or other core tables.
 
@@ -41,4 +44,5 @@ Schema changes must be additive and `dbDelta()` compatible. Never alter/drop col
 - Public password/forgot/OTP responses do not expose account existence or native-only role membership.
 - Native administrator password/2FA login remains available through `wp-login.php` according to policy.
 - Rate limits hash identifiers and return HTTP 429 with `Retry-After`.
+- Logs retain stable codes, keyed identifier fingerprints, and bounded context—not raw identifiers, secrets, exception messages, or traces. REST responses include `X-Pinova-Correlation-ID` for support correlation.
 - Proxy chains are considered only behind trusted CIDRs.

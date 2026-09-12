@@ -2,6 +2,7 @@
 
 namespace Pinova\API;
 
+use Pinova\Logging\Logger;
 use WP_REST_Request;
 use WP_REST_Response;
 use WP_Error;
@@ -45,6 +46,8 @@ abstract class RestAPI {
 		foreach ( $headers as $name => $value ) {
 			$response->header( sanitize_key( (string) $name ), (string) $value );
 		}
+
+		$response->header( 'X-Pinova-Correlation-ID', Logger::instance()->correlation_id() );
 
 		return $response;
 	}

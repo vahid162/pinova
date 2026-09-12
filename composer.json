@@ -10,7 +10,8 @@
     "giggsey/libphonenumber-for-php-lite": "^9.0.30",
     "hekmatinasser/verta": "^9.0",
     "illuminate/database": "^8.83.27",
-    "phpoffice/phpspreadsheet": "^3.10.7"
+    "phpoffice/phpspreadsheet": "^3.10.7",
+    "psr/log": "^1.1 || ^2.0 || ^3.0"
   },
   "require-dev": {
     "phpstan/phpstan": "^2.1",

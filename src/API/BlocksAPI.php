@@ -6,6 +6,7 @@ namespace Pinova\API;
 use Illuminate\Database\Eloquent\Builder;
 use Pinova\Helper;
 use Pinova\Helpers\IP;
+use Pinova\Logging\Logger;
 use Pinova\Models\Block;
 use Pinova\Objects\Identifier;
 use WP_REST_Request;
@@ -233,6 +234,19 @@ class BlocksAPI extends RestAPI {
 			'blocked_until' => $blocked_until,
 		] );
 
+		$log_identifier = new Identifier( $identifier );
+		$log_type       = IP::is_valid( $identifier ) ? 'ip' : $log_identifier->get_type();
+		Logger::instance()->notice(
+			'security.block_added',
+			[
+				'user_id'                => get_current_user_id(),
+				'resource_id'            => $block->id,
+				'identifier_type'        => $log_type,
+				'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier, $log_type ),
+				'status'                 => null === $blocked_until ? 'permanent' : 'temporary',
+			]
+		);
+
 		return self::response( true, sprintf( 'شناسه %s با موفقیت مسدود شد.', $identifier ), [
 			'block_id' => $block->id,
 			'blocks'   => $this->blocks(),
@@ -258,7 +272,21 @@ class BlocksAPI extends RestAPI {
 			], 403 );
 		}
 
+		$identifier = (string) $block->identifier;
+		$block_id   = (int) $block->id;
 		$block->delete();
+
+		$log_identifier = new Identifier( $identifier );
+		$log_type       = IP::is_valid( $identifier ) ? 'ip' : $log_identifier->get_type();
+		Logger::instance()->notice(
+			'security.block_removed',
+			[
+				'user_id'                => get_current_user_id(),
+				'resource_id'            => $block_id,
+				'identifier_type'        => $log_type,
+				'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier, $log_type ),
+			]
+		);
 
 		return self::response( true, 'شناسه با موفقیت رفع مسدودی شد.', [
 			'blocks' => $this->blocks(),

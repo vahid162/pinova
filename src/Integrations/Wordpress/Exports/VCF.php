@@ -3,6 +3,7 @@
 namespace Pinova\Integrations\Wordpress\Exports;
 
 use Pinova\Integrations\Wordpress\ExportUsers;
+use Pinova\Logging\Logger;
 use Pinova\Objects\Mobile;
 use Pinova\Services\UserService;
 use WP_User;
@@ -25,8 +26,26 @@ class VCF {
 		check_admin_referer( self::NONCE_ACTION );
 
 		try {
-			$this->output( $this->generate( ExportUsers::get_users() ) );
+			$users    = ExportUsers::get_users();
+			$contents = $this->generate( $users );
+			Logger::instance()->notice(
+				'user.export_generated',
+				[
+					'user_id'   => get_current_user_id(),
+					'operation' => 'vcf',
+					'count'     => count( $users ),
+				]
+			);
+			$this->output( $contents );
 		} catch ( \RuntimeException $e ) {
+			Logger::instance()->error(
+				'user.export_failed',
+				[
+					'user_id'   => get_current_user_id(),
+					'operation' => 'vcf',
+					'exception' => $e,
+				]
+			);
 			wp_die( esc_html( $e->getMessage() ) );
 		}
 

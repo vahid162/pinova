@@ -4,6 +4,7 @@ namespace Pinova\Admin;
 
 use Pinova\Services\SMSService;
 use Pinova\Services\UserService;
+use Psr\Log\LogLevel;
 
 class Settings extends \Nabik\Utils\V1\Settings {
 
@@ -58,6 +59,10 @@ class Settings extends \Nabik\Utils\V1\Settings {
 			[
 				'id'    => 'pinova_design',
 				'title' => 'ظاهر',
+			],
+			[
+				'id'    => 'pinova_logging',
+				'title' => 'گزارش‌ها',
 			],
 			[
 				'id'    => 'pinova_advanced',
@@ -207,6 +212,38 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'label' => 'لوگو',
 				],
 			],
+			'pinova_logging'    => [
+				[
+					'id'                => 'minimum_level',
+					'label'             => 'حداقل سطح ثبت',
+					'type'              => 'select',
+					'options'           => [
+						LogLevel::INFO    => 'Info و بالاتر',
+						LogLevel::NOTICE  => 'Notice و بالاتر',
+						LogLevel::WARNING => 'Warning و بالاتر (پیشنهادی)',
+						LogLevel::ERROR   => 'Error و بالاتر',
+					],
+					'default'           => LogLevel::WARNING,
+					'desc'              => 'سطح Debug از این گزینه فعال نمی‌شود و فقط پنجرهٔ تشخیصی زمان‌دار می‌تواند آن را موقتاً فعال کند.',
+					'sanitize_callback' => [ self::class, 'sanitize_log_level' ],
+				],
+				[
+					'id'                => 'retention_days',
+					'label'             => 'مدت نگهداری',
+					'type'              => 'number',
+					'default'           => 14,
+					'desc'              => 'تعداد روز نگهداری گزارش‌ها، بین ۱ تا ۹۰ روز. پاک‌سازی به‌صورت روزانه و batch انجام می‌شود.',
+					'sanitize_callback' => [ self::class, 'sanitize_log_retention' ],
+				],
+				[
+					'id'                => 'diagnostic_until',
+					'label'             => 'پنجرهٔ Debug',
+					'type'              => 'diagnostic_window',
+					'default'           => 0,
+					'desc'              => 'Debug به‌طور خودکار در زمان تعیین‌شده منقضی می‌شود و هیچ‌گاه OTP، رمز، token یا شناسهٔ خام را ثبت نمی‌کند.',
+					'sanitize_callback' => [ self::class, 'sanitize_diagnostic_window' ],
+				],
+			],
 			'pinova_advanced'   => [
 				[
 					'id'    => 'pinova_mobile',
@@ -327,6 +364,46 @@ class Settings extends \Nabik\Utils\V1\Settings {
 		}
 
 		return implode( "\n", array_values( array_unique( $valid ) ) );
+	}
+
+	public static function sanitize_log_level( $level ): string {
+		$level = strtolower( sanitize_key( (string) $level ) );
+
+		return in_array( $level, [ LogLevel::INFO, LogLevel::NOTICE, LogLevel::WARNING, LogLevel::ERROR ], true )
+			? $level
+			: LogLevel::WARNING;
+	}
+
+	public static function sanitize_log_retention( $days ): int {
+		return max( 1, min( 90, absint( $days ) ) );
+	}
+
+	public static function sanitize_diagnostic_window( $seconds ): int {
+		$seconds = absint( $seconds );
+
+		return in_array( $seconds, [ 900, 3600, DAY_IN_SECONDS ], true ) ? time() + $seconds : 0;
+	}
+
+	public function callback_diagnostic_window( array $args ): void {
+		$options = get_option( $args['section'], [] );
+		$until   = isset( $options[ $args['id'] ] ) ? (int) $options[ $args['id'] ] : 0;
+		$name    = sprintf( '%s[%s]', $args['section'], $args['id'] );
+		?>
+		<select name="<?php echo esc_attr( $name ); ?>" id="<?php echo esc_attr( $name ); ?>">
+			<option value="0"><?php esc_html_e( 'خاموش', 'pinova' ); ?></option>
+			<option value="900"><?php esc_html_e( 'فعال برای ۱۵ دقیقه', 'pinova' ); ?></option>
+			<option value="3600"><?php esc_html_e( 'فعال برای یک ساعت', 'pinova' ); ?></option>
+			<option value="86400"><?php esc_html_e( 'فعال برای ۲۴ ساعت', 'pinova' ); ?></option>
+		</select>
+		<?php if ( $until > time() ) : ?>
+			<p class="description">
+				<?php echo esc_html( sprintf( __( 'Debug تا %s فعال است. ذخیره با مقدار «خاموش»، پنجره را متوقف می‌کند.', 'pinova' ), wp_date( 'Y-m-d H:i:s', $until ) ) ); ?>
+			</p>
+		<?php endif; ?>
+		<?php if ( ! empty( $args['desc'] ) ) : ?>
+			<p class="description"><?php echo wp_kses_post( $args['desc'] ); ?></p>
+		<?php endif; ?>
+		<?php
 	}
 
 	public static function render_field( array $field, string $section ): string {

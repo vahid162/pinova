@@ -4,6 +4,7 @@ namespace Pinova\Services;
 
 use Exception;
 use Pinova\Helpers\JWT;
+use Pinova\Logging\Logger;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
 use Pinova\Objects\Mobile;
@@ -44,6 +45,14 @@ class UserService {
 		}
 
 		if ( count( $candidate_ids ) > 1 ) {
+			Logger::instance()->warning(
+				'identity.mobile_conflict',
+				[
+					'identifier_type'        => 'mobile',
+					'identifier_fingerprint' => Logger::instance()->fingerprint( $mobile->get_formatted(), 'mobile' ),
+					'candidate_count'        => count( $candidate_ids ),
+				]
+			);
 			do_action( 'pinova/identity_conflict_detected', 'mobile', $candidate_ids );
 		}
 
@@ -156,20 +165,30 @@ class UserService {
 	}
 
 	public static function match( Identifier $identifier ): ?int {
-
+		$user_id = null;
 		if ( $identifier->is_email() ) {
-			return UserService::get_by_email( $identifier->get_value() );
+			$user_id = UserService::get_by_email( $identifier->get_value() );
 		}
 
 		if ( $identifier->is_mobile() ) {
-			return UserService::get_by_mobile( $identifier->get_value() );
+			$user_id = UserService::get_by_mobile( $identifier->get_value() );
 		}
 
 		if ( $identifier->is_username() ) {
-			return UserService::get_by_username( $identifier->get_value() );
+			$user_id = UserService::get_by_username( $identifier->get_value() );
 		}
 
-		return null;
+		Logger::instance()->debug(
+			'identity.resolved',
+			[
+				'user_id'                => $user_id,
+				'identifier_type'        => $identifier->get_type(),
+				'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
+				'result'                 => $user_id ? 'matched' : 'unmatched',
+			]
+		);
+
+		return $user_id;
 	}
 
 	public static function update_username( int $user_id, string $username ): bool {
@@ -196,6 +215,13 @@ class UserService {
 		}
 
 		do_action( 'pinova/user_logged_in', $user_id );
+		Logger::instance()->info(
+			'auth.session_created',
+			[
+				'user_id'     => $user_id,
+				'auth_method' => $login_method ?: 'unknown',
+			]
+		);
 	}
 
 	/**
@@ -230,6 +256,7 @@ class UserService {
 		wp_logout();
 
 		do_action( 'pinova/user_logged_out', $user_id );
+		Logger::instance()->info( 'auth.session_destroyed', [ 'user_id' => $user_id ] );
 	}
 
 	/**
@@ -297,6 +324,14 @@ class UserService {
 		] );
 
 		do_action( 'pinova/user_registered', $user_id );
+		Logger::instance()->notice(
+			'user.registered',
+			[
+				'user_id'        => $user_id,
+				'identifier_type' => 'mobile',
+				'auth_method'     => 'otp',
+			]
+		);
 
 		return $user_id;
 	}

@@ -15,28 +15,32 @@ Before substantive work:
 ## Current project snapshot
 
 - Repository: `https://github.com/vahid162/pinova`
-- Pinova 1.2.3 RC2 regression hardening was merged by PR #2 at `45f9d516`; verify the current `main` SHA before relying on it.
+- `main` is currently `2399eb22f051d24bf9d749a98c2936713ef75a3c`; it includes the 1.2.3 RC2 regression hardening and the reproducible-release correction merged by PR #4.
 - RC2 source branch: `release/v1.2.3-rc2-prep`.
-- Existing pre-releases: `v1.2.3-rc1` at `ce9dc0d`, `v1.2.3-rc2` at `a4600eb5`, and `v1.3.0-rc1` at `93409a6`; none is stable/latest.
+- Existing pre-releases: `v1.2.3-rc1` at `ce9dc0d`, `v1.2.3-rc2` at `a4600eb5`, `v1.2.3-rc3` at `2399eb2`, and `v1.3.0-rc1` at `93409a6`; none is stable/latest.
 - The RC1 1.2.3 asset predates later PHP 8.1 dependency, CI matrix, PHP 8.5, and reproducible-build changes. Do not relabel or overwrite it.
-- RC2 is installable and independently verified, but comparison across build hosts exposed Composer-version, timezone, and file-mode variance. Keep its tag immutable; RC3 pins Composer 2.10.3, UTC, and staged permissions rather than replacing RC2.
+- RC3 is the current verified, installable 1.2.3 pre-release. It pins Composer 2.10.3, UTC, and staged permissions; keep all prior RC tags immutable.
 - Post-merge main CI was green for PHP 8.1–8.5 and all configured WordPress/WooCommerce/HPOS pairs.
+- Structured persistent logging is being developed as 1.2.4 on `feature/structured-logging`; it is not released or installed on production until reviewed, merged, packaged, and separately authorized.
+- A task-specific logging worktree, Node toolchain, and uniquely named wp-env project are retained on the development host. Discover their current paths, ports, container state, and volumes with read-only commands before acting; do not publish host-local coordinates in this public repository. The stored test database has the final 1.2.4 ZIP as slug `pinova`, the source mount inactive, WooCommerce 10.7.0 active, and logging defaults restored to `warning`/14 days/debug off.
+- An earlier RC2 wp-env project and worktree are separately preserved. Never use, stop, update, or remove their containers, volumes, database, or ports for 1.2.4 work. Identify ownership from the project labels and task handoff rather than assuming a directory name.
 - The separate 1.3 development branch is `security/v1.2.3-v1.3.0`. Its identity schema/migration/merge features are not shipped by main 1.2.3.
 
 Verify all facts before acting and update this section whenever lineage, release, compatibility, blocker, or milestone changes.
 
 ## Next expected milestones
 
-1. Keep the reviewed RC2 regression fixes, release automation, and cross-host reproducibility correction green on `main` without touching production.
-2. Publish RC3 from the exact reviewed commit through `publish/v1.2.3-rc3`; never move or overwrite RC2.
-3. Verify the immutable RC3 tag, Release assets, checksum, and installable top-level `pinova/` on GitHub and against a separate local build using the pinned toolchain.
-4. Stop. Installation on `gpante.com` is a separate production operation requiring fresh backup/rollback controls and explicit authorization at execution time.
-5. After the 1.2.3 canary, merge current `main` into the 1.3 development line, resolve drift, retest identity migration, and create a new reviewed 1.3 RC rather than reusing `v1.3.0-rc1`.
+1. Review and test the 1.2.4 structured-logging change without touching production or any preserved test environment.
+2. Merge only after PHP, integration, privacy, retention, upgrade, and installable-ZIP gates pass.
+3. If requested, create a new immutable 1.2.4 release candidate from the exact reviewed commit; never move or overwrite any 1.2.3 RC.
+4. Stop. Installation on the production site is a separate operation requiring fresh backup/rollback controls and explicit authorization at execution time.
+5. After the 1.2.x canary, merge current `main` into the 1.3 development line, resolve drift, retest identity migration, and create a new reviewed 1.3 RC rather than reusing `v1.3.0-rc1`.
 
 ## Source routing
 
 - Bootstrap/upgrades: `pinova.php`, `src/Install.php`, `src/Version.php`, `utils/`.
 - REST/authentication: `src/API/`, `src/Services/`, `src/Objects/`.
+- Structured logging: `src/Logging/`, `src/Admin/Logs.php`, and `.agents/skills/pinova-development/references/logging.md`.
 - WordPress profiles/exports: `src/Integrations/Wordpress/`.
 - WooCommerce: `src/Integrations/Woocommerce/`.
 - Login UI: `templates/`, `assets/`.
@@ -58,9 +62,11 @@ Verify all facts before acting and update this section whenever lineage, release
 
 ## Production boundary
 
-The known gpante production path is `/www/wwwroot/gpante.com/wp-content/plugins/pinova`. Treat it as read-only unless the user explicitly requests the exact production action with appropriate backup, rollback, and maintenance controls.
+Treat `<production-wordpress-root>/wp-content/plugins/pinova` as read-only unless the user explicitly requests the exact production action with appropriate backup, rollback, and maintenance controls. Resolve the real production root from the authorized host at execution time; never hard-code or publish it here.
 
-Never use the production database for development or automated tests. Never run identity apply/merge/rollback, plugin replacement, Nginx edits, or database writes merely because code development, testing, packaging, or GitHub publication was authorized.
+Never use the production database for development or automated tests. Never run identity apply/merge/rollback, plugin replacement, web-server edits, or database writes merely because code development, testing, packaging, or GitHub publication was authorized.
+
+Treat existing worktrees, wp-env projects, containers, volumes, and test databases as preserved operational assets. Do not reuse, stop, update, delete, prune, or clean an environment created by another task unless the user explicitly authorizes that exact action. Create a uniquely named disposable environment for new integration work and report whether it was retained or removed.
 
 ## Definition of done
 

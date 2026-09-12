@@ -65,6 +65,7 @@ Work from a repository checkout or disposable worktree, never from an installed 
 - Read the quality/release reference before changing versions, tags, ZIPs, workflows, or GitHub Releases.
 - Release candidates remain pre-releases until staging and canary gates pass. Stable/latest publication needs explicit authorization.
 - Build twice from the exact tag, compare SHA-256, publish the installable ZIP, download it again, and verify checksum, integrity, and top-level `pinova/`.
+- Automated pre-release publication starts only after a successful `Quality` run on an exact `publish/vX.Y.Z-rcN` branch. The publisher validates the plugin version, creates an annotated immutable tag, builds twice, attaches the ZIP and checksum, and redownloads the published asset. Never create that branch until the intended commit is already reviewed and green on `main`.
 - GitHub publication never authorizes installation, configuration changes, or database writes on `gpante.com`.
 
 ## Documentation synchronization gate

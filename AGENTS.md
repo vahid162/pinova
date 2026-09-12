@@ -15,8 +15,8 @@ Before substantive work:
 ## Current project snapshot
 
 - Repository: `https://github.com/vahid162/pinova`
-- Main after PR #1: `a3b1fab`, Pinova 1.2.3.
-- RC2 preparation: `release/v1.2.3-rc2-prep`, based exactly on that merge.
+- Pinova 1.2.3 RC2 regression hardening was merged by PR #2 at `45f9d516`; verify the current `main` SHA before relying on it.
+- RC2 source branch: `release/v1.2.3-rc2-prep`.
 - Existing pre-releases: `v1.2.3-rc1` at `ce9dc0d` and `v1.3.0-rc1` at `93409a6`; neither is stable/latest.
 - The RC1 1.2.3 asset predates later PHP 8.1 dependency, CI matrix, PHP 8.5, and reproducible-build changes. Do not relabel or overwrite it.
 - Post-merge main CI was green for PHP 8.1–8.5 and all configured WordPress/WooCommerce/HPOS pairs.
@@ -26,9 +26,9 @@ Verify all facts before acting and update this section whenever lineage, release
 
 ## Next expected milestones
 
-1. Complete the narrow RC2 regression fixes, integration tests, documentation synchronization, and local quality suite without touching production.
-2. Open and review a PR to `main`; merge only after required GitHub checks are green.
-3. Tag `v1.2.3-rc2`, reproduce the ZIP twice, publish it as a GitHub pre-release, redownload, and verify it.
+1. Keep the reviewed RC2 regression fixes and release automation green on `main` without touching production.
+2. Create `publish/v1.2.3-rc2` only from the exact reviewed `main` commit. Wait for its `Quality` run; the successful run creates the annotated tag, builds twice, publishes the GitHub pre-release, and redownloads/verifies the ZIP.
+3. Verify the immutable `v1.2.3-rc2` tag, Release assets, checksum, and installable top-level `pinova/`.
 4. Stop. Installation on `gpante.com` is a separate production operation requiring fresh backup/rollback controls and explicit authorization at execution time.
 5. After the 1.2.3 canary, merge current `main` into the 1.3 development line, resolve drift, retest identity migration, and create a new reviewed 1.3 RC rather than reusing `v1.3.0-rc1`.
 
@@ -41,7 +41,7 @@ Verify all facts before acting and update this section whenever lineage, release
 - Login UI: `templates/`, `assets/`.
 - Tests: `tests/`.
 - Reproducible package: `tools/build.sh`.
-- CI: `.github/workflows/quality.yml`.
+- CI and pre-release publication: `.github/workflows/quality.yml`, `.github/workflows/publish-prerelease.yml`.
 - Agent guidance: `.agents/skills/pinova-development/`.
 
 ## Required workflow for changes

@@ -1,0 +1,160 @@
+name: Publish pre-release
+
+on:
+  workflow_run:
+    workflows: [Quality]
+    types: [completed]
+    branches:
+      - 'publish/v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pinova-prerelease-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      RELEASE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          coverage: none
+          extensions: curl, fileinfo, gd, json, mbstring, zip
+          tools: composer:v2
+
+      - name: Validate immutable release identity
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_BRANCH#publish/}"
+          if [[ "${tag}" == "${RELEASE_BRANCH}" || ! "${tag}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-rc([1-9][0-9]*)$ ]]; then
+            echo "Release branch must match publish/vX.Y.Z-rcN" >&2
+            exit 1
+          fi
+
+          version="${BASH_REMATCH[1]}"
+          plugin_version="$(php -r '$s=file_get_contents("pinova.php"); preg_match("/Version:\\s*([0-9.]+)/", $s, $m); echo $m[1] ?? "";')"
+          if [[ "${plugin_version}" != "${version}" ]]; then
+            echo "Tag version ${version} does not match plugin version ${plugin_version}" >&2
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build twice and verify reproducibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          zip_path=".build/pinova-${version}.zip"
+          first_zip="${RUNNER_TEMP}/pinova-${version}-first.zip"
+
+          composer build
+          cp "${zip_path}" "${first_zip}"
+          composer build
+          cmp "${first_zip}" "${zip_path}"
+          unzip -tq "${zip_path}"
+          if unzip -Z1 "${zip_path}" | awk 'index($0, "pinova/") != 1 { bad = 1 } END { exit bad }'; then
+            :
+          else
+            echo "Every ZIP entry must be under pinova/" >&2
+            exit 1
+          fi
+
+          (
+            cd .build
+            sha256sum "pinova-${version}.zip" > "pinova-${version}.zip.sha256"
+          )
+
+      - name: Create immutable annotated tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release.outputs.tag }}"
+          git fetch --tags origin
+
+          if git show-ref --verify --quiet "refs/tags/${tag}"; then
+            tagged_sha="$(git rev-list -n 1 "${tag}")"
+            if [[ "${tagged_sha}" != "${RELEASE_SHA}" ]]; then
+              echo "Existing tag ${tag} points to ${tagged_sha}, not ${RELEASE_SHA}" >&2
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "${tag}" "${RELEASE_SHA}" -m "Pinova ${tag}"
+            git push origin "refs/tags/${tag}"
+          fi
+
+      - name: Publish GitHub pre-release and installable ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release.outputs.tag }}"
+          version="${{ steps.release.outputs.version }}"
+          checksum="$(cut -d' ' -f1 ".build/pinova-${version}.zip.sha256")"
+          notes="${RUNNER_TEMP}/release-notes.md"
+
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists; refusing to overwrite published assets." >&2
+            exit 1
+          fi
+
+          printf '%s\n' \
+            "## Pinova ${version} RC" \
+            "" \
+            "این نسخه یک پیش‌انتشار برای آزمون staging/canary است و هنوز stable/latest نیست." \
+            "" \
+            "- Exact commit: \`${RELEASE_SHA}\`" \
+            "- Installable asset: \`pinova-${version}.zip\`" \
+            "- SHA-256: \`${checksum}\`" \
+            "" \
+            "برای نصب از asset بالا استفاده کنید؛ فایل خودکار Source code بستهٔ نصب افزونه نیست." \
+            > "${notes}"
+
+          gh release create "${tag}" \
+            ".build/pinova-${version}.zip#Pinova ${version} installable ZIP" \
+            ".build/pinova-${version}.zip.sha256#SHA-256 checksum" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${RELEASE_SHA}" \
+            --title "Pinova ${tag}" \
+            --notes-file "${notes}" \
+            --prerelease \
+            --verify-tag
+
+      - name: Redownload and verify published asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release.outputs.tag }}"
+          version="${{ steps.release.outputs.version }}"
+          verify_dir="${RUNNER_TEMP}/published-release"
+          mkdir -p "${verify_dir}"
+
+          gh release download "${tag}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "pinova-${version}.zip*" \
+            --dir "${verify_dir}"
+          (
+            cd "${verify_dir}"
+            sha256sum -c "pinova-${version}.zip.sha256"
+            unzip -tq "pinova-${version}.zip"
+            unzip -Z1 "pinova-${version}.zip" | awk 'index($0, "pinova/") != 1 { bad = 1 } END { exit bad }'
+          )

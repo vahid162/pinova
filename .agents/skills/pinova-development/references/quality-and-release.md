@@ -51,19 +51,19 @@ Build twice from the same tagged tree and require identical SHA-256 values.
 
 1. Confirm clean tree, exact base, version metadata, changelog, locks, and guidance synchronization.
 2. Pass local checks and GitHub Actions for the exact release commit.
-3. Merge the reviewed PR, then create a new immutable annotated RC tag; never move an existing published tag.
-4. Build from a detached worktree at that tag twice and compare hashes.
-5. Create a GitHub pre-release and attach the installable ZIP with SHA-256 in its notes.
-6. Download the published asset, verify its hash/integrity/top-level directory, and remove temporary release resources.
+3. Merge the reviewed PR. Reconfirm `main` and its `Quality` run before selecting the release commit.
+4. Create `publish/vX.Y.Z-rcN` from that exact immutable commit. Its successful `Quality` run triggers `.github/workflows/publish-prerelease.yml`.
+5. The publisher validates the branch and plugin versions, builds twice at the exact SHA, compares hashes, creates a new annotated tag, and creates a GitHub pre-release with the installable ZIP and `.sha256` asset. Existing tags or releases are never moved or overwritten.
+6. The publisher redownloads both assets and verifies the hash, ZIP integrity, and top-level `pinova/`. Confirm the workflow and GitHub Release are green before reporting completion.
 7. Stop before production unless installation was separately and explicitly authorized. On staging/production, validate `/login`, `/wp-login.php`, username/email/mobile password paths, OTP, administrator native login/2FA hooks, WooCommerce, and logs.
 8. Mark stable/latest only after the agreed canary and explicit authorization.
 
 ## Current lineage snapshot
 
-- `main` / `a3b1fab`: merged Pinova 1.2.3 security line and repository guidance PR.
+- `main`: Pinova 1.2.3 security line, repository guidance, and RC2 regression hardening; PR #2 merged at `45f9d516`.
 - `v1.2.3-rc1` / `ce9dc0d`: older security pre-release; it predates later CI, dependency, and build corrections.
 - `v1.3.0-rc1` / `93409a6`: separate identity/migration pre-release.
-- RC2 preparation branch: `release/v1.2.3-rc2-prep` based on `a3b1fab`.
+- RC2 source PR: `release/v1.2.3-rc2-prep`, merged by PR #2 at `45f9d516`.
 - 1.3 development branch: `security/v1.2.3-v1.3.0`.
 
-The post-merge `main` workflow was green for PHP 8.1–8.5 and all six configured WordPress/WooCommerce/HPOS integration pairs. Re-verify refs and checks before relying on this snapshot, and update it when RC2 is merged/tagged.
+The PR #2 workflow was green for PHP 8.1–8.5 and all six configured WordPress/WooCommerce/HPOS integration pairs. Re-verify `main`, the publication workflow, refs, and Release assets before relying on this snapshot, and update it when RC2 is tagged.

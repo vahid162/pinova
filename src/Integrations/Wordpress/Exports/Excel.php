@@ -315,15 +315,6 @@ class Excel {
 
 		$sheet->setRightToLeft( true );
 
-		$sheet->getStyle( 'A:Z' )
-		      ->getAlignment()
-		      ->setReadOrder( Alignment::READORDER_RTL );
-
-		$sheet
-			->getStyle( 'A:Z' )
-			->getAlignment()
-			->setHorizontal( Alignment::HORIZONTAL_CENTER );
-
 		return $spreadsheet;
 	}
 

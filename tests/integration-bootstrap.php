@@ -13,6 +13,20 @@ require_once $_tests_dir . '/includes/functions.php';
 tests_add_filter(
 	'muplugins_loaded',
 	static function (): void {
+		$woocommerce = WP_PLUGIN_DIR . '/woocommerce/woocommerce.php';
+		if ( ! is_readable( $woocommerce ) ) {
+			throw new RuntimeException( 'WooCommerce is required by the configured Pinova integration matrix.' );
+		}
+
+		require_once $woocommerce;
+
+		$hpos = getenv( 'PINOVA_TEST_HPOS' );
+		if ( ! in_array( $hpos, [ 'yes', 'no' ], true ) ) {
+			throw new RuntimeException( 'PINOVA_TEST_HPOS must be forwarded as yes or no.' );
+		}
+
+		update_option( 'woocommerce_custom_orders_table_enabled', $hpos );
+
 		require dirname( __DIR__ ) . '/pinova.php';
 	}
 );

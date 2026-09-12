@@ -9,6 +9,17 @@ permissions:
   contents: read
 
 jobs:
+  project-guidance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require Pinova skill synchronization
+        env:
+          PINOVA_SKILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash .agents/skills/pinova-development/scripts/check-skill-sync.sh "${PINOVA_SKILL_BASE}"
+
   php:
     runs-on: ubuntu-latest
     strategy:
@@ -75,5 +86,8 @@ jobs:
           WP_VERSION: ${{ matrix.wp }}
           WC_VERSION: ${{ matrix.wc }}
       - run: npm run env:start -- --update
-      - run: npx wp-env run cli wp option update woocommerce_custom_orders_table_enabled ${{ matrix.hpos }}
+      - name: Install PDO MySQL in the disposable test container
+        run: npx wp-env run tests-cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
       - run: npm run test:integration
+        env:
+          PINOVA_TEST_HPOS: ${{ matrix.hpos }}

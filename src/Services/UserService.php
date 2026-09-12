@@ -3,7 +3,6 @@
 namespace Pinova\Services;
 
 use Exception;
-use Nabik_Net_Database;
 use Pinova\Helpers\JWT;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
@@ -29,58 +28,88 @@ class UserService {
 	 * @return int|null
 	 */
 	public static function get_by_mobile( $mobile ): ?int {
-		global $wpdb;
-
 		if ( ! is_a( $mobile, Mobile::class ) ) {
 
 			$mobile = new Mobile( $mobile );
-
-			if ( ! $mobile->is_valid() ) {
-				return null;
-			}
 		}
 
-		$possible_formats = $mobile->possible_formats();
-
-		$query = sprintf( "SELECT
-									ID 
-								FROM
-									`%s` 
-								WHERE
-									`user_login` IN ( '%s' )
-								ORDER BY `ID` 
-								LIMIT 1;",
-			$wpdb->users,
-			implode( "','", $possible_formats ) );
-
-		$user_id = intval( $wpdb->get_var( $query ) );
-
-		if ( $user_id ) {
-			return $user_id;
+		if ( ! $mobile->is_valid() ) {
+			return null;
 		}
 
-		$query = sprintf( "SELECT
-										`user_id` 
-									FROM
-										`%s` 
-									WHERE
-										`meta_key` IN ( '%s' ) 
-										AND 
-										`meta_value` IN ( '%s' )
-									ORDER BY `user_id` 
-									LIMIT 1;",
-			$wpdb->usermeta,
-			implode( "','", self::mobile_possible_meta_keys() ),
-			implode( "','", $possible_formats )
-		);
+		$candidate_ids = self::get_mobile_candidate_ids( $mobile );
 
-		$user_id = intval( $wpdb->get_var( $query ) );
+		if ( 1 === count( $candidate_ids ) ) {
+			return $candidate_ids[0];
+		}
 
-		if ( $user_id ) {
-			return $user_id;
+		if ( count( $candidate_ids ) > 1 ) {
+			do_action( 'pinova/identity_conflict_detected', 'mobile', $candidate_ids );
 		}
 
 		return null;
+	}
+
+	/**
+	 * @param string|Mobile $mobile
+	 */
+	public static function mobile_is_available_for_user( $mobile, int $user_id ): bool {
+		if ( ! is_a( $mobile, Mobile::class ) ) {
+			$mobile = new Mobile( $mobile );
+		}
+
+		if ( ! $mobile->is_valid() ) {
+			return false;
+		}
+
+		$candidate_ids = self::get_mobile_candidate_ids( $mobile );
+
+		return [] === array_values( array_diff( $candidate_ids, [ $user_id ] ) );
+	}
+
+	private static function get_mobile_candidate_ids( Mobile $mobile ): array {
+		global $wpdb;
+
+		$possible_formats = array_values( array_unique( array_map( 'strval', $mobile->possible_formats() ) ) );
+		$login_tokens     = implode( ', ', array_fill( 0, count( $possible_formats ), '%s' ) );
+		$login_query      = "SELECT `ID` FROM %i WHERE `user_login` IN ({$login_tokens}) ORDER BY `ID` LIMIT 1";
+		$login_params     = array_merge( [ $wpdb->users ], $possible_formats );
+		$login_user_id    = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The dynamic fragment contains placeholders only.
+				$login_query,
+				...$login_params
+			)
+		);
+
+		$meta_keys     = self::mobile_possible_meta_keys();
+		$key_tokens    = implode( ', ', array_fill( 0, count( $meta_keys ), '%s' ) );
+		$value_tokens  = implode( ', ', array_fill( 0, count( $possible_formats ), '%s' ) );
+		$meta_query    = "SELECT DISTINCT `user_id` FROM %i WHERE `meta_key` IN ({$key_tokens}) AND `meta_value` IN ({$value_tokens}) ORDER BY `user_id`";
+		$meta_params   = array_merge( [ $wpdb->usermeta ], $meta_keys, $possible_formats );
+		$meta_user_ids = array_map(
+			'intval',
+			(array) $wpdb->get_col(
+				$wpdb->prepare(
+					// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The dynamic fragments contain placeholders only.
+					$meta_query,
+					...$meta_params
+				)
+			)
+		);
+		$candidate_ids = array_values( array_unique( array_filter( array_merge( [ $login_user_id ], $meta_user_ids ) ) ) );
+		$candidate_ids = array_values(
+			array_filter(
+				$candidate_ids,
+				static function ( int $candidate_id ) use ( $possible_formats ): bool {
+					$explicit_mobile = self::get_persisted_mobile( $candidate_id );
+
+					return null === $explicit_mobile || in_array( $explicit_mobile, $possible_formats, true );
+				}
+			)
+		);
+
+		return $candidate_ids;
 	}
 
 	public static function get_by_username( string $username ): ?int {
@@ -100,15 +129,22 @@ class UserService {
 			return null;
 		}
 
+		$persisted_mobile = self::get_persisted_mobile( $user_id );
+
+		if ( null !== $persisted_mobile ) {
+			return $persisted_mobile;
+		}
+
 		$mobile = new Mobile( $user->user_login );
 
 		if ( $mobile->is_valid() ) {
 			return $mobile->get_formatted();
 		}
 
-		foreach ( self::mobile_possible_meta_keys() as $possible_meta_key ) {
+		foreach ( array_diff( self::mobile_possible_meta_keys(), [ 'pinova_mobile' ] ) as $possible_meta_key ) {
 
-			$mobile = new Mobile( strval( $user->get( $possible_meta_key ) ) );
+			$raw_value = get_metadata_raw( 'user', $user_id, $possible_meta_key, true );
+			$mobile    = new Mobile( is_scalar( $raw_value ) ? (string) $raw_value : '' );
 
 			if ( $mobile->is_valid() ) {
 				return $mobile->get_formatted();
@@ -137,23 +173,10 @@ class UserService {
 	}
 
 	public static function update_username( int $user_id, string $username ): bool {
+		unset( $user_id, $username );
+		_deprecated_function( __METHOD__, '1.2.3', 'update_user_meta( $user_id, "pinova_mobile", $mobile )' );
 
-		$username = sanitize_user( $username, true );
-
-		try {
-			$username_updated = (bool) Nabik_Net_Database::DB()
-			                                             ->table( 'users' )
-			                                             ->where( 'ID', $user_id )
-			                                             ->update( [ 'user_login' => $username ] );
-		} catch ( Exception $e ) {
-			return false;
-		}
-
-		if ( $username_updated ) {
-			do_action( 'pinova/username_updated', $user_id );
-		}
-
-		return $username_updated;
+		return false;
 	}
 
 	public static function login( int $user_id, ?string $login_method = null ) {
@@ -284,7 +307,8 @@ class UserService {
 		$mobile_possible_meta_keys = explode( PHP_EOL, strval( $mobile_possible_meta_keys ) );
 		$mobile_possible_meta_keys = array_map( 'trim', $mobile_possible_meta_keys );
 
-		// Digits
+		// Pinova's persisted override and legacy Digits aliases.
+		$mobile_possible_meta_keys[] = 'pinova_mobile';
 		$mobile_possible_meta_keys[] = 'digits_phone';
 		$mobile_possible_meta_keys[] = 'digits_phone_no';
 
@@ -292,7 +316,7 @@ class UserService {
 
 		$mobile_possible_meta_keys = apply_filters( 'pinova/mobile_possible_meta_keys', $mobile_possible_meta_keys );
 
-		return array_unique( array_filter( $mobile_possible_meta_keys ) );
+		return array_values( array_unique( array_filter( $mobile_possible_meta_keys ) ) );
 	}
 
 	public static function allowed_registration_roles(): array {
@@ -321,7 +345,43 @@ class UserService {
 			$allowed[ $slug ] = $role['name'];
 		}
 
-		return apply_filters( 'pinova/allowed_registration_roles', $allowed );
+		$filtered = apply_filters( 'pinova/allowed_registration_roles', $allowed );
+		$filtered = is_array( $filtered ) ? $filtered : [];
+		$safe     = [];
+
+		foreach ( $filtered as $slug => $label ) {
+			$slug = sanitize_key( (string) $slug );
+
+			if ( ! isset( wp_roles()->roles[ $slug ] ) ) {
+				continue;
+			}
+
+			$capabilities = array_keys( array_filter( (array) wp_roles()->roles[ $slug ]['capabilities'] ) );
+
+			if ( array_intersect( $denied_capabilities, $capabilities ) ) {
+				continue;
+			}
+
+			$safe[ $slug ] = sanitize_text_field( (string) $label );
+		}
+
+		return $safe;
+	}
+
+	private static function get_persisted_mobile( int $user_id ): ?string {
+		global $wpdb;
+
+		$raw_value = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT `meta_value` FROM %i WHERE `user_id` = %d AND `meta_key` = %s ORDER BY `umeta_id` DESC LIMIT 1',
+				$wpdb->usermeta,
+				$user_id,
+				'pinova_mobile'
+			)
+		);
+		$mobile    = new Mobile( is_scalar( $raw_value ) ? (string) $raw_value : '' );
+
+		return $mobile->is_valid() ? $mobile->get_formatted() : null;
 	}
 
 	/**

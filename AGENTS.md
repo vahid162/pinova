@@ -17,8 +17,9 @@ Before substantive work:
 - Repository: `https://github.com/vahid162/pinova`
 - Pinova 1.2.3 RC2 regression hardening was merged by PR #2 at `45f9d516`; verify the current `main` SHA before relying on it.
 - RC2 source branch: `release/v1.2.3-rc2-prep`.
-- Existing pre-releases: `v1.2.3-rc1` at `ce9dc0d` and `v1.3.0-rc1` at `93409a6`; neither is stable/latest.
+- Existing pre-releases: `v1.2.3-rc1` at `ce9dc0d`, `v1.2.3-rc2` at `a4600eb5`, and `v1.3.0-rc1` at `93409a6`; none is stable/latest.
 - The RC1 1.2.3 asset predates later PHP 8.1 dependency, CI matrix, PHP 8.5, and reproducible-build changes. Do not relabel or overwrite it.
+- RC2 is installable and independently verified, but comparison across build hosts exposed Composer-version, timezone, and file-mode variance. Keep its tag immutable; RC3 pins Composer 2.10.3, UTC, and staged permissions rather than replacing RC2.
 - Post-merge main CI was green for PHP 8.1–8.5 and all configured WordPress/WooCommerce/HPOS pairs.
 - The separate 1.3 development branch is `security/v1.2.3-v1.3.0`. Its identity schema/migration/merge features are not shipped by main 1.2.3.
 
@@ -26,9 +27,9 @@ Verify all facts before acting and update this section whenever lineage, release
 
 ## Next expected milestones
 
-1. Keep the reviewed RC2 regression fixes and release automation green on `main` without touching production.
-2. Create `publish/v1.2.3-rc2` only from the exact reviewed `main` commit. Wait for its `Quality` run; the successful run creates the annotated tag, builds twice, publishes the GitHub pre-release, and redownloads/verifies the ZIP.
-3. Verify the immutable `v1.2.3-rc2` tag, Release assets, checksum, and installable top-level `pinova/`.
+1. Keep the reviewed RC2 regression fixes, release automation, and cross-host reproducibility correction green on `main` without touching production.
+2. Publish RC3 from the exact reviewed commit through `publish/v1.2.3-rc3`; never move or overwrite RC2.
+3. Verify the immutable RC3 tag, Release assets, checksum, and installable top-level `pinova/` on GitHub and against a separate local build using the pinned toolchain.
 4. Stop. Installation on `gpante.com` is a separate production operation requiring fresh backup/rollback controls and explicit authorization at execution time.
 5. After the 1.2.3 canary, merge current `main` into the 1.3 development line, resolve drift, retest identity migration, and create a new reviewed 1.3 RC rather than reusing `v1.3.0-rc1`.
 

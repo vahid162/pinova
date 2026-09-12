@@ -33,7 +33,7 @@ jobs:
           php-version: ${{ matrix.php }}
           coverage: none
           extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
-          tools: composer:v2
+          tools: composer:2.10.3
       - run: composer install --no-interaction --prefer-dist
       - run: composer test
       - run: composer phpstan
@@ -75,7 +75,7 @@ jobs:
           php-version: '8.1'
           coverage: none
           extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
-          tools: composer:v2
+          tools: composer:2.10.3
       - uses: actions/setup-node@v4
         with:
           node-version: '20'

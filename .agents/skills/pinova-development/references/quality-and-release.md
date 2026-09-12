@@ -35,7 +35,7 @@ Set `WP_VERSION` and `WC_VERSION` before configuration for compatibility pairs. 
 
 ## Reproducible installable ZIP
 
-Build with `composer build`. `tools/build.sh` stages `pinova/`, installs production dependencies, removes development-only files, normalizes timestamps, sorts entries, and writes `.build/pinova-<version>.zip`.
+Build with Composer 2.10.3 using `composer build`. `tools/build.sh` rejects other Composer versions, exports `TZ=UTC`, stages `pinova/`, installs production dependencies, removes development-only files, normalizes directory/file modes to `0755`/`0644`, normalizes timestamps, sorts entries, and writes `.build/pinova-<version>.zip`. Pinning Composer, timezone, and file modes is required: Composer versions can format generated autoload files differently, while ZIP records DOS timestamps and Unix permissions from the build host.
 
 The ZIP must exclude `.git`, `.github`, `.agents`, `AGENTS.md`, caches, `node_modules`, tests, tools, and development Composer packages. Validate with:
 
@@ -53,7 +53,7 @@ Build twice from the same tagged tree and require identical SHA-256 values.
 2. Pass local checks and GitHub Actions for the exact release commit.
 3. Merge the reviewed PR. Reconfirm `main` and its `Quality` run before selecting the release commit.
 4. Create `publish/vX.Y.Z-rcN` from that exact immutable commit. Its successful `Quality` run triggers `.github/workflows/publish-prerelease.yml`.
-5. The publisher validates the branch and plugin versions, builds twice at the exact SHA, compares hashes, creates a new annotated tag, and creates a GitHub pre-release with the installable ZIP and `.sha256` asset. Existing tags or releases are never moved or overwritten.
+5. The publisher validates the branch and plugin versions, builds twice at the exact SHA under deliberately different timezone/umask inputs, compares hashes, creates a new annotated tag, and creates a GitHub pre-release with the installable ZIP and `.sha256` asset. Existing tags or releases are never moved or overwritten.
 6. The publisher redownloads both assets and verifies the hash, ZIP integrity, and top-level `pinova/`. Confirm the workflow and GitHub Release are green before reporting completion.
 7. Stop before production unless installation was separately and explicitly authorized. On staging/production, validate `/login`, `/wp-login.php`, username/email/mobile password paths, OTP, administrator native login/2FA hooks, WooCommerce, and logs.
 8. Mark stable/latest only after the agreed canary and explicit authorization.
@@ -62,8 +62,10 @@ Build twice from the same tagged tree and require identical SHA-256 values.
 
 - `main`: Pinova 1.2.3 security line, repository guidance, and RC2 regression hardening; PR #2 merged at `45f9d516`.
 - `v1.2.3-rc1` / `ce9dc0d`: older security pre-release; it predates later CI, dependency, and build corrections.
+- `v1.2.3-rc2` / `a4600eb5`: verified installable pre-release, retained immutably; its build was repeatable on GitHub but exposed unpinned Composer/timezone/file-mode variance across hosts.
 - `v1.3.0-rc1` / `93409a6`: separate identity/migration pre-release.
 - RC2 source PR: `release/v1.2.3-rc2-prep`, merged by PR #2 at `45f9d516`.
+- RC3 preparation fixes cross-host release reproducibility without changing runtime behavior.
 - 1.3 development branch: `security/v1.2.3-v1.3.0`.
 
-The PR #2 workflow was green for PHP 8.1–8.5 and all six configured WordPress/WooCommerce/HPOS integration pairs. Re-verify `main`, the publication workflow, refs, and Release assets before relying on this snapshot, and update it when RC2 is tagged.
+RC2 and its publication workflow were green, and its published ZIP passed checksum, integrity, and top-level checks. Re-verify `main`, the publication workflow, refs, and Release assets before relying on this snapshot, and update it when RC3 is tagged.

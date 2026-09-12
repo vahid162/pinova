@@ -35,7 +35,7 @@ jobs:
           php-version: '8.1'
           coverage: none
           extensions: curl, fileinfo, gd, json, mbstring, zip
-          tools: composer:v2
+          tools: composer:2.10.3
 
       - name: Validate immutable release identity
         id: release
@@ -66,9 +66,11 @@ jobs:
           zip_path=".build/pinova-${version}.zip"
           first_zip="${RUNNER_TEMP}/pinova-${version}-first.zip"
 
-          composer build
+          umask 0002
+          TZ=Pacific/Kiritimati composer build
           cp "${zip_path}" "${first_zip}"
-          composer build
+          umask 0022
+          TZ=America/Adak composer build
           cmp "${first_zip}" "${zip_path}"
           unzip -tq "${zip_path}"
           if unzip -Z1 "${zip_path}" | awk 'index($0, "pinova/") != 1 { bad = 1 } END { exit bad }'; then

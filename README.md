@@ -29,6 +29,7 @@
 - PHP: حداقل ۸.۱
 - WooCommerce: حداقل ۷.۶ برای قابلیت‌های ووکامرس
 - Docker: فقط برای محیط توسعه و تست integration
+- Composer: نسخهٔ دقیق ۲.۱۰.۳ برای ساخت بستهٔ Release
 
 نسخه‌های دقیق بررسی‌شده در CI را از `.github/workflows/quality.yml` ببینید. هر ترکیب WordPress و WooCommerce باید با محدودیت‌های رسمی خود آن نسخه‌ها سازگار باشد.
 
@@ -129,7 +130,13 @@ unzip -Z1 .build/pinova-<version>.zip
 sha256sum .build/pinova-<version>.zip
 ```
 
-برای release، ZIP از exact tag دو بار ساخته می‌شود و SHA-256 هر دو build باید یکسان باشد. سپس asset منتشرشده دوباره از GitHub دانلود و کنترل می‌شود.
+برای release، ZIP از exact tag با Composer 2.10.3 دو بار ساخته می‌شود و SHA-256 هر دو build باید یکسان باشد. اسکریپت build نسخهٔ دیگری از Composer را رد، timezone را روی UTC تثبیت و permission پوشه‌ها/فایل‌ها را به 0755/0644 نرمال می‌کند تا فایل‌های تولیدی Composer، timestampها و modeهای ZIP بین محیط‌ها متفاوت نشوند. سپس asset منتشرشده دوباره از GitHub دانلود و کنترل می‌شود.
+
+اگر Composer سراسری نسخهٔ دیگری دارد، PHAR نسخهٔ پین‌شده را صریحاً به build بدهید:
+
+```bash
+COMPOSER_PHAR=/path/to/composer-2.10.3.phar bash tools/build.sh
+```
 
 پیش‌انتشار GitHub فقط از branch کنترل‌شده‌ای مانند `publish/v1.2.3-rc2` انجام می‌شود. این branch باید از commit دقیق، بازبینی‌شده و سبزِ `main` ساخته شود. پس از سبزشدن workflow اصلی، workflow انتشار نسخه را تطبیق می‌دهد، tag حاشیه‌نویسی‌شده و تغییرناپذیر می‌سازد، build را دوبار مقایسه می‌کند، ZIP و checksum را به Release پیوست می‌کند و asset منتشرشده را دوباره دانلود و راستی‌آزمایی می‌کند.
 

@@ -7,8 +7,6 @@ use Illuminate\Database\Connectors\ConnectionFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Builder;
 
-defined( 'ABSPATH' ) || exit;
-
 if ( ! class_exists( 'Nabik_Net_Database' ) ) {
 
 	/**
@@ -69,5 +67,14 @@ if ( ! class_exists( 'Nabik_Net_Database' ) ) {
 
 	}
 
-	new Nabik_Net_Database();
+	if (
+		isset( $GLOBALS['wpdb'] )
+		&& is_object( $GLOBALS['wpdb'] )
+		&& defined( 'DB_HOST' )
+		&& defined( 'DB_NAME' )
+		&& defined( 'DB_USER' )
+		&& defined( 'DB_PASSWORD' )
+	) {
+		new Nabik_Net_Database();
+	}
 }

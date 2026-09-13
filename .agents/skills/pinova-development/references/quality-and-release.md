@@ -49,6 +49,8 @@ sha256sum .build/pinova-<version>.zip
 
 Build twice from the same tagged tree and require identical SHA-256 values.
 
+The build must also confirm that `vendor/composer/autoload_files.php` eagerly requires `utils/class-database.php`. Classmap presence alone is insufficient for the normal fresh-request path. Integration tests must additionally cover the CLI/test ordering where Composer loads before WordPress; the explicit idempotent initialization in `pinova.php` must make that path succeed.
+
 ## Release sequence
 
 1. Confirm clean tree, exact base, version metadata, changelog, locks, and guidance synchronization.
@@ -62,13 +64,14 @@ Build twice from the same tagged tree and require identical SHA-256 values.
 
 ## Current lineage snapshot
 
-- `main` / `2399eb2`: Pinova 1.2.3 security line plus the reproducible-release correction merged by PR #4.
+- `main`: Pinova 1.2.x security line, reproducible release, structured logging, and the 1.2.5 database-bootstrap hotfix.
 - `v1.2.3-rc1` / `ce9dc0d`: older security pre-release; it predates later CI, dependency, and build corrections.
 - `v1.2.3-rc2` / `a4600eb5`: verified installable pre-release, retained immutably; its build was repeatable on GitHub but exposed unpinned Composer/timezone/file-mode variance across hosts.
 - `v1.2.3-rc3` / `2399eb2`: current installable 1.2.3 pre-release with Composer 2.10.3, UTC, and normalized staged permissions.
 - `v1.3.0-rc1` / `93409a6`: separate identity/migration pre-release.
 - RC2 source PR: `release/v1.2.3-rc2-prep`, merged by PR #2 at `45f9d516`.
-- 1.2.4 structured logging is under development on `feature/structured-logging` and is not yet a GitHub release or production deployment.
+- `v1.2.4-rc1` / `5789178`: structured-logging pre-release; superseded because its reconstructed Composer config classmapped but did not eagerly load the database initializer.
+- `v1.2.5-rc1`: current hotfix pre-release; restores fresh-request initialization and makes administrator SMS-test audit results visible regardless of the logging threshold.
 - 1.3 development branch: `security/v1.2.3-v1.3.0`.
 
-RC3 and its publication workflow were green, and its published ZIP passed checksum, integrity, and top-level checks. Re-verify `main`, the publication workflow, refs, and Release assets before relying on this snapshot.
+Every tag remains immutable. Re-verify `main`, the publication workflow, refs, and Release assets before relying on this snapshot; a published RC is not authorization to install it on production.

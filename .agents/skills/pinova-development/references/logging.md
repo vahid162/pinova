@@ -80,10 +80,13 @@ Adding a context key requires all of:
 
 Event names are API-like identifiers, not translated prose. Renaming an event is a compatibility change for monitoring consumers. Add a new event rather than inserting dynamic data into the event name.
 
+The two `admin.sms_test_*` events are bounded, capability-protected audit actions. They bypass the configured minimum level so a deliberate test always leaves a privacy-safe result, including when the site stores only `error` events. This exception must not be generalized to request-driven authentication, OTP, or channel events.
+
 ## Operational workflow
 
 1. Ask the reporter for the approximate time, operation, and `X-Pinova-Correlation-ID`; do not ask them to send OTPs, passwords, tokens, or full cookies.
-2. Review **Pinova → Logs** with the smallest necessary level filter. Access requires `manage_options`.
+2. Review **Pinova → Logs** with the smallest necessary level filter. Access requires `manage_options`. The viewer reports whether its table exists and shows the effective minimum level. An empty table with minimum `error` may be expected because lower-severity events were never persisted; it is not by itself evidence of a rendering failure.
+   Render pagination only when `paginate_links()` returns a string; a single result page returns no markup and must never be passed as `null` into WordPress escaping functions.
 3. Enable a short diagnostic window only when default warning/notice information is insufficient. Reproduce once, then turn it off; automatic expiry is a safety backstop.
 4. Correlate by event, correlation ID, User ID, and keyed fingerprint. Treat an unmatched fingerprint as inconclusive because normalization/purpose may differ.
 5. Clear logs only when needed for privacy or a clean test boundary. Retention normally handles deletion.

@@ -20,6 +20,16 @@ tests_add_filter(
 
 		require_once $woocommerce;
 
+		$GLOBALS['pinova_doing_it_wrong_functions'] = [];
+		add_action(
+			'doing_it_wrong_run',
+			static function ( string $function_name ): void {
+				$GLOBALS['pinova_doing_it_wrong_functions'][] = $function_name;
+			},
+			10,
+			1
+		);
+
 		$hpos = getenv( 'PINOVA_TEST_HPOS' );
 		if ( ! in_array( $hpos, [ 'yes', 'no' ], true ) ) {
 			throw new RuntimeException( 'PINOVA_TEST_HPOS must be forwarded as yes or no.' );
@@ -28,6 +38,10 @@ tests_add_filter(
 		update_option( 'woocommerce_custom_orders_table_enabled', $hpos );
 
 		require dirname( __DIR__ ) . '/pinova.php';
+
+		if ( ! is_object( \Illuminate\Database\Eloquent\Model::getConnectionResolver() ) ) {
+			throw new RuntimeException( 'Pinova must bootstrap its Illuminate connection on every fresh WordPress request.' );
+		}
 	}
 );
 

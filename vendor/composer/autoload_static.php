@@ -22,6 +22,7 @@ class ComposerStaticInit8237e3ff5c58515be61cfab9fcd44d27
         'b6b991a57620e2fb6b2f66f03fe9ddc2' => __DIR__ . '/..' . '/symfony/string/Resources/functions.php',
         '508dab6c0a7dfd955e775df925e6d583' => __DIR__ . '/..' . '/hekmatinasser/jalali/src/helpers.php',
         '4ad677cf23be1eeec8c74951804d4cb0' => __DIR__ . '/..' . '/hekmatinasser/verta/src/helpers.php',
+        'a77588881e194aac90174b9b7c1e0980' => __DIR__ . '/../..' . '/utils/class-database.php',
     );
 
     public static $prefixLengthsPsr4 = array (

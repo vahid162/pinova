@@ -4,6 +4,8 @@ namespace Pinova\Admin;
 
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
+use Pinova\Pinova;
+use Psr\Log\LogLevel;
 
 final class Logs {
 
@@ -21,9 +23,26 @@ final class Logs {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only list filters do not change state.
 		$page = max( 1, absint( wp_unslash( $_GET['paged'] ?? 1 ) ) );
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only list filters do not change state.
-		$level = sanitize_key( wp_unslash( $_GET['level'] ?? '' ) );
-		$data  = LogRepository::paginate( $page, 50, $level );
-		$pages = max( 1, (int) ceil( $data['total'] / 50 ) );
+		$level            = sanitize_key( wp_unslash( $_GET['level'] ?? '' ) );
+		$data             = LogRepository::paginate( $page, 50, $level );
+		$pages            = max( 1, (int) ceil( $data['total'] / 50 ) );
+		$minimum_level    = (string) Pinova::get_option( 'logging.minimum_level', LogLevel::WARNING );
+		$diagnostic_until = (int) Pinova::get_option( 'logging.diagnostic_until', 0 );
+		$table_exists     = LogRepository::table_exists();
+		$pagination       = paginate_links(
+			[
+				'base'    => add_query_arg(
+					[
+						'page'  => 'pinova-logs',
+						'level' => $level,
+						'paged' => '%#%',
+					],
+					admin_url( 'admin.php' )
+				),
+				'current' => $page,
+				'total'   => $pages,
+			]
+		);
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'گزارش‌های پینوا', 'pinova' ); ?></h1>
@@ -33,6 +52,23 @@ final class Logs {
 				echo esc_html( sprintf( __( 'فقط داده‌های ساختاریافته و بدون شناسهٔ خام ذخیره می‌شوند. نگهداری فعلی: %d روز.', 'pinova' ), LogRepository::retention_days() ) );
 				?>
 			</p>
+			<p>
+				<?php
+				echo esc_html(
+					sprintf(
+						/* translators: %s: configured minimum PSR-3 log level. */
+						__( 'حداقل سطح ثبت فعلی: %s', 'pinova' ),
+						$diagnostic_until > time() ? LogLevel::DEBUG : $minimum_level
+					)
+				);
+				?>
+			</p>
+
+			<?php if ( ! $table_exists ) : ?>
+				<div class="notice notice-error"><p><?php esc_html_e( 'جدول گزارش‌های پینوا در دسترس نیست. نصب یا ارتقای افزونه باید بررسی شود.', 'pinova' ); ?></p></div>
+			<?php elseif ( LogLevel::ERROR === $minimum_level && $diagnostic_until <= time() ) : ?>
+				<div class="notice notice-warning"><p><?php esc_html_e( 'سطح ثبت روی Error است؛ رخدادهای Info، Notice و Warning ذخیره نمی‌شوند. تست مدیریتی پیامک با وجود این تنظیم همیشه ثبت می‌شود.', 'pinova' ); ?></p></div>
+			<?php endif; ?>
 
 			<?php // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Informational redirect flag only. ?>
 			<?php if ( isset( $_GET['cleared'] ) ) : ?>
@@ -62,7 +98,7 @@ final class Logs {
 				</tr></thead>
 				<tbody>
 				<?php if ( empty( $data['rows'] ) ) : ?>
-					<tr><td colspan="6"><?php esc_html_e( 'گزارشی یافت نشد.', 'pinova' ); ?></td></tr>
+					<tr><td colspan="6"><?php esc_html_e( 'هنوز رخدادی مطابق فیلتر و سطح ثبت فعلی ذخیره نشده است.', 'pinova' ); ?></td></tr>
 				<?php else : ?>
 					<?php foreach ( $data['rows'] as $row ) : ?>
 						<?php
@@ -83,24 +119,9 @@ final class Logs {
 				</tbody>
 			</table>
 
-			<?php
-			echo wp_kses_post(
-				paginate_links(
-					[
-						'base'    => add_query_arg(
-							[
-								'page'  => 'pinova-logs',
-								'level' => $level,
-								'paged' => '%#%',
-							],
-							admin_url( 'admin.php' )
-						),
-						'current' => $page,
-						'total'   => $pages,
-					]
-				)
-			);
-			?>
+			<?php if ( is_string( $pagination ) && '' !== $pagination ) : ?>
+				<?php echo wp_kses_post( $pagination ); ?>
+			<?php endif; ?>
 
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('<?php echo esc_js( __( 'همه گزارش‌های فعلی پاک شوند؟', 'pinova' ) ); ?>');">
 				<input type="hidden" name="action" value="pinova_clear_logs" />

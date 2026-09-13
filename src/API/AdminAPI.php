@@ -3,13 +3,13 @@
 
 namespace Pinova\API;
 
-use Exception;
 use Pinova\Channels\SMS;
 use Pinova\Logging\Logger;
 use Pinova\Objects\Identifier;
 use Pinova\Services\OTPService;
 use Pinova\Services\UserService;
 use Pinova\Services\ValidationService;
+use Throwable;
 use WP_REST_Request;
 use WP_REST_Response;
 
@@ -55,7 +55,8 @@ class AdminAPI extends RestAPI {
 
 			$message = sprintf( "کد تایید «%d» با موفقیت پیامک شد.", $code );
 			$success = true;
-			Logger::instance()->notice(
+			Logger::instance()->audit(
+				'notice',
 				'admin.sms_test_succeeded',
 				[
 					'user_id'                => get_current_user_id(),
@@ -64,10 +65,13 @@ class AdminAPI extends RestAPI {
 				]
 			);
 
-		} catch ( Exception $e ) {
-			$message = $e->getMessage();
+		} catch ( Throwable $e ) {
+			$message = $e instanceof \Exception
+				? $e->getMessage()
+				: __( 'خطای داخلی هنگام ارسال پیامک رخ داده است.', 'pinova' );
 			$success = false;
-			Logger::instance()->error(
+			Logger::instance()->audit(
+				'error',
 				'admin.sms_test_failed',
 				[
 					'user_id'                => get_current_user_id(),

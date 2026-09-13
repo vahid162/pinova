@@ -14,6 +14,7 @@ npm install --ignore-scripts
 Run PHP gates:
 
 ```bash
+php tools/check-changelog-sync.php
 composer lint
 composer test
 composer phpstan
@@ -39,7 +40,7 @@ An installable-ZIP browser lifecycle check also needs `pdo_mysql` in the disposa
 
 Build with Composer 2.10.3 using `composer build`. `tools/build.sh` rejects other Composer versions, exports `TZ=UTC`, stages `pinova/`, installs production dependencies, removes development-only files, normalizes directory/file modes to `0755`/`0644`, normalizes timestamps, sorts entries, and writes `.build/pinova-<version>.zip`. Pinning Composer, timezone, and file modes is required: Composer versions can format generated autoload files differently, while ZIP records DOS timestamps and Unix permissions from the build host.
 
-The ZIP must exclude `.git`, `.github`, `.agents`, `AGENTS.md`, caches, `node_modules`, tests, tools, and development Composer packages. Validate with:
+The ZIP must exclude `.git`, `.github`, `.agents`, `AGENTS.md`, root `README.md` and `CHANGELOG.md`, caches, `node_modules`, tests, tools, and development Composer packages. The WordPress `readme.txt` remains in the package and carries the synchronized public changelog. Validate with:
 
 ```bash
 unzip -tq .build/pinova-<version>.zip
@@ -53,7 +54,7 @@ The build must also confirm that `vendor/composer/autoload_files.php` eagerly re
 
 ## Release sequence
 
-1. Confirm clean tree, exact base, version metadata, changelog, locks, and guidance synchronization.
+1. Confirm clean tree, exact base, version metadata, locks, and guidance synchronization. Run `php tools/check-changelog-sync.php` and require root `CHANGELOG.md` to match the version order and every entry in the `readme.txt` Changelog section.
 2. Pass local checks and GitHub Actions for the exact release commit.
 3. Merge the reviewed PR. Reconfirm `main` and its `Quality` run before selecting the release commit.
 4. Create `publish/vX.Y.Z-rcN` from that exact immutable commit. Its successful `Quality` run triggers `.github/workflows/publish-prerelease.yml`.
@@ -72,6 +73,7 @@ The build must also confirm that `vendor/composer/autoload_files.php` eagerly re
 - RC2 source PR: `release/v1.2.3-rc2-prep`, merged by PR #2 at `45f9d516`.
 - `v1.2.4-rc1` / `5789178`: structured-logging pre-release; superseded because its reconstructed Composer config classmapped but did not eagerly load the database initializer.
 - `v1.2.5-rc1`: current hotfix pre-release; restores fresh-request initialization and makes administrator SMS-test audit results visible regardless of the logging threshold.
+- CI enforces synchronized release history between `CHANGELOG.md` and the WordPress.org `readme.txt` Changelog section.
 - 1.3 development branch: `security/v1.2.3-v1.3.0`.
 
 Every tag remains immutable. Re-verify `main`, the publication workflow, refs, and Release assets before relying on this snapshot; a published RC is not authorization to install it on production.

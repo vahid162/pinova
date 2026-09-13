@@ -42,6 +42,7 @@ tar -C "${project_dir}" \
   --exclude='package-lock.json' \
   --exclude='AGENTS.md' \
   --exclude='README.md' \
+  --exclude='CHANGELOG.md' \
   --exclude='phpunit.xml.dist' \
   --exclude='phpunit.integration.xml.dist' \
   --exclude='phpstan.neon.dist' \

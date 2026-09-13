@@ -20,6 +20,7 @@ Before substantive work:
 - The RC1 1.2.3 asset predates later PHP 8.1 dependency, CI matrix, PHP 8.5, and reproducible-build changes. Do not relabel or overwrite it.
 - RC3 is the current verified, installable 1.2.3 pre-release. It pins Composer 2.10.3, UTC, and staged permissions; keep all prior RC tags immutable.
 - The quality matrix covers PHP 8.1–8.5, WordPress 6.8/latest/7.1, WooCommerce fixed/latest/11.1.0, and HPOS on/off where configured.
+- Release history is mirrored between root `CHANGELOG.md` and the WordPress.org `readme.txt` Changelog section. CI compares release order and every entry; update both in the same change set.
 - Structured persistent logging shipped in the 1.2.4 line. In 1.2.5, the bounded administrator SMS test is an audit event that bypasses the minimum threshold, while the viewer reports table availability and the effective minimum level.
 - `utils/class-database.php` is both classmapped and eagerly loaded through Composer `autoload.files`. Removing it from `vendor/composer/autoload_files.php` breaks fresh REST requests before authentication, OTP, SMS, block, and logging operations can run.
 - Task-specific historical worktrees, toolchains, and wp-env projects are retained on the development host. Discover their current paths, ports, container state, and volumes with read-only commands before acting; do not publish host-local coordinates in this public repository.
@@ -46,6 +47,7 @@ Verify all facts before acting and update this section whenever lineage, release
 - Login UI: `templates/`, `assets/`.
 - Tests: `tests/`.
 - Reproducible package: `tools/build.sh`.
+- Release history: `CHANGELOG.md`, the `readme.txt` Changelog section, and `tools/check-changelog-sync.php`.
 - CI and pre-release publication: `.github/workflows/quality.yml`, `.github/workflows/publish-prerelease.yml`.
 - Agent guidance: `.agents/skills/pinova-development/`.
 
@@ -56,8 +58,8 @@ Verify all facts before acting and update this section whenever lineage, release
 3. Implement the smallest coherent fix while preserving the Skill invariants.
 4. Run targeted tests, then proportional unit, integration, HPOS, static, coding-standard, dependency, and packaging checks.
 5. Meaningfully update `.agents/skills/pinova-development/SKILL.md` in the same change set for every plugin-affecting change.
-6. Update references, this snapshot, `README.md`, `readme.txt`, and changelog where behavior or operations changed.
-7. Run `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree` and validate the Skill before handoff.
+6. Update references, this snapshot, `README.md`, `CHANGELOG.md`, and the `readme.txt` Changelog section where behavior or operations changed.
+7. Run `php tools/check-changelog-sync.php`, then `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree`, and validate the Skill before handoff.
 8. Report exact files/refs/checks, remaining risk, production impact, and next safe step.
 
 ## Production boundary

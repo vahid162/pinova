@@ -33,6 +33,7 @@ Work from a repository checkout or disposable worktree, never from an installed 
 - Spreadsheet formatting must stay within populated ranges. Never style whole worksheet columns such as `A:Z`, because PhpSpreadsheet materializes millions of cells and can exhaust PHP memory even for a tiny export.
 - A `pinova_blocks` row with `blocked_until = NULL` is permanent. Expired cleanup must leave permanent blocks intact.
 - Release ZIPs require the repository-pinned Composer 2.10.3. `tools/build.sh` must fail on a different Composer version, export `TZ=UTC`, and normalize staged directories/files to `0755`/`0644`, because Composer-generated autoload formatting, ZIP DOS timestamps, and checkout umasks otherwise vary across build hosts.
+- Root `CHANGELOG.md` and the WordPress.org `readme.txt` Changelog section are synchronized release-history views. Preserve identical version order and entry text, update both together, and run `php tools/check-changelog-sync.php`; CI must reject drift. Keep the repository-only Markdown file out of the installable ZIP because `readme.txt` already ships the same history.
 - A version bump requires a matching `Version::update_XYZ()` method, even when no schema changes are needed, so the installed-version option advances and the upgrader does not repeat on every request.
 - Integration tests must load the configured WooCommerce checkout before Pinova and exercise real WooCommerce classes. Forward `PINOVA_TEST_HPOS=yes|no` into `tests-cli`; the bootstrap must set the HPOS option in the PHPUnit database, not the separate development database. The disposable `tests-cli` container also needs `pdo_mysql` because Pinova's Illuminate database layer uses PDO even when WordPress itself uses mysqli. When installing it through in-container `sudo`, pass `PHP_INI_DIR=/usr/local/etc/php` explicitly because sudo does not preserve that image environment variable.
 - Do not instantiate `WC_Checkout` from the early `woocommerce_loaded` bootstrap merely to read whether registration is required. Derive the same filtered option value without constructing checkout, and keep the integration regression assertion that Pinova load does not trigger WooCommerce just-in-time translation warnings.
@@ -58,7 +59,7 @@ Work from a repository checkout or disposable worktree, never from an installed 
 4. For mobile profile changes, store the normalized value in physical `pinova_mobile` meta, validate ownership/conflicts, and keep `user_login` immutable.
 5. For logging changes, update the event catalogue and privacy allowlist in `references/logging.md`, add a no-secret regression test, and exercise schema upgrade plus retention cleanup.
 6. Run targeted checks and the proportional suite in the quality reference.
-7. Update public documentation and changelog when behavior changes.
+7. Update public documentation plus both `CHANGELOG.md` and the `readme.txt` Changelog section when behavior changes.
 8. Meaningfully update this `SKILL.md` in the same change set whenever runtime code, schema, dependencies, tests, tooling, CI, commands, integrations, or release behavior changes.
 9. Run `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree` before handoff.
 
@@ -74,6 +75,7 @@ Work from a repository checkout or disposable worktree, never from an installed 
 - Read the quality/release reference before changing versions, tags, ZIPs, workflows, or GitHub Releases.
 - Release candidates remain pre-releases until staging and canary gates pass. Stable/latest publication needs explicit authorization.
 - Build twice from the exact tag, compare SHA-256, publish the installable ZIP, download it again, and verify checksum, integrity, and top-level `pinova/`.
+- Run `php tools/check-changelog-sync.php` before selecting a release commit; a release with missing, reordered, or divergent history is not ready.
 - Automated pre-release publication starts only after a successful `Quality` run on an exact `publish/vX.Y.Z-rcN` branch. The publisher validates the plugin version, creates an annotated immutable tag, builds twice, attaches the ZIP and checksum, and redownloads the published asset. Never create that branch until the intended commit is already reviewed and green on `main`.
 - GitHub publication never authorizes installation, configuration changes, or database writes on the production site.
 
@@ -84,7 +86,8 @@ The repository enforces Skill review with [`scripts/check-skill-sync.sh`](script
 - update this entrypoint with decision-changing guidance;
 - place detailed procedures in the relevant reference;
 - update `AGENTS.md` when lineage, blockers, milestone, or completion gates change;
-- update Persian `README.md` and WordPress `readme.txt` when public behavior, requirements, installation, or releases change.
+- update Persian `README.md`, root `CHANGELOG.md`, and WordPress `readme.txt` when public behavior, requirements, installation, or releases change;
+- keep the two changelog views synchronized with `php tools/check-changelog-sync.php`.
 
 Do not use a date-only or whitespace-only edit to satisfy the gate.
 

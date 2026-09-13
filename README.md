@@ -4,6 +4,7 @@
 
 - صفحهٔ رسمی: [wordpress.org/plugins/pinova](https://wordpress.org/plugins/pinova/)
 - مخزن توسعه: [github.com/vahid162/pinova](https://github.com/vahid162/pinova)
+- تاریخچهٔ نسخه‌ها: [CHANGELOG.md](CHANGELOG.md)
 - مجوز: GPLv3
 
 > **وضعیت انتشار:** نسخهٔ ۱.۲.۵ RC1 پیش‌انتشار hotfix خط ۱.۲.x در GitHub است. این نسخه bootstrap اتصال دیتابیس داخلی را که در build نسخهٔ ۱.۲.۴ RC1 حذف شده بود بازمی‌گرداند و آن RC قدیمی نباید برای نصب تازه استفاده شود. RC همچنان stable/latest نیست و پیش از production به staging یا canary نیاز دارد.
@@ -99,6 +100,7 @@ templates/                        قالب‌های ورود
 assets/                           CSS، JavaScript، فونت و تصویر
 tests/                            تست‌های unit و integration
 tools/                            ابزارهای wp-env و ساخت ZIP
+CHANGELOG.md                      تاریخچهٔ مستقل و همگام با readme.txt
 .agents/skills/pinova-development راهنمای تخصصی کار روی مخزن
 AGENTS.md                         نقطهٔ شروع عامل‌های کدنویسی
 ```
@@ -117,6 +119,7 @@ npm install --ignore-scripts
 ## کنترل کیفیت
 
 ```bash
+php tools/check-changelog-sync.php
 composer lint
 composer test
 composer phpstan
@@ -143,7 +146,7 @@ npm run env:stop
 composer build
 ```
 
-خروجی در `.build/pinova-<version>.zip` ساخته می‌شود. build فایل‌های توسعه مانند `.git`، `.github`، `.agents`، `AGENTS.md`، `node_modules`، تست‌ها و ابزارها را حذف و dependencyهای production را بسته‌بندی می‌کند.
+خروجی در `.build/pinova-<version>.zip` ساخته می‌شود. build فایل‌های توسعه مانند `.git`، `.github`، `.agents`، `AGENTS.md`، `README.md`، `CHANGELOG.md`، `node_modules`، تست‌ها و ابزارها را حذف و dependencyهای production را بسته‌بندی می‌کند. تاریخچهٔ همگام‌شده از طریق `readme.txt` داخل بسته باقی می‌ماند.
 
 ```bash
 unzip -tq .build/pinova-<version>.zip
@@ -168,7 +171,7 @@ COMPOSER_PHAR=/path/to/composer-2.10.3.phar bash tools/build.sh
 3. در صورت امکان regression test نوشته می‌شود.
 4. کوچک‌ترین اصلاح سازگار با قواعد امنیت و Identity انجام می‌شود.
 5. تست هدفمند و سپس suite متناسب اجرا می‌شود.
-6. Skill، AGENTS، README و changelog مرتبط در همان change set به‌روز می‌شوند.
+6. Skill، AGENTS، README، `CHANGELOG.md` و بخش Changelog در `readme.txt` در همان change set به‌روز می‌شوند.
 7. Pull Request ساخته و GitHub Actions بررسی می‌شود.
 8. پس از merge، tag جدید و ZIP تکرارپذیر ساخته می‌شود؛ tag منتشرشده جابه‌جا نمی‌شود.
 9. نصب production فقط با مجوز جدا، بکاپ، rollback و آزمون پس از نصب انجام می‌شود.
@@ -197,7 +200,7 @@ bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tre
 
 ## راهنمای AI و مشارکت‌کنندگان
 
-کار را از [AGENTS.md](AGENTS.md) و [.agents/skills/pinova-development/SKILL.md](.agents/skills/pinova-development/SKILL.md) شروع کنید. Skill باید با هر تغییر runtime، schema، dependency، تست، tooling، CI، command، integration یا release به‌صورت معنادار به‌روز شود.
+کار را از [AGENTS.md](AGENTS.md) و [.agents/skills/pinova-development/SKILL.md](.agents/skills/pinova-development/SKILL.md) شروع کنید. Skill باید با هر تغییر runtime، schema، dependency، تست، tooling، CI، command، integration یا release به‌صورت معنادار به‌روز شود. تاریخچهٔ نسخه‌ها نیز در [CHANGELOG.md](CHANGELOG.md) و بخش Changelog فایل `readme.txt` نگهداری می‌شود و `php tools/check-changelog-sync.php` از ناسازگاری آن‌ها جلوگیری می‌کند.
 
 برای مشارکت انسانی نیز جریان توصیه‌شده شامل شرح بازتولید، branch محدود، regression test، اصلاح، کنترل کیفیت، مستندسازی و Pull Request است.
 

@@ -68,6 +68,11 @@ fi
 
 COMPOSER_ROOT_VERSION="${COMPOSER_ROOT_VERSION:-${version}}" "${composer_command[@]}" install "${install_args[@]}"
 
+if ! grep -Fq "utils/class-database.php" "${stage_dir}/vendor/composer/autoload_files.php"; then
+	echo "Pinova database bootstrap is missing from Composer's eager autoload files." >&2
+	exit 1
+fi
+
 rm "${stage_dir}/composer.json" "${stage_dir}/composer.lock"
 
 find "${stage_dir}" -type d -exec chmod 0755 {} +

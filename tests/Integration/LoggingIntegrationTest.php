@@ -4,14 +4,44 @@ declare(strict_types=1);
 
 namespace Pinova\Tests\Integration;
 
+use Pinova\Admin\Logs;
+use Pinova\API\AdminAPI;
 use Pinova\API\RestAPI;
 use Pinova\Exceptions\RateLimitException;
+use Pinova\Gateways\BaseGateway;
 use Pinova\Install;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
+use Pinova\Objects\Identifier;
 use Pinova\Services\RateLimitService;
 use Pinova\Services\UserService;
+use WP_REST_Request;
 use WP_UnitTestCase;
+
+final class LoggingTestGateway extends BaseGateway {
+
+	protected string $name = 'Logging test gateway';
+
+	protected string $url = 'example.test';
+
+	public static bool $fail_with_error = false;
+
+	public function send( string $mobile, string $message ): bool {
+		if ( self::$fail_with_error ) {
+			throw new \Error( 'Deliberate test-only transport failure.' );
+		}
+
+		return true;
+	}
+
+	public function is_enable(): bool {
+		return true;
+	}
+
+	public function options(): array {
+		return [];
+	}
+}
 
 final class LoggingIntegrationTest extends WP_UnitTestCase {
 
@@ -35,6 +65,7 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
+		LoggingTestGateway::$fail_with_error = false;
 		LogRepository::delete_all();
 		$this->delete_rate_limits();
 		delete_option( 'pinova_logging' );
@@ -65,6 +96,89 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 		self::assertStringNotContainsString( 'provider leaked', $row['context'] );
 		self::assertStringContainsString( 'identifier_fingerprint', $row['context'] );
 		self::assertStringContainsString( 'RuntimeException', $row['context'] );
+	}
+
+	public function test_admin_sms_test_is_audited_when_minimum_level_is_error(): void {
+		update_option(
+			'pinova_logging',
+			[
+				'minimum_level'    => 'error',
+				'retention_days'   => 14,
+				'diagnostic_until' => 0,
+			]
+		);
+
+		$filter = static fn(): array => [
+			'gateway'     => LoggingTestGateway::class,
+			'message_code' => 'pattern:test\ncode:{{otp}}',
+		];
+		add_filter( 'pre_option_pinova_sms', $filter );
+
+		try {
+			$request = new WP_REST_Request( 'POST', '/pinova/admin/test/sms' );
+			$request->set_param( 'identifier', new Identifier( '09120000000' ) );
+			$response = ( new AdminAPI() )->test_sms( $request );
+		} finally {
+			remove_filter( 'pre_option_pinova_sms', $filter );
+		}
+
+		self::assertSame( 200, $response->get_status() );
+		$this->assert_latest_event( 'admin.sms_test_succeeded', 'notice' );
+	}
+
+	public function test_admin_sms_test_catches_throwable_and_audits_failure(): void {
+		LoggingTestGateway::$fail_with_error = true;
+		$filter = static fn(): array => [
+			'gateway'     => LoggingTestGateway::class,
+			'message_code' => 'pattern:test\ncode:{{otp}}',
+		];
+		add_filter( 'pre_option_pinova_sms', $filter );
+
+		try {
+			$request = new WP_REST_Request( 'POST', '/pinova/admin/test/sms' );
+			$request->set_param( 'identifier', new Identifier( '09120000000' ) );
+			$response = ( new AdminAPI() )->test_sms( $request );
+		} finally {
+			remove_filter( 'pre_option_pinova_sms', $filter );
+		}
+
+		self::assertSame( 503, $response->get_status() );
+		self::assertSame( 'خطای داخلی هنگام ارسال پیامک رخ داده است.', $response->get_data()['message'] );
+		$this->assert_latest_event( 'admin.sms_test_failed', 'error' );
+	}
+
+	public function test_single_page_log_viewer_renders_without_null_pagination_deprecation(): void {
+		$user_id = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user_id );
+		Logger::instance()->audit( 'error', 'auth.request_failed', [ 'user_id' => $user_id ] );
+
+		$original_get = $_GET;
+		$_GET         = [];
+		$buffer_level = ob_get_level();
+		$html         = '';
+		set_error_handler(
+			static function ( int $severity, string $message ): bool {
+				if ( E_DEPRECATED === $severity ) {
+					throw new \ErrorException( $message, 0, $severity );
+				}
+
+				return false;
+			}
+		);
+
+		try {
+			ob_start();
+			Logs::render();
+			$html = (string) ob_get_clean();
+		} finally {
+			while ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			restore_error_handler();
+			$_GET = $original_get;
+		}
+
+		self::assertStringContainsString( 'auth.request_failed', $html );
 	}
 
 	public function test_identity_conflict_writes_count_and_fingerprint_only(): void {
@@ -132,6 +246,23 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 		);
 
 		self::assertSame( 1, $count );
+	}
+
+	private function assert_latest_event( string $event, string $level ): void {
+		global $wpdb;
+
+		$row = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT `event`, `level`, `context` FROM %i ORDER BY `id` DESC LIMIT 1',
+				$wpdb->prefix . 'pinova_logs'
+			),
+			ARRAY_A
+		);
+
+		self::assertIsArray( $row );
+		self::assertSame( $event, $row['event'] );
+		self::assertSame( $level, $row['level'] );
+		self::assertStringNotContainsString( 'Deliberate test-only transport failure.', $row['context'] );
 	}
 
 	private function delete_rate_limits(): void {

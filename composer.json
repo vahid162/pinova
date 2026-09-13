@@ -25,6 +25,9 @@
     "psr-4": {
       "Pinova\\": "src/"
     },
+    "files": [
+      "utils/class-database.php"
+    ],
     "classmap": [
       "utils/"
     ]

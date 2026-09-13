@@ -51,7 +51,11 @@ class Load {
 	}
 
 	public static function registration_required(): string {
-		$default = WC()->checkout()->is_registration_required() ? 'yes_redirect' : 'no';
+		$registration_required = apply_filters(
+			'woocommerce_checkout_registration_required',
+			'yes' !== get_option( 'woocommerce_enable_guest_checkout' )
+		);
+		$default               = $registration_required ? 'yes_redirect' : 'no';
 
 		return Pinova::get_option( 'general.woocommerce_checkout_registration_required', $default );
 	}

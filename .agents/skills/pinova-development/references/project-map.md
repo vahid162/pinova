@@ -36,6 +36,8 @@ Resolution returns a User ID only when the candidate is unambiguous. Multiple le
 
 Schema changes must be additive and `dbDelta()` compatible. Never alter/drop columns or indexes in `wp_users` or other core tables.
 
+The 1.2.x Eloquent models depend on the connection initializer in `utils/class-database.php`. Composer includes that file in `autoload.files`, not only in the classmap: a classmap makes the class discoverable but does not execute the bottom-of-file initializer on a fresh request. Because a CLI/test process may load Composer before WordPress exists, `pinova.php` also performs an idempotent resolver check and explicitly initializes the connection after WordPress loads. Integration bootstrap checks the resolver before any installer helper can conceal this failure.
+
 ## Security boundaries
 
 - Exports require `list_users`, nonce validation, safe strings, VCF escaping, batching, and XLSX row limits.
@@ -46,3 +48,5 @@ Schema changes must be additive and `dbDelta()` compatible. Never alter/drop col
 - Rate limits hash identifiers and return HTTP 429 with `Retry-After`.
 - Logs retain stable codes, keyed identifier fingerprints, and bounded context—not raw identifiers, secrets, exception messages, or traces. REST responses include `X-Pinova-Correlation-ID` for support correlation.
 - Proxy chains are considered only behind trusted CIDRs.
+
+WooCommerce bootstrap runs early enough that constructing `WC()->checkout()` can trigger its text domain before WordPress permits just-in-time translation loading. The registration-required default mirrors WooCommerce's filtered `woocommerce_enable_guest_checkout` option without constructing checkout; actual checkout calls remain inside checkout-time hooks.

@@ -2,9 +2,9 @@
 Contributors: nabiknet,mahdiy,persianscript
 Tags: otp,email,sms,login,passwordless
 Requires at least: 6.8
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.2.4
+Stable tag: 1.2.5
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -101,6 +101,15 @@ License URI: https://www.gnu.org/licenses/gpl-3.0.html
 4. ایمیل کد تایید
 
 == Changelog ==
+= 1.2.5 =
+* بازگرداندن bootstrap اتصال دیتابیس داخلی در تمام درخواست‌های تازهٔ وردپرس
+* رفع خطای ۵۰۰ در ورود، ساخت OTP، تست پیامک و مدیریت مسدودی‌ها پیش از فراخوانی سرویس‌دهنده
+* ثبت همیشگی نتیجهٔ تست مدیریتی پیامک، مستقل از حداقل سطح گزارش‌گیری
+* نمایش وضعیت جدول و حداقل سطح ثبت در صفحهٔ گزارش‌ها و توضیح دقیق حالت بدون رخداد
+* مدیریت امن خطاهای PHP از نوع Throwable در تست پیامک بدون افشای جزئیات داخلی
+* افزودن آزمون fresh-request و کنترل build برای جلوگیری از بازگشت خطای bootstrap
+* جلوگیری از بارگذاری زودهنگام ترجمهٔ ووکامرس هنگام راه‌اندازی افزونه
+* جلوگیری از هشدار PHP در صفحهٔ گزارش‌های تک‌صفحه‌ای
 = 1.2.4 =
 * افزودن logger سازگار با PSR-3 و جدول مستقل گزارش‌های عملیاتی
 * افزودن صفحه مدیریت گزارش‌ها با capability، nonce، فیلتر سطح، صفحه‌بندی و پاک‌سازی امن

@@ -68,6 +68,12 @@ jobs:
           - wp: 'latest'
             wc: 'latest'
             hpos: 'no'
+          - wp: '7.1'
+            wc: '11.1.0'
+            hpos: 'yes'
+          - wp: '7.1'
+            wc: '11.1.0'
+            hpos: 'no'
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2

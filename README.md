@@ -7,7 +7,7 @@
 - تاریخچهٔ نسخه‌ها: [CHANGELOG.md](CHANGELOG.md)
 - مجوز: GPLv3
 
-> **وضعیت انتشار:** نسخهٔ ۱.۲.۶ ادامهٔ خط امن ۱.۲.x و مبنای پیش‌انتشار `v1.2.6-rc1` است. این نسخه اصلاح bootstrap نسخهٔ ۱.۲.۵ را همراه با قرارداد Blocked List و رابط ورود جدید نگه می‌دارد. هر RC همچنان stable/latest نیست و فقط asset رسمی GitHub آن، پس از راستی‌آزمایی checksum، باید وارد staging یا canary شود.
+> **وضعیت انتشار:** نسخهٔ ۱.۲.۶ ادامهٔ خط امن ۱.۲.x است. `v1.2.6-rc1` منتشر و checksum آن تأیید شد، اما پیش از فعال‌سازی Release Immutability بومی GitHub ساخته شده و handoff نصب نیست. هدف بعدی `v1.2.6-rc2` است؛ هر RC همچنان stable/latest نیست و فقط asset رسمی، immutable و راستی‌آزمایی‌شدهٔ GitHub باید وارد staging یا canary شود.
 
 ## امکانات خط ۱.۲.x
 
@@ -157,7 +157,7 @@ unzip -Z1 .build/pinova-<version>.zip
 sha256sum .build/pinova-<version>.zip
 ```
 
-برای release، ZIP از exact tag با Composer 2.10.3 دو بار ساخته می‌شود و SHA-256 هر دو build باید یکسان باشد. اسکریپت build نسخهٔ دیگری از Composer را رد، timezone را روی UTC تثبیت و permission پوشه‌ها/فایل‌ها را به 0755/0644 نرمال می‌کند تا فایل‌های تولیدی Composer، timestampها و modeهای ZIP بین محیط‌ها متفاوت نشوند. build همچنین بررسی می‌کند bootstrap اتصال دیتابیس در `vendor/composer/autoload_files.php` حاضر باشد. سپس asset منتشرشده دوباره از GitHub دانلود و کنترل می‌شود.
+برای release، ZIP از exact tag با Composer 2.10.3 دو بار ساخته می‌شود و SHA-256 هر دو build باید یکسان باشد. اسکریپت build نسخهٔ دیگری از Composer را رد، timezone را روی UTC تثبیت و permission پوشه‌ها/فایل‌ها را به 0755/0644 نرمال می‌کند تا فایل‌های تولیدی Composer، timestampها و modeهای ZIP بین محیط‌ها متفاوت نشوند. build همچنین بررسی می‌کند bootstrap اتصال دیتابیس در `vendor/composer/autoload_files.php` حاضر باشد. سپس API انتشار باید `immutable: true` گزارش کند و هر دو asset منتشرشده دوباره دانلود، با خروجی build مقایسه و همراه attestation گیت‌هاب راستی‌آزمایی شوند.
 
 اگر Composer سراسری نسخهٔ دیگری دارد، PHAR نسخهٔ پین‌شده را صریحاً به build بدهید:
 
@@ -165,7 +165,7 @@ sha256sum .build/pinova-<version>.zip
 COMPOSER_PHAR=/path/to/composer-2.10.3.phar bash tools/build.sh
 ```
 
-پیش‌انتشار GitHub فقط از branch کنترل‌شده‌ای مانند `publish/v1.2.3-rc2` انجام می‌شود. این branch باید از commit دقیق، بازبینی‌شده و سبزِ `main` ساخته شود. پس از سبزشدن workflow اصلی، workflow انتشار نسخه را تطبیق می‌دهد، tag حاشیه‌نویسی‌شده و تغییرناپذیر می‌سازد، build را دوبار مقایسه می‌کند، ZIP و checksum را به Release پیوست می‌کند و asset منتشرشده را دوباره دانلود و راستی‌آزمایی می‌کند.
+پیش‌انتشار GitHub فقط از branch کنترل‌شده‌ای مانند `publish/v1.2.6-rc2` انجام می‌شود. این branch باید از commit دقیق، بازبینی‌شده و سبزِ `main` ساخته شود. پس از سبزشدن workflow اصلی، workflow انتشار دسترسی SHA از `main` و نسخه را کنترل می‌کند، tag حاشیه‌نویسی‌شده می‌سازد، build را دوبار مقایسه می‌کند، ZIP و checksum را با توالی draft/upload/publish به Release بومیِ immutable پیوست می‌کند و هر دو asset و attestation آن‌ها را دوباره راستی‌آزمایی می‌کند.
 
 ## فرایند اصلاح باگ
 

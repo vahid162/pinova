@@ -15,9 +15,9 @@ Before substantive work:
 ## Current project snapshot
 
 - Repository: `https://github.com/vahid162/pinova`
-- `main` includes the 1.2.3 security line, reproducible-release hardening, structured logging, and the 1.2.5 fresh-request database-bootstrap hotfix.
+- `main` includes the 1.2.3 security line, reproducible-release hardening, structured logging, the 1.2.5 fresh-request database-bootstrap hotfix, and the reviewed 1.2.6 account/Blocked List corrections merged by PR #8 at `270ace9`.
 - Existing 1.2.3 pre-releases remain immutable. `v1.2.4-rc1` contains the Composer bootstrap regression and is superseded by `v1.2.5-rc1`; no RC is stable/latest.
-- Version 1.2.6 is the next review/release target for the account experience, REST error handling, and type-authoritative Blocked List corrections; `v1.2.5-rc1` remains immutable.
+- `v1.2.6-rc1` is published and checksum-verified but reports `immutable: false` because it predates repository-level native Release Immutability. Retain it unchanged as history; `v1.2.6-rc2` is the next installation-handoff target after native immutability and attestation verification pass.
 - The RC1 1.2.3 asset predates later PHP 8.1 dependency, CI matrix, PHP 8.5, and reproducible-build changes. Do not relabel or overwrite it.
 - RC3 is the current verified, installable 1.2.3 pre-release. It pins Composer 2.10.3, UTC, and staged permissions; keep all prior RC tags immutable.
 - The quality matrix covers PHP 8.1–8.5, WordPress 6.8/latest/7.1, WooCommerce fixed/latest/11.1.0, and HPOS on/off where configured.
@@ -35,7 +35,7 @@ Verify all facts before acting and update this section whenever lineage, release
 1. Treat `v1.2.4-rc1` as superseded; do not install, retag, or overwrite it.
 2. Use `v1.2.5-rc1` for staging/canary only after PHP, integration, privacy, upgrade, and installable-ZIP gates pass.
 3. Investigate any new defect from a separate worktree and uniquely named disposable environment; never reuse preserved logging, RC2, or 1.2.5 verification assets without explicit authorization.
-4. Record version 1.2.6 through a GitHub feature branch, pull request, required CI, merge, and immutable `v1.2.6-rc1` Release. Only the redownload-verified GitHub ZIP is an installation handoff; local ZIPs are test evidence.
+4. Harden the publisher through a GitHub branch, pull request, required CI, and merge; then publish `v1.2.6-rc2` and require its Release API to report `immutable: true` plus successful asset-attestation and redownload checks. Only that official GitHub ZIP is an installation handoff; `v1.2.6-rc1` and local ZIPs are retained evidence.
 5. Stop before installation. Production changes require fresh backup/rollback controls and explicit authorization at execution time.
 6. After the 1.2.x canary, merge current `main` into the 1.3 development line, resolve drift, retest identity migration, and create a new reviewed 1.3 RC rather than reusing `v1.3.0-rc1`.
 

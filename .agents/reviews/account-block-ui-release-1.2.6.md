@@ -7,7 +7,7 @@ Date: 2026-09-14 (Asia/Tehran)
 - Development branch: `fix/1.2.6-account-block-ui`, based on `main` commit `c54f442dff0b3edc3476a6587c883f16e59fc486`.
 - The historical Phase 1–4 reports describe the local sequence from the 1.2.5 runtime. This document records the normalized 1.2.6 release candidate.
 - The project Skill now defines local changes and local ZIPs as intermediate evidence. A test version is ready for installation only after a GitHub branch, reviewable commits, pull request, required CI, merge, immutable pre-release, and fresh download verification of its ZIP and checksum.
-- The existing `v1.2.5-rc1` tag/release remains immutable. The new target is `v1.2.6-rc1`; it is a staging/canary pre-release, not stable/latest.
+- `v1.2.6-rc1` was published from PR #8 merge commit `270ace9` and its checksum was independently verified, but the Release API reports `immutable: false` because repository-level native immutability was enabled afterward. It remains untouched as publication history. The new installation-handoff target is `v1.2.6-rc2`; it is a staging/canary pre-release, not stable/latest.
 - Production installation, production data, the running 48-hour test, and the separate 1.3 identity line remain outside this release operation.
 
 ## Candidate contents
@@ -33,6 +33,8 @@ Date: 2026-09-14 (Asia/Tehran)
 - Two local Composer 2.10.3 builds were byte-identical. Candidate SHA-256: `cf830bcdf6ba3716c278d14291c34d3fadc63350e843e8400567c1c7113fc781`; archive integrity, top-level `pinova/`, version 1.2.6, and required new runtime files passed.
 - A fresh local online Composer advisory query timed out. The GitHub PHP 8.1 job must complete `composer audit` online before merge; cached dependency installation was sufficient for local static/test/build checks.
 
-## Publication gate
+## Publication history and next gate
 
-This local candidate is not the installation handoff. The official handoff must be the `pinova-1.2.6.zip` asset from the immutable GitHub `v1.2.6-rc1` pre-release after its `.sha256` companion and a fresh asset download both verify. The release workflow must build twice from the exact publish commit and refuse tag or asset replacement.
+PR #8 and all 15 required jobs passed before merge. The `v1.2.6-rc1` publisher also passed reproducible build, publication, fresh download, checksum, ZIP-integrity, and top-level-directory checks, producing SHA-256 `cf830bcdf6ba3716c278d14291c34d3fadc63350e843e8400567c1c7113fc781`. Because that Release is not GitHub-native immutable, it is not the installation handoff under the strengthened standard.
+
+The official handoff must be the `pinova-1.2.6.zip` asset from `v1.2.6-rc2` after the Release API reports `immutable: true`, GitHub verifies the Release and both asset attestations, and a fresh download matches the build outputs byte-for-byte. The workflow must never move or overwrite either published tag.

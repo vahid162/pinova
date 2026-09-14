@@ -8,6 +8,7 @@ on:
       - 'publish/v*'
 
 permissions:
+  attestations: read
   contents: write
 
 concurrency:
@@ -52,6 +53,12 @@ jobs:
           plugin_version="$(php -r '$s=file_get_contents("pinova.php"); preg_match("/Version:\\s*([0-9.]+)/", $s, $m); echo $m[1] ?? "";')"
           if [[ "${plugin_version}" != "${version}" ]]; then
             echo "Tag version ${version} does not match plugin version ${plugin_version}" >&2
+            exit 1
+          fi
+
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${RELEASE_SHA}" origin/main; then
+            echo "Release commit ${RELEASE_SHA} is not reachable from main" >&2
             exit 1
           fi
 
@@ -105,7 +112,7 @@ jobs:
             git push origin "refs/tags/${tag}"
           fi
 
-      - name: Publish GitHub pre-release and installable ZIP
+      - name: Publish immutable GitHub pre-release and installable ZIP
         shell: bash
         run: |
           set -euo pipefail
@@ -114,34 +121,46 @@ jobs:
           checksum="$(cut -d' ' -f1 ".build/pinova-${version}.zip.sha256")"
           notes="${RUNNER_TEMP}/release-notes.md"
 
-          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists; refusing to overwrite published assets." >&2
-            exit 1
-          fi
-
           printf '%s\n' \
             "## Pinova ${version} RC" \
             "" \
             "این نسخه یک پیش‌انتشار برای آزمون staging/canary است و هنوز stable/latest نیست." \
             "" \
             "- Exact commit: \`${RELEASE_SHA}\`" \
+            "- GitHub-native immutable release: \`true\`" \
             "- Installable asset: \`pinova-${version}.zip\`" \
             "- SHA-256: \`${checksum}\`" \
             "" \
             "برای نصب از asset بالا استفاده کنید؛ فایل خودکار Source code بستهٔ نصب افزونه نیست." \
             > "${notes}"
 
-          gh release create "${tag}" \
-            ".build/pinova-${version}.zip#Pinova ${version} installable ZIP" \
-            ".build/pinova-${version}.zip.sha256#SHA-256 checksum" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --target "${RELEASE_SHA}" \
-            --title "Pinova ${tag}" \
-            --notes-file "${notes}" \
-            --prerelease \
-            --verify-tag
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists; preserving it and verifying without mutation."
+          else
+            # With attached assets, gh creates a draft, uploads both files, then
+            # publishes it. GitHub-native immutability starts at publication.
+            gh release create "${tag}" \
+              ".build/pinova-${version}.zip#Pinova ${version} installable ZIP" \
+              ".build/pinova-${version}.zip.sha256#SHA-256 checksum" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${RELEASE_SHA}" \
+              --title "Pinova ${tag}" \
+              --notes-file "${notes}" \
+              --prerelease \
+              --latest=false \
+              --verify-tag
+          fi
 
-      - name: Redownload and verify published asset
+          release_api="repos/${GITHUB_REPOSITORY}/releases/tags/${tag}"
+          if [[ "$(gh api "${release_api}" --jq '.draft')" != "false" || \
+                "$(gh api "${release_api}" --jq '.prerelease')" != "true" || \
+                "$(gh api "${release_api}" --jq '.target_commitish')" != "${RELEASE_SHA}" || \
+                "$(gh api "${release_api}" --jq '.immutable')" != "true" ]]; then
+            echo "Release ${tag} is not the expected immutable pre-release for ${RELEASE_SHA}" >&2
+            exit 1
+          fi
+
+      - name: Redownload and verify published assets and attestations
         shell: bash
         run: |
           set -euo pipefail
@@ -160,3 +179,20 @@ jobs:
             unzip -tq "pinova-${version}.zip"
             unzip -Z1 "pinova-${version}.zip" | awk 'index($0, "pinova/") != 1 { bad = 1 } END { exit bad }'
           )
+          cmp ".build/pinova-${version}.zip" "${verify_dir}/pinova-${version}.zip"
+          cmp ".build/pinova-${version}.zip.sha256" "${verify_dir}/pinova-${version}.zip.sha256"
+
+          verified=false
+          for attempt in 1 2 3 4 5; do
+            if gh release verify "${tag}" --repo "${GITHUB_REPOSITORY}" && \
+               gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.zip" --repo "${GITHUB_REPOSITORY}" && \
+               gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.zip.sha256" --repo "${GITHUB_REPOSITORY}"; then
+              verified=true
+              break
+            fi
+            sleep 3
+          done
+          if [[ "${verified}" != "true" ]]; then
+            echo "GitHub release attestation verification failed for ${tag}" >&2
+            exit 1
+          fi

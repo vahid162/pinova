@@ -19,6 +19,7 @@ Work from a repository checkout or disposable worktree, never from an installed 
    - If identity migration documentation exists on the active 1.3 development branch, read it completely before migration, merge, resume, or rollback work.
 3. Classify the request as read-only review, diagnosis, implementation, migration, release, or production deployment. Permission for one class does not authorize another.
 4. Preserve unrelated changes. Never clean, reset, overwrite, migrate, publish, or deploy to simplify inspection.
+5. Establish the requested delivery boundary before reporting completion. For this project, a new version intended for installation or site testing is a GitHub-delivered release: local worktree changes and local ZIPs are intermediate evidence only.
 
 ## Non-negotiable invariants
 
@@ -28,10 +29,12 @@ Work from a repository checkout or disposable worktree, never from an installed 
 - If one mobile deterministically matches multiple legacy User IDs, fail closed and emit `pinova/identity_conflict_detected`; never choose the first row. Multi-ID merge belongs to the separately tested 1.3 identity workflow.
 - Password authentication must resolve the User ID first, then call `wp_signon()` with the real `user_login`, preserving 2FA, Wordfence, and standard login hooks.
 - Public authentication and recovery responses must not reveal whether an identifier exists, has a password, or belongs to a native-only role. Native-only roles still use `wp-login.php`, but that policy is not exposed through account-specific REST output.
+- The shared browser REST helper must return valid non-2xx Pinova/WordPress JSON responses to its callers instead of replacing them with a transport error. Prefer the field-specific WordPress validation message, preserve HTTP status, `Retry-After`, and Pinova correlation metadata, and show a generic helper-level notification only for network or malformed responses. Do not emit a duplicate notification from both the helper and its caller.
 - Role allowlists must be revalidated after filters. A filter cannot admit roles with administrative, user-management, plugin-management, WooCommerce-management, or order-edit capabilities.
 - Legacy upgrade methods are additive/no-op against WordPress core tables. Do not alter/drop core columns or indexes, rewrite core identity data, or add foreign keys to core tables.
 - Spreadsheet formatting must stay within populated ranges. Never style whole worksheet columns such as `A:Z`, because PhpSpreadsheet materializes millions of cells and can exhaust PHP memory even for a tiny export.
 - A `pinova_blocks` row with `blocked_until = NULL` is permanent. Expired cleanup must leave permanent blocks intact.
+- Blocked List writes are type-authoritative: accept only `mobile`, `email`, `username`, or `ip`, normalize by that selected type before persistence and lookup, and never allow a manual request to convert or delete a system-managed block. Recheck both the client IP and identifier during OTP verification so a block added after code issuance still prevents authentication and user creation.
 - Release ZIPs require the repository-pinned Composer 2.10.3. `tools/build.sh` must fail on a different Composer version, export `TZ=UTC`, and normalize staged directories/files to `0755`/`0644`, because Composer-generated autoload formatting, ZIP DOS timestamps, and checkout umasks otherwise vary across build hosts.
 - Root `CHANGELOG.md` and the WordPress.org `readme.txt` Changelog section are synchronized release-history views. Preserve identical version order and entry text, update both together, and run `php tools/check-changelog-sync.php`; CI must reject drift. Keep the repository-only Markdown file out of the installable ZIP because `readme.txt` already ships the same history.
 - A version bump requires a matching `Version::update_XYZ()` method, even when no schema changes are needed, so the installed-version option advances and the upgrader does not repeat on every request.
@@ -57,11 +60,12 @@ Work from a repository checkout or disposable worktree, never from an installed 
 2. Add a regression test when practical. Authentication, identifier, database, exports, proxy, redirect, and WooCommerce ownership changes require integration coverage.
 3. Make the smallest coherent change and preserve the REST envelope `{success,message,data}` where compatibility requires it.
 4. For mobile profile changes, store the normalized value in physical `pinova_mobile` meta, validate ownership/conflicts, and keep `user_login` immutable.
-5. For logging changes, update the event catalogue and privacy allowlist in `references/logging.md`, add a no-secret regression test, and exercise schema upgrade plus retention cleanup.
-6. Run targeted checks and the proportional suite in the quality reference.
-7. Update public documentation plus both `CHANGELOG.md` and the `readme.txt` Changelog section when behavior changes.
-8. Meaningfully update this `SKILL.md` in the same change set whenever runtime code, schema, dependencies, tests, tooling, CI, commands, integrations, or release behavior changes.
-9. Run `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree` before handoff.
+5. For Blocked List changes, test every supported identifier type, permanent/temporary expiry, system-block immutability, capability denial, filtered pagination, privacy-safe logs, and both issuance-time and verification-time authentication denial.
+6. For logging changes, update the event catalogue and privacy allowlist in `references/logging.md`, add a no-secret regression test, and exercise schema upgrade plus retention cleanup.
+7. Run targeted checks and the proportional suite in the quality reference.
+8. Update public documentation plus both `CHANGELOG.md` and the `readme.txt` Changelog section when behavior changes.
+9. Meaningfully update this `SKILL.md` in the same change set whenever runtime code, schema, dependencies, tests, tooling, CI, commands, integrations, or release behavior changes.
+10. Run `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree` before handoff.
 
 ### Migrate or merge identities
 
@@ -73,6 +77,8 @@ Work from a repository checkout or disposable worktree, never from an installed 
 ### Package or release
 
 - Read the quality/release reference before changing versions, tags, ZIPs, workflows, or GitHub Releases.
+- Record every durable change intended for a Pinova test version through a named GitHub branch, reviewable commits, a pull request, required CI, and merge. Never describe local implementation as a completed phase or an installable version while that GitHub record is missing. If GitHub mutation has not been authorized, stop at the local candidate and report publication as an explicit incomplete gate.
+- Treat a version as ready for installation only after an immutable GitHub Release contains its installable ZIP and SHA-256 file and both assets have been downloaded again and verified. Never direct the user to install a worktree-local ZIP.
 - Release candidates remain pre-releases until staging and canary gates pass. Stable/latest publication needs explicit authorization.
 - Build twice from the exact tag, compare SHA-256, publish the installable ZIP, download it again, and verify checksum, integrity, and top-level `pinova/`.
 - Run `php tools/check-changelog-sync.php` before selecting a release commit; a release with missing, reordered, or divergent history is not ready.
@@ -93,4 +99,4 @@ Do not use a date-only or whitespace-only edit to satisfy the gate.
 
 ## Completion gate
 
-Finish only when the requested behavior is evidenced or implemented, required checks pass (or failures are accurately classified), guidance is synchronized, requested artifacts are reproducible, and no production or external state changed outside the user-authorized scope. Handoff must name branch/tag, checks, results, remaining risk, and next safe step.
+Finish only when the requested behavior is evidenced or implemented, required checks pass (or failures are accurately classified), guidance is synchronized, requested artifacts are reproducible, and no production or external state changed outside the user-authorized scope. When the requested outcome is a version ready for installation, completion additionally requires the GitHub branch/PR/CI/merge record, an immutable GitHub pre-release or release, and successful redownload verification of its ZIP and checksum. Handoff must name branch, PR, merge commit, tag, Release URL, asset checksum, checks, remaining risk, and the separately authorized installation step.

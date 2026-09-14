@@ -19,7 +19,7 @@ final class ChangelogSyncTest extends TestCase {
 		$root = dirname(__DIR__, 2);
 
 		self::assertSame(
-			12,
+			13,
 			ChangelogSync::assertSynchronized(
 				(string) file_get_contents($root . '/CHANGELOG.md'),
 				(string) file_get_contents($root . '/readme.txt')

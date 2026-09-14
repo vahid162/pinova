@@ -6,11 +6,14 @@ namespace Pinova\Tests\Integration;
 
 use Illuminate\Database\Eloquent\Model;
 use Pinova\Services\FirewallService;
+use Pinova\Version;
 use WP_UnitTestCase;
 
 final class PluginLoadTest extends WP_UnitTestCase {
 	public function test_plugin_version_is_defined(): void {
 		self::assertTrue( defined( 'PINOVA_VERSION' ) );
+		self::assertSame( '1.2.6', PINOVA_VERSION );
+		self::assertTrue( method_exists( Version::class, 'update_126' ) );
 	}
 
 	public function test_database_connection_is_ready_without_install_bootstrap(): void {

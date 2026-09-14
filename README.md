@@ -7,7 +7,7 @@
 - تاریخچهٔ نسخه‌ها: [CHANGELOG.md](CHANGELOG.md)
 - مجوز: GPLv3
 
-> **وضعیت انتشار:** نسخهٔ ۱.۲.۵ RC1 پیش‌انتشار hotfix خط ۱.۲.x در GitHub است. این نسخه bootstrap اتصال دیتابیس داخلی را که در build نسخهٔ ۱.۲.۴ RC1 حذف شده بود بازمی‌گرداند و آن RC قدیمی نباید برای نصب تازه استفاده شود. RC همچنان stable/latest نیست و پیش از production به staging یا canary نیاز دارد.
+> **وضعیت انتشار:** نسخهٔ ۱.۲.۶ ادامهٔ خط امن ۱.۲.x و مبنای پیش‌انتشار `v1.2.6-rc1` است. این نسخه اصلاح bootstrap نسخهٔ ۱.۲.۵ را همراه با قرارداد Blocked List و رابط ورود جدید نگه می‌دارد. هر RC همچنان stable/latest نیست و فقط asset رسمی GitHub آن، پس از راستی‌آزمایی checksum، باید وارد staging یا canary شود.
 
 ## امکانات خط ۱.۲.x
 
@@ -18,9 +18,11 @@
 - ذخیرهٔ موبایل جدید در `pinova_mobile` بدون بازنویسی `wp_users.user_login`
 - توقف امن تطبیق موبایل وقتی یک مقدار به چند User ID برسد
 - یکپارچگی حساب و checkout ووکامرس و اعلام سازگاری HPOS
-- rate limit اتمیک، block موقت/دائمی و trusted proxy صریح
+- rate limit اتمیک و Blocked List نوع‌دار برای موبایل، ایمیل، نام کاربری و IP با مسدودی موقت/دائمی و trusted proxy صریح
 - خروجی Excel و VCF با capability، nonce، escaping و محدودیت ردیف
 - REST response استاندارد با envelope سازگار `{success,message,data}`
+- نمایش پیام معتبر خطاهای REST در رابط، همراه با زمان انتظار rate limit و Correlation ID قابل‌استفاده برای عیب‌یابی
+- صفحهٔ ورود مستقل، واکنش‌گرا و RTL با فرم‌های معنایی، کنترل کامل صفحه‌کلید، مسیر بدون جاوااسکریپت و نمایش مستقیم پیام Blocked List
 
 نسخهٔ ۱.۲.۳ برای جلوگیری از تخریب بیشتر Identity طراحی شده است، اما چند حساب موجود را خودکار merge نمی‌کند. Identity Resolver، audit، migration، merge و rollback به خط توسعهٔ جداگانهٔ ۱.۳ تعلق دارند و هنوز ویژگی منتشرشدهٔ ۱.۲.۳ نیستند.
 
@@ -120,6 +122,7 @@ npm install --ignore-scripts
 
 ```bash
 php tools/check-changelog-sync.php
+npm run test:js
 composer lint
 composer test
 composer phpstan

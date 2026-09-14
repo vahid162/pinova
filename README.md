@@ -7,7 +7,7 @@
 - تاریخچهٔ نسخه‌ها: [CHANGELOG.md](CHANGELOG.md)
 - مجوز: GPLv3
 
-> **وضعیت انتشار:** نسخهٔ ۱.۲.۶ ادامهٔ خط امن ۱.۲.x است. `v1.2.6-rc1` منتشر و checksum آن تأیید شد، اما پیش از فعال‌سازی Release Immutability بومی GitHub ساخته شده و handoff نصب نیست. هدف بعدی `v1.2.6-rc2` است؛ هر RC همچنان stable/latest نیست و فقط asset رسمی، immutable و راستی‌آزمایی‌شدهٔ GitHub باید وارد staging یا canary شود.
+> **وضعیت انتشار:** نسخهٔ ۱.۲.۶ ادامهٔ خط امن ۱.۲.x است. [`v1.2.6-rc2`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc2) به‌صورت pre-release بومی و immutable گیت‌هاب منتشر شده و Release، هر دو asset، checksum و بازدانلود مستقل آن تأیید شده‌اند. SHA-256 فایل نصب `dc6a918c6c9df67010038004ac1b5ce8b16b091fda4d3f7135ec81bb7d4fbfc9` است. این نسخه handoff رسمی برای staging/canary با مجوز جداگانه است و هنوز stable/latest یا مجوز نصب production نیست؛ `v1.2.6-rc1` فقط سابقهٔ انتشار باقی می‌ماند.
 
 ## امکانات خط ۱.۲.x
 

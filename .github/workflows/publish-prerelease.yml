@@ -143,6 +143,7 @@ jobs:
             "" \
             "- Exact commit: \`${RELEASE_SHA}\`" \
             "- GitHub-native immutable release: \`true\`" \
+            "- Publisher identity: \`pinova-prerelease-v2\`" \
             "- Installable asset: \`pinova-${version}.zip\`" \
             "- SHA-256: \`${checksum}\`" \
             "" \
@@ -150,14 +151,36 @@ jobs:
             > "${notes}"
 
           release_exists=false
+          release_found=false
           if release_state="$(gh release view "${tag}" \
             --repo "${GITHUB_REPOSITORY}" \
             --json isDraft,isImmutable \
             --jq '[.isDraft, .isImmutable] | @tsv' 2>/dev/null)"; then
+            release_found=true
             IFS=$'\t' read -r is_draft is_immutable <<< "${release_state}"
             if [[ "${is_draft}" == "true" ]]; then
-              echo "Removing incomplete unpublished draft for ${tag} before rebuilding it."
-              gh release delete "${tag}" --repo "${GITHUB_REPOSITORY}" --yes
+              expected_name="Pinova ${tag}"
+              actual_name="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json name --jq '.name')"
+              actual_target="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json targetCommitish --jq '.targetCommitish')"
+              actual_body="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json body --jq '.body')"
+              expected_body="$(cat "${notes}")"
+              asset_names="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name')"
+
+              if [[ "${actual_name}" != "${expected_name}" || \
+                    "${actual_target}" != "${RELEASE_SHA}" || \
+                    "${actual_body}" != "${expected_body}" ]]; then
+                echo "Existing draft ${tag} does not match this publisher identity; refusing to alter it." >&2
+                exit 1
+              fi
+              while IFS= read -r asset_name; do
+                if [[ -n "${asset_name}" && \
+                      "${asset_name}" != "pinova-${version}.zip" && \
+                      "${asset_name}" != "pinova-${version}.zip.sha256" ]]; then
+                  echo "Existing draft ${tag} contains unexpected asset ${asset_name}; refusing to alter it." >&2
+                  exit 1
+                fi
+              done <<< "${asset_names}"
+              echo "Resuming verified unpublished draft for ${tag}."
             elif [[ "${is_immutable}" == "true" ]]; then
               echo "Immutable Release ${tag} already exists; preserving it and verifying without mutation."
               release_exists=true
@@ -168,25 +191,39 @@ jobs:
           fi
 
           if [[ "${release_exists}" != "true" ]]; then
-            # With attached assets, gh creates a draft, uploads both files, then
-            # publishes it. GitHub-native immutability starts at publication.
-            gh release create "${tag}" \
+            if [[ "${release_found}" != "true" ]]; then
+              gh release create "${tag}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --target "${RELEASE_SHA}" \
+                --title "Pinova ${tag}" \
+                --notes-file "${notes}" \
+                --prerelease \
+                --draft \
+                --verify-tag
+            fi
+            gh release upload "${tag}" \
               ".build/pinova-${version}.zip#Pinova ${version} installable ZIP" \
               ".build/pinova-${version}.zip.sha256#SHA-256 checksum" \
               --repo "${GITHUB_REPOSITORY}" \
-              --target "${RELEASE_SHA}" \
-              --title "Pinova ${tag}" \
-              --notes-file "${notes}" \
+              --clobber
+            gh release edit "${tag}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --draft=false \
               --prerelease \
               --latest=false \
               --verify-tag
           fi
 
           release_api="repos/${GITHUB_REPOSITORY}/releases/tags/${tag}"
-          if [[ "$(gh api "${release_api}" --jq '.draft')" != "false" || \
-                "$(gh api "${release_api}" --jq '.prerelease')" != "true" || \
-                "$(gh api "${release_api}" --jq '.target_commitish')" != "${RELEASE_SHA}" || \
-                "$(gh api "${release_api}" --jq '.immutable')" != "true" ]]; then
+          release_state="$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "${release_api}" \
+            --jq '[.draft, .prerelease, .target_commitish, .immutable] | @tsv')"
+          IFS=$'\t' read -r is_draft is_prerelease actual_target is_immutable <<< "${release_state}"
+          if [[ "${is_draft}" != "false" || \
+                "${is_prerelease}" != "true" || \
+                "${actual_target}" != "${RELEASE_SHA}" || \
+                "${is_immutable}" != "true" ]]; then
             echo "Release ${tag} is not the expected immutable pre-release for ${RELEASE_SHA}" >&2
             exit 1
           fi

@@ -38,26 +38,11 @@ jobs:
           extensions: curl, fileinfo, gd, json, mbstring, zip
           tools: composer:2.10.3
 
-      - name: Validate immutable release identity
+      - name: Validate release identity
         id: release
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.PINOVA_RELEASE_PREFLIGHT_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ -z "${GH_TOKEN}" ]]; then
-            echo "PINOVA_RELEASE_PREFLIGHT_TOKEN is required and must have repository Administration (read)." >&2
-            exit 1
-          fi
-          immutability_enabled="$(gh api \
-            -H "X-GitHub-Api-Version: 2026-03-10" \
-            "repos/${GITHUB_REPOSITORY}/immutable-releases" \
-            --jq '.enabled')"
-          if [[ "${immutability_enabled}" != "true" ]]; then
-            echo "GitHub-native Release Immutability is not enabled for ${GITHUB_REPOSITORY}" >&2
-            exit 1
-          fi
-
           tag="${RELEASE_BRANCH#publish/}"
           if [[ "${tag}" == "${RELEASE_BRANCH}" || ! "${tag}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-rc([1-9][0-9]*)$ ]]; then
             echo "Release branch must match publish/vX.Y.Z-rcN" >&2

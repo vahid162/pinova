@@ -41,8 +41,23 @@ jobs:
       - name: Validate immutable release identity
         id: release
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PINOVA_RELEASE_PREFLIGHT_TOKEN }}
         run: |
           set -euo pipefail
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "PINOVA_RELEASE_PREFLIGHT_TOKEN is required and must have repository Administration (read)." >&2
+            exit 1
+          fi
+          immutability_enabled="$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/immutable-releases" \
+            --jq '.enabled')"
+          if [[ "${immutability_enabled}" != "true" ]]; then
+            echo "GitHub-native Release Immutability is not enabled for ${GITHUB_REPOSITORY}" >&2
+            exit 1
+          fi
+
           tag="${RELEASE_BRANCH#publish/}"
           if [[ "${tag}" == "${RELEASE_BRANCH}" || ! "${tag}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-rc([1-9][0-9]*)$ ]]; then
             echo "Release branch must match publish/vX.Y.Z-rcN" >&2
@@ -134,9 +149,25 @@ jobs:
             "برای نصب از asset بالا استفاده کنید؛ فایل خودکار Source code بستهٔ نصب افزونه نیست." \
             > "${notes}"
 
-          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists; preserving it and verifying without mutation."
-          else
+          release_exists=false
+          if release_state="$(gh release view "${tag}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --json isDraft,isImmutable \
+            --jq '[.isDraft, .isImmutable] | @tsv' 2>/dev/null)"; then
+            IFS=$'\t' read -r is_draft is_immutable <<< "${release_state}"
+            if [[ "${is_draft}" == "true" ]]; then
+              echo "Removing incomplete unpublished draft for ${tag} before rebuilding it."
+              gh release delete "${tag}" --repo "${GITHUB_REPOSITORY}" --yes
+            elif [[ "${is_immutable}" == "true" ]]; then
+              echo "Immutable Release ${tag} already exists; preserving it and verifying without mutation."
+              release_exists=true
+            else
+              echo "Published Release ${tag} exists but is mutable; refusing to alter it." >&2
+              exit 1
+            fi
+          fi
+
+          if [[ "${release_exists}" != "true" ]]; then
             # With attached assets, gh creates a draft, uploads both files, then
             # publishes it. GitHub-native immutability starts at publication.
             gh release create "${tag}" \

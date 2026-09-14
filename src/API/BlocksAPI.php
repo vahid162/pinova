@@ -5,10 +5,11 @@ namespace Pinova\API;
 
 use Illuminate\Database\Eloquent\Builder;
 use Pinova\Helper;
-use Pinova\Helpers\IP;
 use Pinova\Logging\Logger;
 use Pinova\Models\Block;
 use Pinova\Objects\Identifier;
+use Pinova\Services\FirewallService;
+use WP_Error;
 use WP_REST_Request;
 use WP_User;
 use WP_User_Query;
@@ -23,6 +24,12 @@ class BlocksAPI extends RestAPI {
 			'methods'             => 'POST',
 			'callback'            => [ $this, 'filters' ],
 			'permission_callback' => [ $this, 'permission_callback' ],
+			'args'                => [
+				'blocked_by' => [
+					'required'          => false,
+					'sanitize_callback' => 'sanitize_text_field',
+				],
+			],
 		] );
 
 		register_rest_route( 'pinova/admin/blocks', 'index', [
@@ -64,9 +71,15 @@ class BlocksAPI extends RestAPI {
 			'callback'            => [ $this, 'add' ],
 			'permission_callback' => [ $this, 'permission_callback' ],
 			'args'                => [
+				'blocked_type'  => [
+					'required'          => true,
+					'sanitize_callback' => 'sanitize_key',
+					'validate_callback' => [ $this, 'validate_blocked_type' ],
+				],
 				'identifier'    => [
 					'required'          => true,
 					'sanitize_callback' => 'sanitize_text_field',
+					'validate_callback' => [ $this, 'validate_block_identifier' ],
 				],
 				'blocked_until' => [
 					'required'          => false,
@@ -106,27 +119,44 @@ class BlocksAPI extends RestAPI {
 
 		}
 
-		$users = new WP_User_Query( [
-			'number'   => - 1,
+		$search     = trim( (string) $request->get_param( 'blocked_by' ) );
+		$query_args = [
+			'number'   => 20,
+			'orderby'  => 'display_name',
+			'order'    => 'ASC',
 			'role__in' => $roles,
-		] );
-		$users = collect( $users->get_results() );
+		];
+
+		if ( '' !== $search ) {
+			$query_args['search']         = '*' . $search . '*';
+			$query_args['search_columns'] = [ 'user_login', 'user_email', 'display_name' ];
+		}
+
+		$users = new WP_User_Query( $query_args );
+		$users = array_map(
+			static function ( WP_User $user ): array {
+				return [
+					'id'   => (int) $user->ID,
+					'name' => (string) $user->display_name,
+				];
+			},
+			$users->get_results()
+		);
 
 		return self::response( true, null, [
-			'users' => $users->pluck( 'display_name', 'ID' )->toArray(),
+			'users' => array_values( $users ),
 		] );
 	}
 
 	public function index( WP_REST_Request $request ) {
 
 		$raw_identifier = $request->get_param( 'identifier' );
-		$blocked_by     = $request->get_param( 'blocked_by' ); // @todo check it return null
-		$blocked_by     = $_POST['blocked_by'] ?? null;
+		$blocked_by     = absint( $request->get_param( 'blocked_by' ) );
 		$from_date      = $request->get_param( 'from_date' );
 		$to_date        = $request->get_param( 'to_date' );
 
-		$page     = max( 1, $request->get_param( 'page' ) );
-		$per_page = max( 1, $request->get_param( 'per_page' ) );
+		$page     = max( 1, absint( $request->get_param( 'page' ) ) );
+		$per_page = min( 100, max( 1, absint( $request->get_param( 'per_page' ) ) ) );
 
 		$timezone = wp_timezone();
 
@@ -165,16 +195,10 @@ class BlocksAPI extends RestAPI {
 
 			              } );
 
-		              } )
-		              ->when( $blocked_by, function ( Builder $query ) use ( $blocked_by ) {
-
-			              $users = new WP_User_Query( [
-				              'search' => "*{$blocked_by}*",
-				              'fields' => 'ID',
-			              ] );
-
-			              $query->where( 'blocked_by', '=', $users->get_results() );
-		              } )
+			              } )
+			              ->when( $blocked_by, function ( Builder $query ) use ( $blocked_by ) {
+				$query->where( 'blocked_by', '=', $blocked_by );
+			              } )
 		              ->when( $from_date, function ( Builder $query ) use ( $from_date ) {
 			              $query->where( 'blocked_until', '>=', $from_date );
 		              } )
@@ -183,6 +207,8 @@ class BlocksAPI extends RestAPI {
 		              } );
 
 		$total_items = $query->count();
+		$total_pages = max( 1, (int) ceil( $total_items / $per_page ) );
+		$page        = min( $page, $total_pages );
 
 		$blocks = $query
 			->forPage( $page, $per_page )
@@ -193,14 +219,28 @@ class BlocksAPI extends RestAPI {
 		return self::response( true, null, [
 			'blocks'       => $blocks,
 			'current_page' => intval( $page ),
+			'total_pages'  => $total_pages,
 			'total_items'  => intval( $total_items ),
 		] );
 	}
 
 	public function add( WP_REST_Request $request ) {
 
-		$raw_identifier = $request->get_param( 'identifier' );
-		$blocked_until  = $request->get_param( 'blocked_until' );
+		$blocked_type  = sanitize_key( (string) $request->get_param( 'blocked_type' ) );
+		$identifier    = FirewallService::normalize_identifier(
+			$blocked_type,
+			(string) $request->get_param( 'identifier' )
+		);
+		$blocked_until = $request->get_param( 'blocked_until' );
+
+		if ( null === $identifier ) {
+			return self::response(
+				false,
+				self::invalid_identifier_message( $blocked_type ),
+				[ 'field' => 'identifier' ],
+				400
+			);
+		}
 
 		if ( empty( $blocked_until ) ) {
 			$blocked_until = null;
@@ -216,14 +256,24 @@ class BlocksAPI extends RestAPI {
 				->utc();
 
 			if ( $blocked_until->isPast() ) {
-				return self::response( false, __( 'تاریخ مسدودیت باید در آینده باشد.', 'pinova' ), [], 400 );
+				return self::response(
+					false,
+					__( 'تاریخ مسدودیت باید در آینده باشد.', 'pinova' ),
+					[ 'field' => 'blocked_until' ],
+					400
+				);
 			}
 		}
 
-		$identifier = $this->expand_identifier( $raw_identifier );
-
-		if ( empty( $identifier ) ) {
-			return self::response( false, __( 'شناسه وارد شده معتبر نمی‌باشد.', 'pinova' ), [], 400 );
+		/** @var Block|null $existing_block */
+		$existing_block = Block::query()->where( 'identifier', $identifier )->first();
+		if ( $existing_block && null === $existing_block->blocked_by ) {
+			return self::response(
+				false,
+				__( 'مسدودی‌های سیستمی از این بخش قابل ویرایش نیستند.', 'pinova' ),
+				[ 'field' => 'identifier' ],
+				403
+			);
 		}
 
 		/** @var Block $block */
@@ -234,21 +284,20 @@ class BlocksAPI extends RestAPI {
 			'blocked_until' => $blocked_until,
 		] );
 
-		$log_identifier = new Identifier( $identifier );
-		$log_type       = IP::is_valid( $identifier ) ? 'ip' : $log_identifier->get_type();
 		Logger::instance()->notice(
 			'security.block_added',
 			[
 				'user_id'                => get_current_user_id(),
 				'resource_id'            => $block->id,
-				'identifier_type'        => $log_type,
-				'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier, $log_type ),
+				'identifier_type'        => $blocked_type,
+				'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier, $blocked_type ),
 				'status'                 => null === $blocked_until ? 'permanent' : 'temporary',
 			]
 		);
 
-		return self::response( true, sprintf( 'شناسه %s با موفقیت مسدود شد.', $identifier ), [
+		return self::response( true, __( 'مسدودی با موفقیت ذخیره شد.', 'pinova' ), [
 			'block_id' => $block->id,
+			'block'    => $this->resource( $block ),
 			'blocks'   => $this->blocks(),
 		] );
 	}
@@ -262,12 +311,12 @@ class BlocksAPI extends RestAPI {
 			/** @var Block $block */
 			$block = Block::query()->findOrFail( $block_id );
 
-		} catch ( \Exception $e ) {
-			return self::response( false, $e->getMessage(), [], 404 );
+		} catch ( \Throwable $e ) {
+			return self::response( false, __( 'مسدودی موردنظر یافت نشد.', 'pinova' ), [], 404 );
 		}
 
 		if ( empty( $block->blocked_by ) ) {
-			return self::response( false, 'مسدودی‌های سیستمی قابل حذف نیستند.', [
+			return self::response( false, __( 'مسدودی‌های سیستمی قابل حذف نیستند.', 'pinova' ), [
 				'blocks' => $this->blocks(),
 			], 403 );
 		}
@@ -276,8 +325,7 @@ class BlocksAPI extends RestAPI {
 		$block_id   = (int) $block->id;
 		$block->delete();
 
-		$log_identifier = new Identifier( $identifier );
-		$log_type       = IP::is_valid( $identifier ) ? 'ip' : $log_identifier->get_type();
+		$log_type = FirewallService::identifier_type( $identifier );
 		Logger::instance()->notice(
 			'security.block_removed',
 			[
@@ -288,7 +336,7 @@ class BlocksAPI extends RestAPI {
 			]
 		);
 
-		return self::response( true, 'شناسه با موفقیت رفع مسدودی شد.', [
+		return self::response( true, __( 'شناسه با موفقیت رفع مسدودی شد.', 'pinova' ), [
 			'blocks' => $this->blocks(),
 		] );
 	}
@@ -307,37 +355,59 @@ class BlocksAPI extends RestAPI {
 
 	public function resource( Block $block ): array {
 		return [
-			'id'            => $block->id,
-			'identifier'    => $block->identifier,
-			'blocked_by'    => $block->blocked_by_label,
-			'blocked_until' => $block->blocked_until ? Helper::date( $block->blocked_until, 'Y/m/d H:i' ) : null,
+			'id'              => $block->id,
+			'identifier'      => $block->identifier,
+			'identifier_type' => FirewallService::identifier_type( (string) $block->identifier ),
+			'blocked_by'      => $block->blocked_by_label,
+			'blocked_until'   => $block->blocked_until ? Helper::date( $block->blocked_until, 'Y/m/d H:i' ) : null,
 		];
 	}
 
-	private function expand_identifier( string $raw_identifier = '' ): ?string {
+	/** @return bool|WP_Error */
+	public function validate_blocked_type( $param, WP_REST_Request $request, string $key ) {
+		$type = is_scalar( $param ) ? sanitize_key( (string) $param ) : '';
 
-		if ( empty( $raw_identifier ) ) {
-			return null;
+		if ( in_array( $type, FirewallService::IDENTIFIER_TYPES, true ) ) {
+			return true;
 		}
 
-		$identifier = new Identifier( $raw_identifier );
+		return new WP_Error( 'pinova_invalid_blocked_type', __( 'نوع شناسه انتخاب‌شده معتبر نیست.', 'pinova' ) );
+	}
 
-		if ( IP::is_valid( $raw_identifier ) ) {
-			return $raw_identifier;
+	/** @return bool|WP_Error */
+	public function validate_block_identifier( $param, WP_REST_Request $request, string $key ) {
+		$type = sanitize_key( (string) $request->get_param( 'blocked_type' ) );
+
+		if ( ! in_array( $type, FirewallService::IDENTIFIER_TYPES, true ) ) {
+			return true;
 		}
 
-		if ( $identifier->get_type() === 'username' ) {
+		$identifier = is_scalar( $param )
+			? FirewallService::normalize_identifier( $type, (string) $param )
+			: null;
 
-			$user = get_user_by( 'login', $identifier->get_value() );
-
-			if ( $user instanceof WP_User ) {
-				return $user->user_login;
-			}
-
-			return null;
+		if ( null === $identifier ) {
+			return new WP_Error( 'pinova_invalid_block_identifier', self::invalid_identifier_message( $type ) );
 		}
 
-		// Phone/Email
-		return $identifier->get_value();
+		$request->set_param( $key, $identifier );
+
+		return true;
+	}
+
+	private static function invalid_identifier_message( string $type ): string {
+		$labels = [
+			'mobile'   => __( 'تلفن همراه', 'pinova' ),
+			'email'    => __( 'ایمیل', 'pinova' ),
+			'ip'       => __( 'آدرس آی.پی', 'pinova' ),
+			'username' => __( 'نام کاربری', 'pinova' ),
+		];
+		$label = $labels[ $type ] ?? __( 'شناسه', 'pinova' );
+
+		return sprintf(
+			/* translators: %s: identifier type label. */
+			__( 'مقدار واردشده یک %s معتبر نیست.', 'pinova' ),
+			$label
+		);
 	}
 }

@@ -4,6 +4,7 @@ namespace Pinova\Services;
 
 use Carbon\Carbon;
 use Exception;
+use Pinova\Exceptions\BlockedException;
 use Pinova\Exceptions\SendOTPException;
 use Pinova\Helpers\IP;
 use Pinova\Helpers\JWT;
@@ -86,6 +87,15 @@ class OTPService {
 		} catch ( \Throwable $e ) {
 			Logger::instance()->notice( 'otp.verify_failed', [ 'reason' => 'record_not_found', 'exception' => $e ] );
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
+		}
+
+		if ( FirewallService::is_ip_blocked() ) {
+			throw new BlockedException( 'ip' );
+		}
+
+		$identifier = new Identifier( (string) $otp->identifier );
+		if ( $identifier->is_valid() && FirewallService::is_blocked( $identifier->get_value() ) ) {
+			throw new BlockedException( $identifier->get_type() );
 		}
 
 		if ( $otp->isExpired() || $otp->isVerified() || $otp->attempts >= 5 ) {

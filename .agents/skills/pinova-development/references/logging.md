@@ -80,6 +80,8 @@ Adding a context key requires all of:
 
 Event names are API-like identifiers, not translated prose. Renaming an event is a compatibility change for monitoring consumers. Add a new event rather than inserting dynamic data into the event name.
 
+The `security.block_added` and `security.block_removed` contexts may contain the selected identifier type, keyed identifier fingerprint, block status, authorized administrator User ID, and block resource ID. They must never contain the raw mobile, email, username, or IP. Do not emit a new persistent event for every attacker-controlled blocked login attempt; the administrator mutation events provide the bounded audit trail without log amplification.
+
 The two `admin.sms_test_*` events are bounded, capability-protected audit actions. They bypass the configured minimum level so a deliberate test always leaves a privacy-safe result, including when the site stores only `error` events. This exception must not be generalized to request-driven authentication, OTP, or channel events.
 
 ## Operational workflow

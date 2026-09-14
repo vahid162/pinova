@@ -36,6 +36,8 @@ Resolution returns a User ID only when the candidate is unambiguous. Multiple le
 
 Schema changes must be additive and `dbDelta()` compatible. Never alter/drop columns or indexes in `wp_users` or other core tables.
 
+Blocked List writes require an authoritative `blocked_type`: `mobile`, `email`, `username`, or `ip`. REST writes validate the selected type, persist the canonical identifier for that type, store `NULL` for a permanent block, and keep system-managed rows immutable through manual add/delete operations. The current table stores the canonical identifier rather than a separate type column, so response resources derive `identifier_type` from the stored value. List filters return a stable `{users:[{id,name}]}` shape and server pagination metadata. Authentication checks the normalized identifier and client IP before OTP issuance and checks them again during OTP verification; therefore adding a block after issuing a code must still prevent verification, session creation, and user creation.
+
 The 1.2.x Eloquent models depend on the connection initializer in `utils/class-database.php`. Composer includes that file in `autoload.files`, not only in the classmap: a classmap makes the class discoverable but does not execute the bottom-of-file initializer on a fresh request. Because a CLI/test process may load Composer before WordPress exists, `pinova.php` also performs an idempotent resolver check and explicitly initializes the connection after WordPress loads. Integration bootstrap checks the resolver before any installer helper can conceal this failure.
 
 ## Security boundaries
@@ -46,7 +48,12 @@ The 1.2.x Eloquent models depend on the connection initializer in `utils/class-d
 - Public password/forgot/OTP responses do not expose account existence or native-only role membership.
 - Native administrator password/2FA login remains available through `wp-login.php` according to policy.
 - Rate limits hash identifiers and return HTTP 429 with `Retry-After`.
+- Active mobile, email, username, and IP blocks deny the corresponding public authentication path without exposing account existence. Block messages may identify the blocked input type but never disclose whether a WordPress account exists.
 - Logs retain stable codes, keyed identifier fingerprints, and bounded context—not raw identifiers, secrets, exception messages, or traces. REST responses include `X-Pinova-Correlation-ID` for support correlation.
 - Proxy chains are considered only behind trusted CIDRs.
+
+## Client REST response contract
+
+`assets/js/global.js` is shared by the full-page login, login modal, Blocked List administration, and WooCommerce customer-creation modal. For a valid JSON response it returns the existing server envelope and adds an `http` object containing the status, optional `Retry-After` values, and optional Pinova correlation ID. A non-2xx JSON response is normalized to `success: false`; standard WordPress argument-validation errors prefer their field-specific `data.params` message over the generic `rest_invalid_param` summary. Callers remain responsible for rendering those server messages. The helper itself shows a generic notification and rejects only when transport fails or the response is malformed, preventing duplicate notifications while preserving actionable blocked, OTP, rate-limit, and delivery failures.
 
 WooCommerce bootstrap runs early enough that constructing `WC()->checkout()` can trigger its text domain before WordPress permits just-in-time translation loading. The registration-required default mirrors WooCommerce's filtered `woocommerce_enable_guest_checkout` option without constructing checkout; actual checkout calls remain inside checkout-time hooks.

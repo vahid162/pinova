@@ -2,6 +2,7 @@
 
 namespace Pinova\Services;
 
+use Pinova\Exceptions\BlockedException;
 use Pinova\Helpers\Number;
 use Pinova\Helpers\Password;
 use Pinova\Objects\Identifier;
@@ -22,7 +23,7 @@ class ValidationService {
 		$is_blocked = FirewallService::is_blocked( $identifier->get_value() );
 
 		if ( $is_blocked ) {
-			return new WP_Error( 'pinova_blocked_identifier', __( 'ایمیل یا تلفن همراه مسدود شده است.', 'pinova' ) );
+			return new WP_Error( 'pinova_blocked_identifier', BlockedException::message_for( $identifier->get_type() ) );
 		}
 
 		$request->set_param( 'identifier', $identifier );
@@ -41,7 +42,7 @@ class ValidationService {
 		$is_blocked = FirewallService::is_blocked( $mobile->get_value() );
 
 		if ( $is_blocked ) {
-			return new WP_Error( 'pinova_blocked_mobile', __( 'تلفن همراه مسدود شده است.', 'pinova' ) );
+			return new WP_Error( 'pinova_blocked_mobile', BlockedException::message_for( 'mobile' ) );
 		}
 
 		$request->set_param( 'mobile', $mobile );
@@ -65,7 +66,7 @@ class ValidationService {
 		$is_blocked = FirewallService::is_blocked( $email->get_value() );
 
 		if ( $is_blocked ) {
-			return new WP_Error( 'pinova_blocked_email', __( 'ایمیل مسدود شده است.', 'pinova' ) );
+			return new WP_Error( 'pinova_blocked_email', BlockedException::message_for( 'email' ) );
 		}
 
 		$request->set_param( 'email', $email );

@@ -22,6 +22,14 @@ composer phpcs
 composer audit
 ```
 
+Run the dependency-free browser-helper regression suite with Node.js 20 or newer:
+
+```bash
+npm run test:js
+```
+
+It evaluates the shipped browser scripts in isolated VMs with mocked REST responses. Keep `global.js` coverage for successful envelopes, WordPress field-validation errors, Pinova 401/403/429/503 envelopes, `Retry-After`, correlation metadata, nonce-header isolation, malformed responses, and network failures. Keep Blocked List coverage for permanent-modal reset, typed add payloads, stable filter parsing, exact pagination, current-page refresh after add/delete, and bounded page navigation. CI runs this suite in its own JavaScript job; it does not require starting wp-env.
+
 Run integration tests only in an isolated WordPress environment:
 
 ```bash
@@ -33,6 +41,8 @@ npm run env:stop
 ```
 
 Set `WP_VERSION` and `WC_VERSION` before configuration for compatibility pairs. `tools/run-integration.sh` derives the mounted plugin directory from the checkout name and forwards `PINOVA_TEST_HPOS=yes|no` into `tests-cli`; the bootstrap writes that option into the PHPUnit database before Pinova loads. Do not use the ordinary `cli` container to configure HPOS for integration tests because it addresses the separate development database. The test bootstrap loads the mounted WooCommerce plugin before Pinova; a missing WooCommerce class is a test failure, not an acceptable skip. Ensure `pdo_mysql` is installed in `tests-cli` because Pinova's Illuminate connection uses PDO. The wp-env image's in-container sudo does not retain `PHP_INI_DIR`, so pass `PHP_INI_DIR=/usr/local/etc/php` explicitly to `docker-php-ext-install`. Authentication and legacy-identity changes must cover native hooks, role policy, uniform public responses, explicit mobile override of every older alias, deterministic conflicts, invalid mobile objects, and no core-table mutation. WooCommerce changes require HPOS off and on.
+
+Blocked List integration coverage must exercise `manage_options`, all four identifier types, normalization/type mismatch, permanent and expiring rows, duplicate updates, immutable system rows, stable filter and pagination responses, privacy-safe add/remove logs, denial before OTP issuance, denial after OTP issuance but before verification, password/native-hook denial, and non-enumerating public responses. Run the full integration suite with HPOS both off and on after these changes.
 
 An installable-ZIP browser lifecycle check also needs `pdo_mysql` in the disposable `wordpress` web container; installing it only in `tests-cli` is sufficient for PHPUnit but not for a real authenticated wp-admin request. Never modify a preserved environment to add it—prepare the task-specific environment and record that difference in the handoff.
 
@@ -63,6 +73,8 @@ The build must also confirm that `vendor/composer/autoload_files.php` eagerly re
 7. Stop before production unless installation was separately and explicitly authorized. On staging/production, validate `/login`, `/wp-login.php`, username/email/mobile password paths, OTP, administrator native login/2FA hooks, WooCommerce, and logs.
 8. Mark stable/latest only after the agreed canary and explicit authorization.
 
+A worktree-local ZIP is never the installation handoff for this project. A test version is ready for installation only when the GitHub branch, commits, pull request, required CI, merge commit, immutable Release, ZIP, and checksum are all present, and the published assets pass a fresh download verification. If authorization stops before GitHub publication, label the result as a local candidate rather than a completed version.
+
 ## Current lineage snapshot
 
 - `main`: Pinova 1.2.x security line, reproducible release, structured logging, and the 1.2.5 database-bootstrap hotfix.
@@ -73,6 +85,7 @@ The build must also confirm that `vendor/composer/autoload_files.php` eagerly re
 - RC2 source PR: `release/v1.2.3-rc2-prep`, merged by PR #2 at `45f9d516`.
 - `v1.2.4-rc1` / `5789178`: structured-logging pre-release; superseded because its reconstructed Composer config classmapped but did not eagerly load the database initializer.
 - `v1.2.5-rc1`: current hotfix pre-release; restores fresh-request initialization and makes administrator SMS-test audit results visible regardless of the logging threshold.
+- `v1.2.6-rc1`: next immutable pre-release target for the REST error contract, type-authoritative Blocked List enforcement, and accessible responsive account experience. Its installation asset must come from GitHub Releases, not a local build.
 - CI enforces synchronized release history between `CHANGELOG.md` and the WordPress.org `readme.txt` Changelog section.
 - 1.3 development branch: `security/v1.2.3-v1.3.0`.
 

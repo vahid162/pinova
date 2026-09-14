@@ -58,8 +58,7 @@ pinovaAlpine.data("pinovaLoginModal", ()=>({
                 password:{
                     value: '',
                     rules: {
-                        required: true,
-                        minLength: 8
+                        required: true
                     },
                     errorMsg: ''
                 },
@@ -148,7 +147,7 @@ pinovaAlpine.data("pinovaLoginModal", ()=>({
     },
 
     time:{
-        timeLeft: 120 * 1000, //2 minutes in seconds
+        duration: 120 * 1000, //2 minutes in milliseconds
         timerInterval : null,
         textTime: "03:00",
         textTimeMinutes: '',
@@ -260,7 +259,7 @@ pinovaAlpine.data("pinovaLoginModal", ()=>({
         try{
             this.pageLoaderIsActive = true;
 
-            const data = otherData;
+            const data = {...otherData};
             for (const key in this.forms.authenticate.inputs) {
                 if(this.forms.authenticate.inputs[key].value !== null){
                     data[key] = this.forms.authenticate.inputs[key].value
@@ -280,38 +279,22 @@ pinovaAlpine.data("pinovaLoginModal", ()=>({
                 const responseData = result.data;
                 this.forms.loginByPassword.inputs.identifier.value = this.forms.authenticate.inputs.identifier.value;
 
-                if(responseData.has_account){
-                    if(nextStepName === "forgotPassword"){
-                        this.changeStep("forgotPassword");
-                        this.forms.forgotPassword.inputs.jwt.value = responseData.jwt;
-                        this.forms.forgotPassword.inputs.code.value = '';
-                        this.forms.forgotPassword.msg = result.message;
-                        if(!this.time.timerInterval){
-                            this.time.timeLeft = responseData.ttl * 1000;
-                            this.startTime();
-                        }
-                    }else if(nextStepName === "loginByOtp" || responseData.login_method === 'otp'){
-                        this.changeStep("loginByOtp");
-                        this.forms.loginByOtp.inputs.jwt.value = responseData.jwt;
-                        this.forms.loginByOtp.inputs.code.value = '';
-                        this.forms.loginByOtp.msg = result.message;
-                        if(!this.time.timerInterval){
-                            this.time.timeLeft = responseData.ttl * 1000;
-                            this.startTime();
-                        }
-                    }else if(responseData.login_method === 'password'){
-                        this.changeStep('loginByPassword');
-                    }
-
-                }else{
-                    this.changeStep('signIn');
-                    if(!this.time.timerInterval){
-                        this.time.timeLeft = responseData.ttl * 1000;
-                        this.startTime();
-                    }
-                    this.forms.signIn.inputs.jwt.value = responseData.jwt;
-                    this.forms.signIn.inputs.code.value = '';
-                    this.forms.signIn.msg = result.message;
+                if(nextStepName === "forgotPassword"){
+                    this.changeStep("forgotPassword");
+                    this.forms.forgotPassword.inputs.jwt.value = responseData.jwt;
+                    this.forms.forgotPassword.inputs.code.value = '';
+                    this.forms.forgotPassword.msg = result.message;
+                    this.time.duration = responseData.ttl * 1000;
+                    this.startTime();
+                }else if(nextStepName === "loginByOtp" || responseData.login_method === 'otp'){
+                    this.changeStep("loginByOtp");
+                    this.forms.loginByOtp.inputs.jwt.value = responseData.jwt;
+                    this.forms.loginByOtp.inputs.code.value = '';
+                    this.forms.loginByOtp.msg = result.message;
+                    this.time.duration = responseData.ttl * 1000;
+                    this.startTime();
+                }else if(responseData.login_method === 'password'){
+                    this.changeStep('loginByPassword');
                 }
 
             }else{
@@ -480,8 +463,8 @@ pinovaAlpine.data("pinovaLoginModal", ()=>({
     },
 
     startTime(){
-        this.time.timerInterval = null;
         clearInterval(this.time.timerInterval);
+        this.time.timerInterval = null;
         this.time.btnResendIsActive = false;
         const endTime = Date.now() + this.time.duration;
 

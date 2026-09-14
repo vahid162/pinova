@@ -9,6 +9,18 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
         previousStepName: null,
         pageLoaderIsActive: false,
         codeLength: pinova.code_length,
+        allowedSteps: [
+            'authenticate',
+            'signIn',
+            'loginByPassword',
+            'loginByOtp',
+            'forgotPassword',
+            'changePassword'
+        ],
+        status: {
+            message: '',
+            tone: 'info'
+        },
 
         forms: {
             authenticate:{
@@ -57,8 +69,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                     password:{
                         value: '',
                         rules: {
-                            required: true,
-                            minLength: 8
+                            required: true
                         },
                         errorMsg: ''
                     },
@@ -156,7 +167,17 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
         },
 
         init(){
-            this.changeStep(this.stepName);
+            this.changeStep(this.stepName, {replace: true, fromHistory: true});
+
+            window.addEventListener('popstate', (event) => {
+                const targetStep = event.state && event.state.pinovaStep;
+                this.changeStep(
+                    this.allowedSteps.includes(targetStep) ? targetStep : 'authenticate',
+                    {fromHistory: true}
+                );
+            });
+
+            window.addEventListener('beforeunload', () => this.stopTimer());
 
             if ('OTPCredential' in window) {
                 window.addEventListener('DOMContentLoaded', e => {
@@ -167,19 +188,19 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
                             switch (this.stepName) {
                                 case 'loginByOtp': {
-                                    this.forms.loginByOtp.inputs.code.value = otp.code;
+                                    this.forms.loginByOtp.inputs.code.value = pinovaCleanNumericInput(otp.code);
                                     this.submit();
                                     break;
                                 }
 
                                 case 'signIn': {
-                                    this.forms.signIn.inputs.code.value = otp.code;
+                                    this.forms.signIn.inputs.code.value = pinovaCleanNumericInput(otp.code);
                                     this.submit();
                                     break;
                                 }
 
                                 case 'forgotPassword': {
-                                    this.forms.forgotPassword.inputs.code.value = otp.code;
+                                    this.forms.forgotPassword.inputs.code.value = pinovaCleanNumericInput(otp.code);
                                     this.submit();
                                     break;
                                 }
@@ -198,6 +219,8 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             if(this.pageLoaderIsActive){
                 return
             }
+
+            this.clearStatus();
 
             for (const key in this.forms){
                 for (const inputKey in this.forms[key].inputs){
@@ -259,7 +282,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             try{
                 this.pageLoaderIsActive = true;
 
-                const data = otherData;
+                const data = {...otherData};
                 for (const key in this.forms.authenticate.inputs) {
                     if(this.forms.authenticate.inputs[key].value !== null){
                         data[key] = this.forms.authenticate.inputs[key].value
@@ -268,6 +291,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
                 const result = await pinovaApiRequest('pinova/user/authenticate', {
                     method: 'POST',
+                    notifyOnError: false,
                     headers:{
                         nonce: null
                     },
@@ -284,19 +308,15 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                         this.forms.forgotPassword.inputs.jwt.value = responseData.jwt;
                         this.forms.forgotPassword.inputs.code.value = '';
                         this.forms.forgotPassword.msg = result.message;
-                        if(!this.time.timerInterval){
-                            this.time.duration = responseData.ttl * 1000;
-                            this.startTime();
-                        }
+                        this.time.duration = responseData.ttl * 1000;
+                        this.startTime();
                     }else if(nextStepName === "loginByOtp" || responseData.login_method === 'otp'){
                         this.changeStep("loginByOtp");
                         this.forms.loginByOtp.inputs.jwt.value = responseData.jwt;
                         this.forms.loginByOtp.inputs.code.value = '';
                         this.forms.loginByOtp.msg = result.message;
-                        if(!this.time.timerInterval){
-                            this.time.duration = responseData.ttl * 1000;
-                            this.startTime();
-                        }
+                        this.time.duration = responseData.ttl * 1000;
+                        this.startTime();
                     }else if(responseData.login_method === 'password'){
                         this.changeStep('loginByPassword');
                     }
@@ -306,13 +326,13 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                         window.location.href = result.data.native_login_url;
                         return;
                     }
-                    pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
+                    this.handleRequestFailure(result);
                 }
-
-                this.pageLoaderIsActive = false;
 
             }catch (error){
                 console.error('Error fetching posts:', error);
+                this.handleRequestException(error);
+            }finally{
                 this.pageLoaderIsActive = false;
             }
         },
@@ -331,6 +351,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
                 const result = await pinovaApiRequest('pinova/user/login/otp', {
                     method: 'POST',
+                    notifyOnError: false,
                     headers:{
                         nonce: null
                     },
@@ -352,13 +373,14 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                         window.location.href = result.data.native_login_url;
                         return;
                     }
-                    pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
-                    this.forms[this.stepName].inputs.code.value = null;
-                    this.pageLoaderIsActive = false;
+                    this.handleRequestFailure(result);
+                    this.forms[this.stepName].inputs.code.value = '';
                 }
 
             }catch (error){
                 console.error('Error fetching posts:', error);
+                this.handleRequestException(error);
+            }finally{
                 this.pageLoaderIsActive = false;
             }
         },
@@ -376,6 +398,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
                 const result = await pinovaApiRequest('pinova/user/login/password', {
                     method: 'POST',
+                    notifyOnError: false,
                     headers:{
                         nonce: null
                     },
@@ -397,12 +420,13 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                         window.location.href = result.data.native_login_url;
                         return;
                     }
-                    pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
-                    this.pageLoaderIsActive = false;
+                    this.handleRequestFailure(result);
                 }
 
             }catch (error){
                 console.error('Error fetching posts:', error);
+                this.handleRequestException(error);
+            }finally{
                 this.pageLoaderIsActive = false;
             }
         },
@@ -420,6 +444,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
                 const result = await pinovaApiRequest('pinova/auth/forgot/verify', {
                     method: 'POST',
+                    notifyOnError: false,
                     headers:{
                         nonce: null
                     },
@@ -434,14 +459,14 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                     this.forms.changePassword.inputs.jwt.value = responseData.jwt;
                     this.forms.changePassword.inputs.reset_key.value = responseData.reset_key;
                 }else{
-                    pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
-                    this.forms.forgotPassword.inputs.code.value = null;
+                    this.handleRequestFailure(result);
+                    this.forms.forgotPassword.inputs.code.value = '';
                 }
-
-                this.pageLoaderIsActive = false;
 
             }catch (error){
                 console.error('Error fetching posts:', error);
+                this.handleRequestException(error);
+            }finally{
                 this.pageLoaderIsActive = false;
             }
         },
@@ -459,6 +484,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
                 const result = await pinovaApiRequest('pinova/auth/forgot/change', {
                     method: 'POST',
+                    notifyOnError: false,
                     headers:{
                         nonce: null
                     },
@@ -471,27 +497,123 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                     pinovaNotyf.success(result.message ? result.message : 'درخواست با موفقیت انجام شد!');
                     window.location.href = responseData.back_url;
                 }else{
-                    pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
-                    this.pageLoaderIsActive = false;
+                    this.handleRequestFailure(result);
                 }
 
             }catch (error){
                 console.error('Error fetching posts:', error);
+                this.handleRequestException(error);
+            }finally{
                 this.pageLoaderIsActive = false;
             }
         },
 
         //other function
-        changeStep(newStep){
+        setStatus(message, tone = 'error'){
+            this.status.message = message || 'خطایی رخ داده است!';
+            this.status.tone = tone;
+        },
+
+        clearStatus(){
+            this.status.message = '';
+            this.status.tone = 'info';
+        },
+
+        handleRequestFailure(result){
+            this.setStatus(result && result.message ? result.message : 'خطایی رخ داده است!');
+        },
+
+        handleRequestException(){
+            this.setStatus('ارتباط با سرور برقرار نشد. لطفاً دوباره تلاش کنید.');
+        },
+
+        clearStepSecrets(stepName){
+            switch(stepName){
+                case 'signIn':
+                    this.forms.signIn.inputs.jwt.value = '';
+                    this.forms.signIn.inputs.code.value = '';
+                    this.stopTimer();
+                    break;
+                case 'loginByOtp':
+                    this.forms.loginByOtp.inputs.jwt.value = '';
+                    this.forms.loginByOtp.inputs.code.value = '';
+                    this.stopTimer();
+                    break;
+                case 'forgotPassword':
+                    this.forms.forgotPassword.inputs.jwt.value = '';
+                    this.forms.forgotPassword.inputs.code.value = '';
+                    this.stopTimer();
+                    break;
+                case 'changePassword':
+                    this.forms.changePassword.inputs.jwt.value = '';
+                    this.forms.changePassword.inputs.reset_key.value = '';
+                    this.forms.changePassword.inputs.password_1.value = '';
+                    this.forms.changePassword.inputs.password_2.value = '';
+                    break;
+                case 'loginByPassword':
+                    this.forms.loginByPassword.inputs.password.value = '';
+                    break;
+            }
+        },
+
+        resetSensitiveState(){
+            this.stopTimer();
+            this.forms.signIn.inputs.jwt.value = '';
+            this.forms.signIn.inputs.code.value = '';
+            this.forms.loginByOtp.inputs.jwt.value = '';
+            this.forms.loginByOtp.inputs.code.value = '';
+            this.forms.forgotPassword.inputs.jwt.value = '';
+            this.forms.forgotPassword.inputs.code.value = '';
+            this.forms.changePassword.inputs.jwt.value = '';
+            this.forms.changePassword.inputs.reset_key.value = '';
+            this.forms.changePassword.inputs.password_1.value = '';
+            this.forms.changePassword.inputs.password_2.value = '';
+            this.forms.loginByPassword.inputs.password.value = '';
+        },
+
+        changeStep(newStep, options = {}){
+            if(!this.allowedSteps.includes(newStep)){
+                return;
+            }
+
+            if(this.stepName !== newStep){
+                this.clearStepSecrets(this.stepName);
+            }
+
+            if(newStep === 'authenticate'){
+                this.resetSensitiveState();
+            }
+
+            this.previousStepName = this.stepName;
             this.stepName = newStep;
+            this.clearStatus();
+
+            if(!options.fromHistory){
+                const method = options.replace ? 'replaceState' : 'pushState';
+                window.history[method]({pinovaStep: newStep}, '', window.location.href);
+            }else if(options.replace){
+                window.history.replaceState({pinovaStep: newStep}, '', window.location.href);
+            }
+
             setTimeout(()=>{
-                document.getElementById(newStep).querySelector('input').focus();
+                const step = document.getElementById(newStep);
+                const firstInput = step && step.querySelector('input');
+                if(firstInput){
+                    firstInput.focus();
+                }
             }, 100)
         },
 
-        startTime(){
+        stopTimer(){
+            if(this.time.timerInterval !== null){
+                clearInterval(this.time.timerInterval);
+            }
             this.time.timerInterval = null;
-            clearInterval(this.time.timerInterval);
+            this.time.btnResendIsActive = true;
+        },
+
+        startTime(){
+            this.stopTimer();
             this.time.btnResendIsActive = false;
             const endTime = Date.now() + this.time.duration;
 
@@ -528,10 +650,14 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
         },
 
         backStep(){
+            if(window.history.state && window.history.state.pinovaStep === this.stepName){
+                window.history.back();
+                return;
+            }
+
             switch (this.stepName){
 
                 case 'authenticate': {
-                    this.stepName = null;
                     break;
                 }
 
@@ -622,6 +748,17 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
             return passwordStrength;
 
+        },
+
+        passwordStrengthLabel(){
+            const strength = this.passwordStrengthAssessment();
+            if(strength === 4){
+                return 'قدرت رمز: عالی';
+            }
+            if(strength === 3){
+                return 'قدرت رمز: متوسط';
+            }
+            return 'قدرت رمز: ضعیف';
         },
 
         // Admin Iframe

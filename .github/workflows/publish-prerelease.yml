@@ -161,12 +161,14 @@ jobs:
             if [[ "${is_draft}" == "true" ]]; then
               expected_name="Pinova ${tag}"
               actual_name="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json name --jq '.name')"
+              actual_author="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json author --jq '.author.login')"
               actual_target="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json targetCommitish --jq '.targetCommitish')"
               actual_body="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json body --jq '.body')"
               expected_body="$(cat "${notes}")"
               asset_names="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name')"
 
-              if [[ "${actual_name}" != "${expected_name}" || \
+              if [[ "${actual_author}" != "github-actions[bot]" || \
+                    "${actual_name}" != "${expected_name}" || \
                     "${actual_target}" != "${RELEASE_SHA}" || \
                     "${actual_body}" != "${expected_body}" ]]; then
                 echo "Existing draft ${tag} does not match this publisher identity; refusing to alter it." >&2

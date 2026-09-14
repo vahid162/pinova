@@ -165,7 +165,7 @@ sha256sum .build/pinova-<version>.zip
 COMPOSER_PHAR=/path/to/composer-2.10.3.phar bash tools/build.sh
 ```
 
-پیش‌انتشار GitHub فقط از branch کنترل‌شده‌ای مانند `publish/v1.2.6-rc2` انجام می‌شود. این branch باید از commit دقیق، بازبینی‌شده و سبزِ `main` ساخته شود. پیش از ساخت tag، workflow با secret محدود `PINOVA_RELEASE_PREFLIGHT_TOKEN` و دسترسی فقط‌خواندنی Administration فعال‌بودن Release Immutability را از API کنترل می‌کند. سپس دسترسی SHA از `main` و نسخه را بررسی می‌کند، tag حاشیه‌نویسی‌شده می‌سازد، build را دوبار مقایسه می‌کند، ZIP و checksum را با توالی صریح draft/upload/publish به Release بومیِ immutable پیوست می‌کند و هر دو asset و attestation آن‌ها را دوباره راستی‌آزمایی می‌کند. اجرای مجدد فقط draft منتشرنشده‌ای را ادامه می‌دهد که نام، commit هدف، متن شناسنامه و فهرست assetهای مجاز آن دقیقاً متعلق به همین انتشار باشد؛ draft ناشناس و هر Release منتشرشده بدون تغییر باقی می‌مانند.
+پیش‌انتشار GitHub فقط از branch کنترل‌شده‌ای مانند `publish/v1.2.6-rc2` انجام می‌شود. این branch باید از commit دقیق، بازبینی‌شده و سبزِ `main` ساخته شود. پیش از ساخت tag، workflow با secret محدود `PINOVA_RELEASE_PREFLIGHT_TOKEN` و دسترسی فقط‌خواندنی Administration فعال‌بودن Release Immutability را از API کنترل می‌کند. سپس دسترسی SHA از `main` و نسخه را بررسی می‌کند، tag حاشیه‌نویسی‌شده می‌سازد، build را دوبار مقایسه می‌کند، ZIP و checksum را با توالی صریح draft/upload/publish به Release بومیِ immutable پیوست می‌کند و هر دو asset و attestation آن‌ها را دوباره راستی‌آزمایی می‌کند. اجرای مجدد فقط draft منتشرنشده‌ای را ادامه می‌دهد که نویسندهٔ ثبت‌شدهٔ آن `github-actions[bot]` باشد و نام، commit هدف، متن شناسنامه و فهرست assetهای مجاز آن دقیقاً متعلق به همین انتشار باشد؛ draft ناشناس و هر Release منتشرشده بدون تغییر باقی می‌مانند.
 
 ## فرایند اصلاح باگ
 

@@ -5,6 +5,7 @@
     "env:configure": "node tools/configure-wp-env.mjs",
     "env:start": "wp-env start",
     "env:stop": "wp-env stop",
+    "test:js": "node --test tests/js/*.test.mjs",
     "test:integration": "bash tools/run-integration.sh"
   },
   "devDependencies": {

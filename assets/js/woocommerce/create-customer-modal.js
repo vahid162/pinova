@@ -119,6 +119,7 @@ pinovaAlpine.data("pinovaCreateCustomer", () => ({
 
             const result = await pinovaApiRequest('pinova/woocommerce/customer/create', {
                 method: 'POST',
+                notifyOnError: false,
                 data
             });
 

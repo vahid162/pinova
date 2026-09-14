@@ -53,30 +53,132 @@ function pinovaGetQueryParam(key) {
     return urlParams.get(key);
 }
 
+const PINOVA_API_GENERIC_ERROR = 'در پردازش درخواست خطایی رخ داده است!';
+
+function pinovaApiGetHeader(response, name) {
+    if (!response.headers || typeof response.headers.get !== 'function') {
+        return null;
+    }
+
+    const value = response.headers.get(name);
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function pinovaApiRetryAfterSeconds(value) {
+    if (!value) {
+        return null;
+    }
+
+    if (/^\d+$/.test(value)) {
+        return Math.max(0, Number.parseInt(value, 10));
+    }
+
+    const retryAt = Date.parse(value);
+    if (Number.isNaN(retryAt)) {
+        return null;
+    }
+
+    return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
+}
+
+function pinovaApiSafeMessage(value) {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const message = value.trim();
+    if (!message || message.length > 500 || /[<>]/.test(message)) {
+        return null;
+    }
+
+    return message;
+}
+
+function pinovaApiErrorMessage(responseData) {
+    const parameterMessages = responseData?.data?.params;
+
+    if (parameterMessages && typeof parameterMessages === 'object') {
+        for (const value of Object.values(parameterMessages)) {
+            const message = pinovaApiSafeMessage(value);
+            if (message) {
+                return message;
+            }
+        }
+    }
+
+    return pinovaApiSafeMessage(responseData?.message);
+}
+
+function pinovaApiNormalizeResponse(response, responseData) {
+    if (!responseData || typeof responseData !== 'object' || Array.isArray(responseData)) {
+        throw new Error(PINOVA_API_GENERIC_ERROR);
+    }
+
+    const retryAfter = pinovaApiGetHeader(response, 'Retry-After');
+    const http = {
+        status: response.status,
+        retryAfter,
+        retryAfterSeconds: pinovaApiRetryAfterSeconds(retryAfter),
+        correlationId: pinovaApiGetHeader(response, 'X-Pinova-Correlation-ID'),
+    };
+    const result = {
+        ...responseData,
+        http,
+    };
+
+    if (!response.ok) {
+        result.success = false;
+        result.data = Object.prototype.hasOwnProperty.call(responseData, 'data')
+            ? responseData.data
+            : {};
+
+        const serverMessage = pinovaApiErrorMessage(responseData);
+        result.message = serverMessage || PINOVA_API_GENERIC_ERROR;
+
+        if (response.status === 429 && http.retryAfterSeconds > 0) {
+            result.message += ` امکان تلاش مجدد تا ${http.retryAfterSeconds} ثانیهٔ دیگر وجود دارد.`;
+        }
+    }
+
+    return result;
+}
+
 async function pinovaApiRequest(url, options = {}) {
 
     const {
         method = 'GET',
         data = {},
         headers = {},
-        form = false
+        form = false,
+        timeout = 30000,
+        signal = null,
+        notifyOnError = true
     } = options;
 
-    if(headers.nonce !== null){
-        headers['X-WP-Nonce'] = pinova.nonce
+    const requestHeaders = { ...headers };
+
+    if(requestHeaders.nonce !== null){
+        requestHeaders['X-WP-Nonce'] = pinova.nonce
     }
+    delete requestHeaders.nonce;
+
+    const controller = signal ? null : new AbortController();
+    const timeoutId = controller && timeout > 0
+        ? setTimeout(() => controller.abort(), timeout)
+        : null;
 
     try {
         const fetchOptions = {
             method,
-            headers
+            headers: requestHeaders,
+            signal: signal || controller.signal
         };
 
         if (data && method !== 'GET') {
             if (data instanceof FormData) {
                 fetchOptions.body = data;
             } else if (form) {
-                fetchOptions.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+                requestHeaders['Content-Type'] = 'application/x-www-form-urlencoded';
 
                 const params = new URLSearchParams();
                 for (const key in data) {
@@ -91,7 +193,7 @@ async function pinovaApiRequest(url, options = {}) {
                 }
                 fetchOptions.body = params.toString();
             } else {
-                fetchOptions.headers['Content-Type'] = 'application/json';
+                requestHeaders['Content-Type'] = 'application/json';
                 fetchOptions.body = JSON.stringify(data);
             }
         }
@@ -103,16 +205,18 @@ async function pinovaApiRequest(url, options = {}) {
             ? await response.json()
             : await response.text();
 
-        if (!response.ok) {
-            throw new Error(responseData.message || 'خطا در پاسخ از سرور');
-        }
-
-        return responseData;
+        return pinovaApiNormalizeResponse(response, responseData);
 
     } catch (err) {
         console.error('API error:', err.message);
-        pinovaNotyf.error('در پردازش درخواست خطایی رخ داده است!');
+        if (notifyOnError && pinovaNotyf) {
+            pinovaNotyf.error(PINOVA_API_GENERIC_ERROR);
+        }
         throw err;
+    } finally {
+        if (timeoutId !== null) {
+            clearTimeout(timeoutId);
+        }
     }
 }
 
@@ -198,7 +302,13 @@ function pinovaBuildQueryString(obj) {
 }
 
 function pinovaCleanNumericInput(value) {
-    return value.replace(/[^0-9]/g, '');
+    const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
+    const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
+
+    return String(value ?? '')
+        .replace(/[۰-۹]/g, digit => persianDigits.indexOf(digit))
+        .replace(/[٠-٩]/g, digit => arabicDigits.indexOf(digit))
+        .replace(/[^0-9]/g, '');
 }
 
 function pinovaFormatDate(timestamp, format){

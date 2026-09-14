@@ -15,7 +15,7 @@ Before substantive work:
 ## Current project snapshot
 
 - Repository: `https://github.com/vahid162/pinova`
-- `main` includes the 1.2.3 security line, reproducible-release hardening, structured logging, the 1.2.5 fresh-request database-bootstrap hotfix, and the reviewed 1.2.6 account/Blocked List corrections merged by PR #8 at `270ace9`.
+- `main` includes the 1.2.3 security line, reproducible-release hardening, structured logging, the 1.2.5 fresh-request database-bootstrap hotfix, the reviewed 1.2.6 account/Blocked List corrections merged by PR #8 at `270ace9`, and native-immutable publisher hardening introduced by PR #9 at `cccf1c3`.
 - Existing 1.2.3 pre-releases remain immutable. `v1.2.4-rc1` contains the Composer bootstrap regression and is superseded by `v1.2.5-rc1`; no RC is stable/latest.
 - `v1.2.6-rc1` is published and checksum-verified but reports `immutable: false` because it predates repository-level native Release Immutability. Retain it unchanged as history; `v1.2.6-rc2` is the next installation-handoff target after native immutability and attestation verification pass.
 - The RC1 1.2.3 asset predates later PHP 8.1 dependency, CI matrix, PHP 8.5, and reproducible-build changes. Do not relabel or overwrite it.
@@ -35,7 +35,7 @@ Verify all facts before acting and update this section whenever lineage, release
 1. Treat `v1.2.4-rc1` as superseded; do not install, retag, or overwrite it.
 2. Use `v1.2.5-rc1` for staging/canary only after PHP, integration, privacy, upgrade, and installable-ZIP gates pass.
 3. Investigate any new defect from a separate worktree and uniquely named disposable environment; never reuse preserved logging, RC2, or 1.2.5 verification assets without explicit authorization.
-4. Harden the publisher through a GitHub branch, pull request, required CI, and merge. Before creating the publish branch, require the repository-scoped `PINOVA_RELEASE_PREFLIGHT_TOKEN` with Administration read so the workflow can verify native immutability before creating a tag. Then publish `v1.2.6-rc2` and require its Release API to report `immutable: true` plus successful asset-attestation and redownload checks. Only that official GitHub ZIP is an installation handoff; `v1.2.6-rc1` and local ZIPs are retained evidence.
+4. Keep the publisher independent of an Administration-scoped secret and repository Ruleset. After the repository owner confirms native Release Immutability is enabled, publish `v1.2.6-rc2` from an exact reviewed and green `main` commit. Require its post-publication Release API to report `immutable: true` plus successful asset-attestation and redownload checks. If it unexpectedly reports mutable, preserve that tag and Release and use a new RC tag after correcting the setting. Only an official GitHub ZIP that passes these gates is an installation handoff; `v1.2.6-rc1` and local ZIPs are retained evidence.
 5. Stop before installation. Production changes require fresh backup/rollback controls and explicit authorization at execution time.
 6. After the 1.2.x canary, merge current `main` into the 1.3 development line, resolve drift, retest identity migration, and create a new reviewed 1.3 RC rather than reusing `v1.3.0-rc1`.
 

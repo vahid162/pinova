@@ -127,12 +127,12 @@ jobs:
             "این نسخه یک پیش‌انتشار برای آزمون staging/canary است و هنوز stable/latest نیست." \
             "" \
             "- Exact commit: \`${RELEASE_SHA}\`" \
-            "- GitHub-native immutable release: \`true\`" \
+            "- Required installation gate: Release API \`immutable: true\` and a successful publisher workflow" \
             "- Publisher identity: \`pinova-prerelease-v2\`" \
             "- Installable asset: \`pinova-${version}.zip\`" \
             "- SHA-256: \`${checksum}\`" \
             "" \
-            "برای نصب از asset بالا استفاده کنید؛ فایل خودکار Source code بستهٔ نصب افزونه نیست." \
+            "این یادداشت به‌تنهایی تأیید انتشار نیست. فقط پس از موفقیت کامل workflow از asset بالا برای staging/canary استفاده کنید؛ فایل خودکار Source code بستهٔ نصب افزونه نیست." \
             > "${notes}"
 
           release_exists=false

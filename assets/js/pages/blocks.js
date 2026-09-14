@@ -29,6 +29,7 @@ pinovaAlpine.data("blocks", ()=>({
     blockedBy: {
         users: [],
         selected: null,
+        query: '',
         timeout: null,
         loader: false
     },
@@ -58,7 +59,7 @@ pinovaAlpine.data("blocks", ()=>({
             loaderIsActive: false,
             data:{
                 blocked_type: {
-                    label: "مسدود تا",
+                    label: "نوع شناسه",
                     value:  {
                         key: 'تلفن همراه',
                         value: 'mobile'
@@ -147,13 +148,19 @@ pinovaAlpine.data("blocks", ()=>({
             if(result.success){
                 const data = result.data;
                 this.tableData = data.blocks;
+                const totalPage = Math.max(1, Number.isInteger(data.total_pages)
+                    ? data.total_pages
+                    : Math.ceil(data.total_items / this.tableFilters.per_page));
+
+                this.tableFilters.page = data.current_page;
+                pinovaSetUrlQueryParams('pinova-blocks', pinovaGenerateFiltersObject(this.tableFilters));
 
                 this.pagination = {
                     currentPage: data.current_page,
-                    totalPage: parseInt((data.total_items / this. tableFilters.per_page)) + 1,
+                    totalPage,
                     items: pinovaGetVisiblePages({
                         currentPage: data.current_page,
-                        totalPage: parseInt((data.total_items / this. tableFilters.per_page)) + 1
+                        totalPage
                     })
                 }
 
@@ -162,7 +169,7 @@ pinovaAlpine.data("blocks", ()=>({
                     this.skeletonIds.push(item.id)
                 }
             }else{
-                pinovaNotyf.error(result.message ? result.message : 'حطایی رخ داده است!');
+                pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
                 this.tableLoaderIsActive = false;
             }
             this.tableLoaderIsActive = false;
@@ -197,15 +204,9 @@ pinovaAlpine.data("blocks", ()=>({
                 })
 
                 if(result.success){
-                    const data = result.data;
-                    this.blockedBy.users = result.data.users.map(user=>{
-                        return {
-                            id: user.data.ID,
-                            name: user.data.display_name
-                        }
-                    });
+                    this.blockedBy.users = result.data.users;
                 }else{
-                    pinovaNotyf.error(result.message ? result.message : 'حطایی رخ داده است!');
+                    pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
                 }
                 this.blockedBy.loader = false
 
@@ -255,18 +256,13 @@ pinovaAlpine.data("blocks", ()=>({
             })
 
             if(result.success){
-                const data = result.data;
                 pinovaNotyf.success(result.message ? result.message : 'درخواست با موفقیت انجام شد!');
 
                 this.modals.add.active = false;
-                this.skeletonIds.push(data.block_id);
-                this.tableLoaderIsActive = true;
-                this.tableData = data.blocks;
-                setTimeout(()=>{
-                    this.tableLoaderIsActive = false;
-                }, 1000)
+                await this.getBlocks();
             }else{
-                pinovaNotyf.error(result.message ? result.message : 'حطایی رخ داده است!');
+                this.setAddFieldErrors(result);
+                pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
             }
             this.modals.add.loaderIsActive = false;
 
@@ -289,12 +285,11 @@ pinovaAlpine.data("blocks", ()=>({
             })
 
             if(result.success){
-                const data = result.data;
-                this.tableData = data.blocks;
                 pinovaNotyf.success(result.message ? result.message : 'درخواست با موفقیت انجام شد!');
                 this.modals.delete.active = false;
+                await this.getBlocks();
             }else{
-                pinovaNotyf.error(result.message ? result.message : 'حطایی رخ داده است!');
+                pinovaNotyf.error(result.message ? result.message : 'خطایی رخ داده است!');
                 this.skeletonIds.push(this.modals.delete.block.id);
             }
             this.modals.delete.loaderIsActive = false;
@@ -306,17 +301,19 @@ pinovaAlpine.data("blocks", ()=>({
         }
     },
 
-    changePage(newPage){
-        this.pagination.currentPage = newPage;
-        this.tableFilters.page = newPage;
-        this.getUsers();
+    async changePage(newPage){
+        const lastPage = Math.max(1, this.pagination.totalPage);
+        const page = Math.min(lastPage, Math.max(1, Number(newPage) || 1));
+        this.pagination.currentPage = page;
+        this.tableFilters.page = page;
+        await this.getBlocks();
     },
 
     openAddModal(data){
         this.modals.add.active = true;
         this.modals.add.data = {
             blocked_type: {
-                label: "مسدود تا",
+                label: "نوع شناسه",
                 value: {
                     key: 'تلفن همراه',
                     value: 'mobile'
@@ -330,6 +327,7 @@ pinovaAlpine.data("blocks", ()=>({
             },
             blocked_until: {
                 label: "مسدود تا",
+                always: true,
                 value: null,
                 errorMsg: ""
             }
@@ -376,12 +374,32 @@ pinovaAlpine.data("blocks", ()=>({
             to_date: null,
         }
 
+        this.blockedBy.selected = null;
+        this.blockedBy.query = '';
+        this.blockedBy.users = [];
+
         this.getBlocks();
     },
 
     selectBlockedBy(select){
         this.blockedBy.selected = select;
-        this.tableFilters.blocked_by = Number(select.id);
+        this.blockedBy.query = select ? select.name : '';
+        this.tableFilters.blocked_by = select ? Number(select.id) : null;
+    },
+
+    setAddFieldErrors(result){
+        const params = result?.data?.params || {};
+
+        for (const [field, message] of Object.entries(params)) {
+            if (this.modals.add.data[field] && typeof message === 'string') {
+                this.modals.add.data[field].errorMsg = message;
+            }
+        }
+
+        const field = result?.data?.field;
+        if (field && this.modals.add.data[field] && !params[field]) {
+            this.modals.add.data[field].errorMsg = result.message || 'مقدار واردشده معتبر نیست.';
+        }
     }
 
 }))

@@ -5,6 +5,7 @@ namespace Pinova\API;
 
 use Carbon\Carbon;
 use Exception;
+use Pinova\Exceptions\BlockedException;
 use Pinova\Exceptions\RateLimitException;
 use Pinova\Exceptions\SendOTPException;
 use Pinova\Helper;
@@ -297,6 +298,8 @@ class UserAPI extends RestAPI {
 
 		try {
 			$user = OTPService::verify( $jwt, $code );
+		} catch ( BlockedException $e ) {
+			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
 			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
@@ -322,6 +325,8 @@ class UserAPI extends RestAPI {
 
 		try {
 			$user = OTPService::verify( $jwt, $code );
+		} catch ( BlockedException $e ) {
+			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
 			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}

@@ -1492,6 +1492,7 @@ class ComposerStaticInit8237e3ff5c58515be61cfab9fcd44d27
         'Pinova\\Channels\\ChannelInterface' => __DIR__ . '/../..' . '/src/Channels/ChannelInterface.php',
         'Pinova\\Channels\\Email' => __DIR__ . '/../..' . '/src/Channels/Email.php',
         'Pinova\\Channels\\SMS' => __DIR__ . '/../..' . '/src/Channels/SMS.php',
+        'Pinova\\Exceptions\\BlockedException' => __DIR__ . '/../..' . '/src/Exceptions/BlockedException.php',
         'Pinova\\Exceptions\\RateLimitException' => __DIR__ . '/../..' . '/src/Exceptions/RateLimitException.php',
         'Pinova\\Exceptions\\SendOTPException' => __DIR__ . '/../..' . '/src/Exceptions/SendOTPException.php',
         'Pinova\\Gateways\\BaseGateway' => __DIR__ . '/../..' . '/src/Gateways/BaseGateway.php',

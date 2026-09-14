@@ -75,27 +75,19 @@ wp_localize_script( 'global-script', 'pinova', [
                     <div class="lg:col-span-3 col-span-full">
                         <div>
                             <label class="block text-sm mb-2">مسدود شده توسط</label>
-                            <input pinova-model="tableFilters.blocked_by" type="text" class="w-full bg-white border !border-gray-300 shadow-[0_1px_2px_0_#1018280D] !rounded-lg !py-2 !px-3" placeholder="جستجو کنید">
-                        </div>
-                    </div>
-
-                    <!-- hide -->
-                    <div class="hidden lg:col-span-3 col-span-full">
-                        <div>
-                            <label class="block text-sm mb-2">مسدود شده توسط</label>
 
                             <div class="gap-1 border border-gray-300 shadow-[0_1px_2px_0_#1018280D] bg-white rounded-lg">
                                 <!-- select dropdown -->
                                 <div
-                                        pinova-data="{open: false, value: null}"
+                                        pinova-data="{open: false}"
                                         pinova-on:click.outside="open = false"
                                         class="relative h-full"
                                 >
                                     <div class="flex items-center gap-2 py-2 px-3">
 
                                         <input
-                                                pinova-on:keyup="searchBlockedBy($el.value); open = true"
-                                                pinova-model="value"
+                                                pinova-on:keyup="searchBlockedBy(blockedBy.query); if (!blockedBy.query) selectBlockedBy(null); open = true"
+                                                pinova-model="blockedBy.query"
                                                 placeholder="جستجو کنید"
                                                 class="w-full"
                                         >
@@ -110,7 +102,7 @@ wp_localize_script( 'global-script', 'pinova', [
                                             <template pinova-if="!blockedBy.loader">
                                                 <template pinova-for="(item, index) in blockedBy.users">
                                                     <div
-                                                            pinova-on:click="selectBlockedBy(item); value = item.name ; open = false"
+                                                            pinova-on:click="selectBlockedBy(item); open = false"
                                                             class="flex gap-2 items-center cursor-pointer hover:text-primary-300 duration-300 p-1.5 mx-1"
                                                             pinova-bind:class="{'border-b' : (index+1 !== blockedBy.users.length)}"
                                                     >
@@ -145,8 +137,6 @@ wp_localize_script( 'global-script', 'pinova', [
                                     </div>
                                 </div>
                             </div>
-                            <!--error msg-->
-                            <div class="text-xs text-error-300 pt-1.5 empty:pt-0"></div>
                         </div>
                     </div>
 
@@ -514,7 +504,10 @@ wp_localize_script( 'global-script', 'pinova', [
                                 </div>
                             </div>
                             <!--error msg-->
-                            <div class="text-xs text-error-300 pt-1.5 empty:pt-0"></div>
+                            <div
+                                    pinova-text="modals.add.data.blocked_type.errorMsg"
+                                    class="text-xs text-error-300 pt-1.5 empty:pt-0"
+                            ></div>
                         </div>
                         <div class="mb-5">
                             <label class="block text-sm mb-2" pinova-text="modals.add.data.identifier.label"></label>

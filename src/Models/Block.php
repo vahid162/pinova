@@ -40,6 +40,8 @@ class Block extends Model {
 			return 'سیستمی';
 		}
 
-		return get_userdata( $this->blocked_by )->display_name;
+		$user = get_userdata( $this->blocked_by );
+
+		return $user ? $user->display_name : 'کاربر حذف‌شده';
 	}
 }

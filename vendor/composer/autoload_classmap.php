@@ -1221,6 +1221,7 @@ return array(
     'Pinova\\Channels\\ChannelInterface' => $baseDir . '/src/Channels/ChannelInterface.php',
     'Pinova\\Channels\\Email' => $baseDir . '/src/Channels/Email.php',
     'Pinova\\Channels\\SMS' => $baseDir . '/src/Channels/SMS.php',
+    'Pinova\\Exceptions\\BlockedException' => $baseDir . '/src/Exceptions/BlockedException.php',
     'Pinova\\Exceptions\\RateLimitException' => $baseDir . '/src/Exceptions/RateLimitException.php',
     'Pinova\\Exceptions\\SendOTPException' => $baseDir . '/src/Exceptions/SendOTPException.php',
     'Pinova\\Gateways\\BaseGateway' => $baseDir . '/src/Gateways/BaseGateway.php',

@@ -8,6 +8,7 @@ on:
       - 'publish/v*'
 
 permissions:
+  attestations: read
   contents: write
 
 concurrency:
@@ -40,8 +41,23 @@ jobs:
       - name: Validate immutable release identity
         id: release
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PINOVA_RELEASE_PREFLIGHT_TOKEN }}
         run: |
           set -euo pipefail
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "PINOVA_RELEASE_PREFLIGHT_TOKEN is required and must have repository Administration (read)." >&2
+            exit 1
+          fi
+          immutability_enabled="$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/immutable-releases" \
+            --jq '.enabled')"
+          if [[ "${immutability_enabled}" != "true" ]]; then
+            echo "GitHub-native Release Immutability is not enabled for ${GITHUB_REPOSITORY}" >&2
+            exit 1
+          fi
+
           tag="${RELEASE_BRANCH#publish/}"
           if [[ "${tag}" == "${RELEASE_BRANCH}" || ! "${tag}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-rc([1-9][0-9]*)$ ]]; then
             echo "Release branch must match publish/vX.Y.Z-rcN" >&2
@@ -52,6 +68,12 @@ jobs:
           plugin_version="$(php -r '$s=file_get_contents("pinova.php"); preg_match("/Version:\\s*([0-9.]+)/", $s, $m); echo $m[1] ?? "";')"
           if [[ "${plugin_version}" != "${version}" ]]; then
             echo "Tag version ${version} does not match plugin version ${plugin_version}" >&2
+            exit 1
+          fi
+
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${RELEASE_SHA}" origin/main; then
+            echo "Release commit ${RELEASE_SHA} is not reachable from main" >&2
             exit 1
           fi
 
@@ -105,7 +127,7 @@ jobs:
             git push origin "refs/tags/${tag}"
           fi
 
-      - name: Publish GitHub pre-release and installable ZIP
+      - name: Publish immutable GitHub pre-release and installable ZIP
         shell: bash
         run: |
           set -euo pipefail
@@ -114,34 +136,101 @@ jobs:
           checksum="$(cut -d' ' -f1 ".build/pinova-${version}.zip.sha256")"
           notes="${RUNNER_TEMP}/release-notes.md"
 
-          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists; refusing to overwrite published assets." >&2
-            exit 1
-          fi
-
           printf '%s\n' \
             "## Pinova ${version} RC" \
             "" \
             "این نسخه یک پیش‌انتشار برای آزمون staging/canary است و هنوز stable/latest نیست." \
             "" \
             "- Exact commit: \`${RELEASE_SHA}\`" \
+            "- GitHub-native immutable release: \`true\`" \
+            "- Publisher identity: \`pinova-prerelease-v2\`" \
             "- Installable asset: \`pinova-${version}.zip\`" \
             "- SHA-256: \`${checksum}\`" \
             "" \
             "برای نصب از asset بالا استفاده کنید؛ فایل خودکار Source code بستهٔ نصب افزونه نیست." \
             > "${notes}"
 
-          gh release create "${tag}" \
-            ".build/pinova-${version}.zip#Pinova ${version} installable ZIP" \
-            ".build/pinova-${version}.zip.sha256#SHA-256 checksum" \
+          release_exists=false
+          release_found=false
+          if release_state="$(gh release view "${tag}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --target "${RELEASE_SHA}" \
-            --title "Pinova ${tag}" \
-            --notes-file "${notes}" \
-            --prerelease \
-            --verify-tag
+            --json isDraft,isImmutable \
+            --jq '[.isDraft, .isImmutable] | @tsv' 2>/dev/null)"; then
+            release_found=true
+            IFS=$'\t' read -r is_draft is_immutable <<< "${release_state}"
+            if [[ "${is_draft}" == "true" ]]; then
+              expected_name="Pinova ${tag}"
+              actual_name="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json name --jq '.name')"
+              actual_author="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json author --jq '.author.login')"
+              actual_target="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json targetCommitish --jq '.targetCommitish')"
+              actual_body="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json body --jq '.body')"
+              expected_body="$(cat "${notes}")"
+              asset_names="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name')"
 
-      - name: Redownload and verify published asset
+              if [[ "${actual_author}" != "github-actions[bot]" || \
+                    "${actual_name}" != "${expected_name}" || \
+                    "${actual_target}" != "${RELEASE_SHA}" || \
+                    "${actual_body}" != "${expected_body}" ]]; then
+                echo "Existing draft ${tag} does not match this publisher identity; refusing to alter it." >&2
+                exit 1
+              fi
+              while IFS= read -r asset_name; do
+                if [[ -n "${asset_name}" && \
+                      "${asset_name}" != "pinova-${version}.zip" && \
+                      "${asset_name}" != "pinova-${version}.zip.sha256" ]]; then
+                  echo "Existing draft ${tag} contains unexpected asset ${asset_name}; refusing to alter it." >&2
+                  exit 1
+                fi
+              done <<< "${asset_names}"
+              echo "Resuming verified unpublished draft for ${tag}."
+            elif [[ "${is_immutable}" == "true" ]]; then
+              echo "Immutable Release ${tag} already exists; preserving it and verifying without mutation."
+              release_exists=true
+            else
+              echo "Published Release ${tag} exists but is mutable; refusing to alter it." >&2
+              exit 1
+            fi
+          fi
+
+          if [[ "${release_exists}" != "true" ]]; then
+            if [[ "${release_found}" != "true" ]]; then
+              gh release create "${tag}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --target "${RELEASE_SHA}" \
+                --title "Pinova ${tag}" \
+                --notes-file "${notes}" \
+                --prerelease \
+                --draft \
+                --verify-tag
+            fi
+            gh release upload "${tag}" \
+              ".build/pinova-${version}.zip#Pinova ${version} installable ZIP" \
+              ".build/pinova-${version}.zip.sha256#SHA-256 checksum" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+            gh release edit "${tag}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --draft=false \
+              --prerelease \
+              --latest=false \
+              --verify-tag
+          fi
+
+          release_api="repos/${GITHUB_REPOSITORY}/releases/tags/${tag}"
+          release_state="$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "${release_api}" \
+            --jq '[.draft, .prerelease, .target_commitish, .immutable] | @tsv')"
+          IFS=$'\t' read -r is_draft is_prerelease actual_target is_immutable <<< "${release_state}"
+          if [[ "${is_draft}" != "false" || \
+                "${is_prerelease}" != "true" || \
+                "${actual_target}" != "${RELEASE_SHA}" || \
+                "${is_immutable}" != "true" ]]; then
+            echo "Release ${tag} is not the expected immutable pre-release for ${RELEASE_SHA}" >&2
+            exit 1
+          fi
+
+      - name: Redownload and verify published assets and attestations
         shell: bash
         run: |
           set -euo pipefail
@@ -160,3 +249,20 @@ jobs:
             unzip -tq "pinova-${version}.zip"
             unzip -Z1 "pinova-${version}.zip" | awk 'index($0, "pinova/") != 1 { bad = 1 } END { exit bad }'
           )
+          cmp ".build/pinova-${version}.zip" "${verify_dir}/pinova-${version}.zip"
+          cmp ".build/pinova-${version}.zip.sha256" "${verify_dir}/pinova-${version}.zip.sha256"
+
+          verified=false
+          for attempt in 1 2 3 4 5; do
+            if gh release verify "${tag}" --repo "${GITHUB_REPOSITORY}" && \
+               gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.zip" --repo "${GITHUB_REPOSITORY}" && \
+               gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.zip.sha256" --repo "${GITHUB_REPOSITORY}"; then
+              verified=true
+              break
+            fi
+            sleep 3
+          done
+          if [[ "${verified}" != "true" ]]; then
+            echo "GitHub release attestation verification failed for ${tag}" >&2
+            exit 1
+          fi

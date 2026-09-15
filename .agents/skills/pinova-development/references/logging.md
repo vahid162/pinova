@@ -93,6 +93,7 @@ The two `admin.sms_test_*` events are bounded, capability-protected audit action
 4. Correlate by event, correlation ID, User ID, and keyed fingerprint. Treat an unmatched fingerprint as inconclusive because normalization/purpose may differ.
 5. Clear logs only when needed for privacy or a clean test boundary. Retention normally handles deletion.
 6. If the dedicated table is unavailable, inspect WooCommerce logs for source `pinova`, then the server PHP error log. Those fallbacks contain the same sanitized structure.
+7. Even when the Pinova table is healthy and contains no warnings or errors, inspect WordPress debug output, WooCommerce logs, PHP-FPM/PHP logs, and the web-server error stream for lifecycle, deprecation, and compatibility diagnostics near the same request. These global streams are complementary evidence, not Pinova logger fallbacks. Do not persist every `doing_it_wrong_run` event in `pinova_logs`: the hook is global, attribution to Pinova is not reliable, and repeated public requests could create log amplification. Fix the owning call site and add a focused regression instead.
 
 Do not query or alter the production table during development. Production inspection or deletion needs explicit authority for that environment.
 

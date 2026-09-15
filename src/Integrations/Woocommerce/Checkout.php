@@ -4,6 +4,7 @@ namespace Pinova\Integrations\Woocommerce;
 
 use Pinova\Objects\Mobile;
 use WC_Customer;
+use WP_Error;
 
 class Checkout {
 
@@ -13,7 +14,7 @@ class Checkout {
 		add_filter( 'pre_option_woocommerce_registration_generate_password', [ $this, 'return_yes' ] );
 		add_filter( 'pre_option_woocommerce_registration_generate_username', [ $this, 'return_yes' ] );
 
-		add_action( 'woocommerce_checkout_process', [ $this, 'validate_checkout_phone' ] );
+		add_action( 'woocommerce_after_checkout_validation', [ $this, 'validate_checkout_phone' ], 10, 2 );
 		add_action( 'woocommerce_checkout_update_customer', [ $this, 'update_customer' ], 10, 2 );
 	}
 
@@ -21,14 +22,12 @@ class Checkout {
 		return 'yes';
 	}
 
-	public function validate_checkout_phone() {
-
-		$posted_data = WC()->checkout()->get_posted_data();
+	public function validate_checkout_phone( array $posted_data, WP_Error $errors ): void {
 
 		$phone = $posted_data['billing_phone'] ?? '';
 
-		if ( empty( $phone ) ) {
-			wc_add_notice( 'لطفا شماره موبایل را وارد کنید.', 'error' );
+		if ( ! is_string( $phone ) || empty( $phone ) ) {
+			$errors->add( 'pinova_billing_phone_required', 'لطفا شماره موبایل را وارد کنید.' );
 
 			return;
 		}
@@ -36,9 +35,8 @@ class Checkout {
 		$mobile = new Mobile( $phone );
 
 		if ( ! $mobile->is_valid() ) {
-			wc_add_notice( 'شماره موبایل وارد شده معتبر نمی‌باشد.', 'error' );
+			$errors->add( 'pinova_billing_phone_invalid', 'شماره موبایل وارد شده معتبر نمی‌باشد.' );
 		}
-
 	}
 
 	public function update_customer( WC_Customer $customer, array $posted_data ): void {
@@ -49,7 +47,7 @@ class Checkout {
 			return;
 		}
 
-		if ( empty( $customer->get_first_name() ) || $customer->get_first_name() == 'کاربر' ) {
+		if ( empty( $customer->get_first_name() ) || $customer->get_first_name() === 'کاربر' ) {
 			$customer->set_first_name( $first_name );
 			$customer->set_display_name( $customer->get_first_name() . ' ' . $customer->get_last_name() );
 		}

@@ -17,9 +17,9 @@ Before substantive work:
 - Repository: `https://github.com/vahid162/pinova`
 - `main` includes the 1.2.3 security line, reproducible-release hardening, structured logging, the 1.2.5 fresh-request database-bootstrap hotfix, the reviewed 1.2.6 account/Blocked List corrections merged by PR #8 at `270ace9`, native-immutable publisher hardening introduced by PR #9 at `cccf1c3`, and the WooCommerce checkout-lifecycle correction that consumes the platform's validated data instead of reparsing the complete request early.
 - Existing 1.2.3 pre-releases remain immutable. `v1.2.4-rc1` contains the Composer bootstrap regression and is superseded by `v1.2.5-rc1`; no RC is stable/latest.
-- `v1.2.6-rc1` is published and checksum-verified but reports `immutable: false` because it predates repository-level native Release Immutability; retain it unchanged as history. `v1.2.6-rc2` was published from `714122f`, reports native `immutable: true`, and passed its release gates, but a later production read-only audit confirmed repeated nonfatal WooCommerce checkout lifecycle warnings in code shared by RC2. Retain RC2 unchanged and supersede it with a new RC rather than installing it for a new canary.
+- `v1.2.6-rc1` is published and checksum-verified but reports `immutable: false` because it predates repository-level native Release Immutability; retain it unchanged as history. `v1.2.6-rc2` was published from `714122f`, reports native `immutable: true`, and passed its release gates, but a later production read-only audit confirmed repeated nonfatal WooCommerce checkout lifecycle warnings in code shared by RC2. Retain RC2 unchanged and do not use it for a new canary. `v1.2.6-rc3` is the current 1.2.6 installation handoff: its annotated tag targets merged commit `de1a269`, Release `388879417` reports `immutable: true`, the publisher and attestations passed, and an independent redownload verified ZIP SHA-256 `7fbdb046ced0ce09ea875eee39e81d363e78852fef81dea04175956c0f30850d`.
 - The RC1 1.2.3 asset predates later PHP 8.1 dependency, CI matrix, PHP 8.5, and reproducible-build changes. Do not relabel or overwrite it.
-- RC3 is the current verified, installable 1.2.3 pre-release. It pins Composer 2.10.3, UTC, and staged permissions; keep all prior RC tags immutable.
+- `v1.2.3-rc3` is the current verified, installable 1.2.3 pre-release. It pins Composer 2.10.3, UTC, and staged permissions; keep all prior RC tags immutable.
 - The quality matrix covers PHP 8.1–8.5, WordPress 6.8/latest/7.1, WooCommerce fixed/latest/11.1.0, and HPOS on/off where configured.
 - Release history is mirrored between root `CHANGELOG.md` and the WordPress.org `readme.txt` Changelog section. CI compares release order and every entry; update both in the same change set.
 - Structured persistent logging shipped in the 1.2.4 line. In 1.2.5, the bounded administrator SMS test is an audit event that bypasses the minimum threshold, while the viewer reports table availability and the effective minimum level.
@@ -33,10 +33,10 @@ Verify all facts before acting and update this section whenever lineage, release
 ## Next expected milestones
 
 1. Treat `v1.2.4-rc1` as superseded; do not install, retag, or overwrite it.
-2. Publish `v1.2.6-rc3` only from the exact reviewed, merged, and green checkout-lifecycle fix on `main`; require native immutability, attestations, and an independent asset redownload before calling it an installation handoff.
-3. Do not install RC2 for a new canary. Investigate any later defect from a separate worktree and uniquely named disposable environment; never reuse preserved logging, RC2, or 1.2.5 verification assets without explicit authorization.
+2. Use only the installable `pinova-1.2.6.zip` asset from immutable `v1.2.6-rc3` for the next 1.2.6 staging/canary test; never substitute GitHub's automatic source archives.
+3. Do not install RC1 or RC2 for a new canary. Investigate any later defect from a separate worktree and uniquely named disposable environment; never reuse preserved logging, RC2, or 1.2.5 verification assets without explicit authorization.
 4. Keep future publication independent of an Administration-scoped secret and repository Ruleset. After the repository owner confirms native Release Immutability is enabled, publish only from an exact reviewed and green `main` commit and require the post-publication Release API, attestations, and redownload checks to pass. Preserve any failed tag or Release unchanged and use a new RC tag after correcting the cause.
-5. Stop before installation. Production changes require fresh backup/rollback controls and explicit authorization at execution time.
+5. Stop before installation. Complete the active stability observation and repeat the read-only production health gate first; production changes then require a fresh backup, an exact rollback plan, and explicit authorization at execution time.
 6. After the 1.2.x canary, merge current `main` into the 1.3 development line, resolve drift, retest identity migration, and create a new reviewed 1.3 RC rather than reusing `v1.3.0-rc1`.
 
 ## Source routing

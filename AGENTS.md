@@ -11,6 +11,7 @@ Before substantive work:
 3. Read Persian `README.md` for the public overview and `readme.txt` for WordPress.org metadata.
 4. Classify the task as review, diagnosis, implementation, migration, packaging/release, or production deployment and stay within that authority.
 5. Preserve unrelated changes and secrets. Do not force-push, move published tags, discard work, or clean shared Docker resources.
+6. Establish the compute boundary before running dependency installation, static analysis, packaging, or wp-env. A separate worktree/container is not resource isolation; if the checkout shares a host with production or another live tenant, keep resource-intensive quality work on GitHub Actions or a dedicated development host.
 
 ## Current project snapshot
 
@@ -71,6 +72,8 @@ Treat `<production-wordpress-root>/wp-content/plugins/pinova` as read-only unles
 Never use the production database for development or automated tests. Never run identity apply/merge/rollback, plugin replacement, web-server edits, or database writes merely because code development, testing, packaging, or GitHub publication was authorized.
 
 Treat existing worktrees, wp-env projects, containers, volumes, and test databases as preserved operational assets. Do not reuse, stop, update, delete, prune, or clean an environment created by another task unless the user explicitly authorizes that exact action. Create a uniquely named disposable environment for new integration work and report whether it was retained or removed.
+
+Never run the full integration matrix, unrestricted PHPStan/Composer work, or release builds on a host that also serves production. Filesystem, worktree, and Docker separation do not prevent CPU, RAM, swap, I/O, or OOM interference. Use the repository's GitHub Actions matrix or a resource-isolated development host; when host ownership is uncertain, stop after lightweight source checks and verify it before continuing.
 
 ## Definition of done
 

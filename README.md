@@ -118,7 +118,7 @@ composer install --no-interaction --prefer-dist
 npm install --ignore-scripts
 ```
 
-تست‌های integration با `@wordpress/env` در کانتینرهای جدا اجرا می‌شوند و نباید به فایل یا دیتابیس production متصل شوند. worktree، کانتینر، volume و دیتابیس آزمایشی موجود متعلق به همان task است؛ task تازه باید محیطی با نام یکتا بسازد و بدون مجوز صریح محیط قبلی را stop، update، prune یا حذف نکند.
+تست‌های integration با `@wordpress/env` در کانتینرهای جدا اجرا می‌شوند و نباید به فایل یا دیتابیس production متصل شوند. worktree، کانتینر، volume و دیتابیس آزمایشی موجود متعلق به همان task است؛ task تازه باید محیطی با نام یکتا بسازد و بدون مجوز صریح محیط قبلی را stop، update، prune یا حذف نکند. جداسازی مسیر و کانتینر به معنی جداسازی CPU/RAM/swap/I/O نیست؛ روی سروری که production یا tenant زندهٔ دیگری را میزبانی می‌کند، full matrix، PHPStan/Composer سنگین و build انتشار را اجرا نکنید و از GitHub Actions یا host توسعهٔ دارای منابع جدا استفاده کنید.
 
 ## کنترل کیفیت
 

@@ -2,6 +2,10 @@
 
 Read this reference for tests, dependencies, CI, ZIP builds, staging, tags, or releases.
 
+## Execution location gate
+
+Before installing dependencies or running quality tools, determine whether the checkout shares CPU, RAM, swap, I/O, or Docker with a production or multi-tenant workload. Worktree and container separation protect files and databases, not host capacity. Never run the full integration matrix, unrestricted PHPStan/Composer analysis, or reproducible release builds on a shared live host; use GitHub Actions or a dedicated resource-isolated development host. If host ownership is uncertain, perform only lightweight bounded source checks and stop until the boundary is verified. Do not compensate by stopping or pruning environments owned by other tasks.
+
 ## Quality suite
 
 Install locked dependencies:

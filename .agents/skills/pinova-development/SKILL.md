@@ -7,7 +7,7 @@ metadata:
 
 # Pinova Development
 
-Work from a repository checkout or disposable worktree, never from an installed production copy of the plugin.
+Work from a repository checkout or disposable worktree, never from an installed production copy of the plugin. Also establish compute isolation: a separate path, worktree, or Docker project still shares host resources. If the checkout is on a production or multi-tenant host, do not run dependency installation, full PHPStan, full wp-env/integration matrices, reproducible builds, or other unbounded PHP/Composer jobs there; use GitHub Actions or a dedicated resource-isolated development host. Limit local work on a shared live host to lightweight, bounded source checks after confirming headroom.
 
 ## Start every task
 

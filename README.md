@@ -111,6 +111,8 @@ AGENTS.md                         نقطهٔ شروع عامل‌های کدنو
 
 ## محیط توسعهٔ ایزوله
 
+پیش از نصب dependency یا اجرای هر ابزار کیفیت، مشخص کنید checkout از نظر CPU/RAM/swap/I/O نیز از production و tenantهای زنده جداست. worktree یا کانتینر جدا به‌تنهایی این جداسازی را ایجاد نمی‌کند؛ روی host مشترک حتی `composer install`، full matrix، PHPStan/Composer سنگین و build انتشار را اجرا نکنید و از GitHub Actions یا host توسعهٔ دارای منابع جدا استفاده کنید.
+
 ```bash
 git clone https://github.com/vahid162/pinova.git
 cd pinova

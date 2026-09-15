@@ -77,7 +77,7 @@ A worktree-local ZIP is never the installation handoff for this project. A test 
 
 ## Current lineage snapshot
 
-- `main`: Pinova 1.2.x security line, reproducible release, structured logging, and the 1.2.5 database-bootstrap hotfix.
+- `main`: Pinova 1.2.x security line, reproducible release, structured logging, the 1.2.5 database-bootstrap hotfix, the 1.2.6 account/Blocked List corrections, and the WooCommerce checkout-lifecycle correction.
 - `v1.2.3-rc1` / `ce9dc0d`: older security pre-release; it predates later CI, dependency, and build corrections.
 - `v1.2.3-rc2` / `a4600eb5`: verified installable pre-release, retained immutably; its build was repeatable on GitHub but exposed unpinned Composer/timezone/file-mode variance across hosts.
 - `v1.2.3-rc3` / `2399eb2`: current installable 1.2.3 pre-release with Composer 2.10.3, UTC, and normalized staged permissions.
@@ -87,6 +87,7 @@ A worktree-local ZIP is never the installation handoff for this project. A test 
 - `v1.2.5-rc1`: current hotfix pre-release; restores fresh-request initialization and makes administrator SMS-test audit results visible regardless of the logging threshold.
 - `v1.2.6-rc1` / `270ace9`: published and checksum-verified pre-release for the REST error contract, type-authoritative Blocked List enforcement, and accessible responsive account experience. It predates repository-level native Release Immutability (`immutable: false`) and is retained as publication history, not the installation handoff.
 - `v1.2.6-rc2` / `714122f`: native-immutable pre-release retained unchanged. Its publication gates passed, but a later read-only production audit found repeated nonfatal WooCommerce lifecycle warnings in its checkout-validation path. It is superseded for new installations; publish a new immutable RC from the reviewed fix instead of moving or editing this tag.
+- `v1.2.6-rc3` / `de1a269`: current native-immutable 1.2.6 installation handoff. PR #12 fixed the checkout lifecycle, Quality passed on the implementation branch, PR, merged `main`, and `publish/v1.2.6-rc3`; publisher run `34931316166` verified reproducibility and attestations. Annotated tag object `bb7dcbf` targets `de1a269`; Release `388879417` and an independent redownload verified installable ZIP SHA-256 `7fbdb046ced0ce09ea875eee39e81d363e78852fef81dea04175956c0f30850d`. It remains a pre-release and does not itself authorize production installation.
 - CI enforces synchronized release history between `CHANGELOG.md` and the WordPress.org `readme.txt` Changelog section.
 - 1.3 development branch: `security/v1.2.3-v1.3.0`.
 

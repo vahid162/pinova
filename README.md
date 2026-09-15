@@ -7,7 +7,7 @@
 - تاریخچهٔ نسخه‌ها: [CHANGELOG.md](CHANGELOG.md)
 - مجوز: GPLv3
 
-> **وضعیت انتشار:** نسخهٔ ۱.۲.۶ ادامهٔ خط امن ۱.۲.x است. [`v1.2.6-rc2`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc2) به‌صورت pre-release بومی و immutable منتشر شد، اما بررسی read-only بعدی هشدار تکراری چرخهٔ checkout را در کد مشترک آن تأیید کرد؛ این Release بدون تغییر به‌عنوان سابقه باقی می‌ماند و برای نصب تازه superseded است. handoff بعدی فقط `v1.2.6-rc3` خواهد بود، آن هم پس از PR، CI، انتشار immutable، attestation و بازدانلود مستقل موفق؛ تا پیش از آن artifact نصب تأییدشدهٔ تازه‌ای وجود ندارد.
+> **وضعیت انتشار:** [`v1.2.6-rc3`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc3) اکنون pre-release تأییدشدهٔ خط امن ۱.۲.x و تنها handoff نصب ۱.۲.۶ است. این نسخه از commit ادغام‌شدهٔ `de1a269` منتشر شده، Release آن `immutable: true` است، کنترل‌های CI و attestation موفق بوده‌اند و بازدانلود مستقل فایل [`pinova-1.2.6.zip`](https://github.com/vahid162/pinova/releases/download/v1.2.6-rc3/pinova-1.2.6.zip) مقدار SHA-256 برابر `7fbdb046ced0ce09ea875eee39e81d363e78852fef81dea04175956c0f30850d` را تأیید کرده است. RC2 بدون تغییر به‌عنوان سابقه باقی می‌ماند و برای نصب تازه superseded است. RC3 هنوز stable/latest نیست و انتشار آن به‌تنهایی مجوز نصب روی production محسوب نمی‌شود؛ ابتدا gate سلامت و staging/canary توافق‌شده را اجرا کنید.
 
 ## امکانات خط ۱.۲.x
 

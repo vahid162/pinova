@@ -160,7 +160,7 @@ class Pinova {
 		$url = site_url( 'login' );
 
 		if ( $back_url ) {
-			$url = add_query_arg( 'back_url', $back_url, $url );
+			$url = add_query_arg( 'back_url', urlencode( $back_url ), $url );
 		}
 
 		return $url;
@@ -170,7 +170,7 @@ class Pinova {
 		$url = site_url( 'logout' );
 
 		if ( $back_url ) {
-			$url = add_query_arg( 'back_url', $back_url, $url );
+			$url = add_query_arg( 'back_url', urlencode( $back_url ), $url );
 		}
 
 		return wp_nonce_url( $url, 'logout', '_pinova_nonce' );

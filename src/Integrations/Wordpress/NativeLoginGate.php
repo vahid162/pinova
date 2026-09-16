@@ -173,13 +173,11 @@ final class NativeLoginGate {
 	}
 
 	public function rewrite_public_login_url( string $login_url, string $redirect, bool $force_reauth ): string {
-		unset( $force_reauth );
-
 		if ( $this->private_request ) {
 			return $login_url;
 		}
 
-		return Pinova::get_login_url( '' === $redirect ? null : $redirect );
+		return Pinova::get_login_url( '' === $redirect ? null : $redirect, $force_reauth );
 	}
 
 	public function rewrite_public_register_url( string $register_url ): string {

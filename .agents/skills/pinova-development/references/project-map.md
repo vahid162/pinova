@@ -44,7 +44,7 @@ The 1.2.x Eloquent models depend on the connection initializer in `utils/class-d
 
 - Exports require `list_users`, nonce validation, safe strings, VCF escaping, batching, and XLSX row limits.
 - WooCommerce customer creation accepts only allowed billing/shipping input and forces role `customer`.
-- Redirects require `wp_validate_redirect()` and the allowed-host policy; encode a nested return URL exactly once before `add_query_arg()` so a single request-query decode restores the exact destination.
+- Redirects require `wp_validate_redirect()` and the allowed-host policy; encode a nested return URL exactly once before `add_query_arg()` so a single request-query decode restores the exact destination. A core force-reauthentication URL must retain `reauth=1`; the Pinova route clears the current session before rendering instead of redirecting an already-authenticated visitor.
 - Public password/forgot/OTP responses do not expose account existence or native-only role membership.
 - Native administrator password/2FA login remains available through the private Pinova administrator route, which internally executes `wp-login.php` and its core/security-plugin hooks. Canonical account actions can return 404 only after the opt-in gate is enabled; exact core `postpass`, `logout`, and `confirmaction` actions remain available for password-protected posts, nonce-protected logout, and keyed privacy confirmation. The private route remains testable before enablement, is derived from the public home URL even when WordPress core is installed in a subdirectory, and is never rendered by the public account template.
 - Rate limits hash identifiers and return HTTP 429 with `Retry-After`.

@@ -26,6 +26,11 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 			(string) wp_parse_url( Pinova::get_login_url( $return_url ), PHP_URL_QUERY ),
 			$login_args
 		);
+		$reauth_args = [];
+		wp_parse_str(
+			(string) wp_parse_url( Pinova::get_login_url( $return_url, true ), PHP_URL_QUERY ),
+			$reauth_args
+		);
 
 		$logout_args = [];
 		wp_parse_str(
@@ -37,6 +42,8 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 		);
 
 		self::assertSame( $return_url, $login_args['back_url'] ?? null );
+		self::assertSame( $return_url, $reauth_args['back_url'] ?? null );
+		self::assertSame( '1', $reauth_args['reauth'] ?? null );
 		self::assertSame( $return_url, $logout_args['back_url'] ?? null );
 	}
 
@@ -53,6 +60,9 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 
 		try {
 			$public_url  = wp_login_url( home_url( '/wp-admin/' ) );
+			$reauth_url  = wp_login_url( home_url( '/sensitive-action/' ), true );
+			$reauth_args = [];
+			wp_parse_str( (string) wp_parse_url( $reauth_url, PHP_URL_QUERY ), $reauth_args );
 			$private_url = $gate->rewrite_site_url(
 				'https://example.test/wordpress/wp-login.php?action=login#form',
 				'wp-login.php',
@@ -62,6 +72,9 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 
 			self::assertStringContainsString( '/login', $public_url );
 			self::assertStringNotContainsString( 'wp-login.php', $public_url );
+			self::assertStringContainsString( '/login', $reauth_url );
+			self::assertSame( '1', $reauth_args['reauth'] ?? null );
+			self::assertSame( home_url( '/sensitive-action/' ), $reauth_args['back_url'] ?? null );
 			self::assertSame(
 				NativeLoginGate::url() . '?action=login#form',
 				$private_url
@@ -115,6 +128,27 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 			self::assertSame( '42', $privacy_query['request_id'] ?? null );
 			self::assertSame( 'test-confirm-key', $privacy_query['confirm_key'] ?? null );
 			self::assertStringNotContainsString( '###CONFIRM_URL###', $privacy_content );
+
+			$previous_user_id = get_current_user_id();
+			$had_reauth       = array_key_exists( 'reauth', $_REQUEST );
+			$previous_reauth  = $_REQUEST['reauth'] ?? null;
+
+			try {
+				wp_set_current_user( $customer->ID );
+				unset( $_REQUEST['reauth'] );
+				self::assertFalse( Pinova::prepare_force_reauthentication() );
+				self::assertSame( $customer->ID, get_current_user_id() );
+				$_REQUEST['reauth'] = '1';
+				self::assertTrue( Pinova::prepare_force_reauthentication() );
+				self::assertSame( 0, get_current_user_id() );
+			} finally {
+				wp_set_current_user( $previous_user_id );
+				if ( $had_reauth ) {
+					$_REQUEST['reauth'] = $previous_reauth;
+				} else {
+					unset( $_REQUEST['reauth'] );
+				}
+			}
 		} finally {
 			remove_action( 'template_redirect', [ $gate, 'serve_private_login' ], 0 );
 			remove_action( 'login_init', [ $gate, 'block_canonical_login' ], 0 );

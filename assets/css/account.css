@@ -57,6 +57,7 @@ body.pinova-account-page input:focus-visible {
 .pinova-auth-layout {
   display: grid;
   grid-template-rows: auto auto;
+  direction: ltr;
   width: min(100%, 1000px);
   min-height: calc(100vh - 32px);
   min-height: calc(100svh - 32px);
@@ -71,6 +72,7 @@ body.pinova-account-page input:focus-visible {
 .pinova-auth-intro {
   display: flex;
   grid-row: 2;
+  direction: rtl;
   flex-direction: column;
   justify-content: center;
   padding: 24px 22px;
@@ -155,6 +157,7 @@ body.pinova-account-page input:focus-visible {
 .pinova-auth-card {
   position: relative;
   grid-row: 1;
+  direction: rtl;
   align-self: start;
   width: 100%;
   max-width: 500px;

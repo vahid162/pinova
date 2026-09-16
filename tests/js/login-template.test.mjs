@@ -59,6 +59,9 @@ test('account stylesheet protects small screens, focus, and touch targets', () =
     assert.match(accountCss, /min-height:\s*44px/i);
     assert.match(accountCss, /\.pinova-auth-card\s*{[^}]*grid-row:\s*1/is);
     assert.match(accountCss, /\.pinova-auth-intro\s*{[^}]*grid-row:\s*2/is);
+    assert.match(accountCss, /\.pinova-auth-layout\s*{[^}]*direction:\s*ltr/is);
+    assert.match(accountCss, /\.pinova-auth-card\s*{[^}]*direction:\s*rtl/is);
+    assert.match(accountCss, /\.pinova-auth-intro\s*{[^}]*direction:\s*rtl/is);
     assert.match(accountCss, /@media\s*\(max-width:\s*420px\)/i);
     assert.doesNotMatch(accountCss, /overflow-x:\s*auto/i);
 });

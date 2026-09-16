@@ -47,6 +47,36 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 		self::assertSame( $return_url, $logout_args['back_url'] ?? null );
 	}
 
+	public function test_public_login_and_logout_routes_follow_the_home_url(): void {
+		$home_filter = static function ( string $url, string $path ): string {
+			unset( $url );
+
+			return 'https://public.example' . ( '' === $path ? '' : '/' . ltrim( $path, '/' ) );
+		};
+		$site_filter = static function ( string $url, string $path ): string {
+			unset( $url );
+
+			return 'https://public.example/wordpress' . ( '' === $path ? '' : '/' . ltrim( $path, '/' ) );
+		};
+
+		add_filter( 'home_url', $home_filter, 99, 2 );
+		add_filter( 'site_url', $site_filter, 99, 2 );
+
+		try {
+			$login_url  = Pinova::get_login_url();
+			$logout_url = html_entity_decode( Pinova::get_logout_url(), ENT_QUOTES, 'UTF-8' );
+
+			self::assertSame( 'public.example', wp_parse_url( $login_url, PHP_URL_HOST ) );
+			self::assertSame( '/login', wp_parse_url( $login_url, PHP_URL_PATH ) );
+			self::assertSame( '/logout', wp_parse_url( $logout_url, PHP_URL_PATH ) );
+			self::assertStringNotContainsString( '/wordpress/', $login_url );
+			self::assertStringNotContainsString( '/wordpress/', $logout_url );
+		} finally {
+			remove_filter( 'home_url', $home_filter, 99 );
+			remove_filter( 'site_url', $site_filter, 99 );
+		}
+	}
+
 	public function test_enabled_native_login_gate_rewrites_generated_core_login_urls(): void {
 		$previous = get_option( 'pinova_advanced', null );
 		$options  = is_array( $previous ) ? $previous : [];
@@ -83,6 +113,23 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 
 			$administrator = get_userdata( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
 			$customer      = get_userdata( self::factory()->user->create( [ 'role' => 'subscriber' ] ) );
+			$previous_user = get_current_user_id();
+
+			try {
+				wp_set_current_user( $administrator->ID );
+				$native_reauth_url = wp_login_url( home_url( '/sensitive-admin-action/' ), true );
+			} finally {
+				wp_set_current_user( $previous_user );
+			}
+
+			$native_reauth_args = [];
+			wp_parse_str( (string) wp_parse_url( $native_reauth_url, PHP_URL_QUERY ), $native_reauth_args );
+			self::assertSame(
+				wp_parse_url( NativeLoginGate::url(), PHP_URL_PATH ),
+				wp_parse_url( $native_reauth_url, PHP_URL_PATH )
+			);
+			self::assertSame( '1', $native_reauth_args['reauth'] ?? null );
+			self::assertSame( home_url( '/sensitive-admin-action/' ), $native_reauth_args['redirect_to'] ?? null );
 
 			self::assertSame( $administrator, $gate->enforce_native_only_role( $administrator ) );
 			self::assertInstanceOf( \WP_Error::class, $gate->enforce_native_only_role( $customer ) );
@@ -128,6 +175,29 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 			self::assertSame( '42', $privacy_query['request_id'] ?? null );
 			self::assertSame( 'test-confirm-key', $privacy_query['confirm_key'] ?? null );
 			self::assertStringNotContainsString( '###CONFIRM_URL###', $privacy_content );
+
+			$had_action      = array_key_exists( 'action', $GLOBALS );
+			$previous_action = $GLOBALS['action'] ?? null;
+
+			try {
+				$GLOBALS['action'] = 'confirm_admin_email';
+				$confirm_admin_url = $gate->rewrite_public_login_url(
+					site_url( 'wp-login.php', 'login' ),
+					'',
+					false
+				);
+			} finally {
+				if ( $had_action ) {
+					$GLOBALS['action'] = $previous_action;
+				} else {
+					unset( $GLOBALS['action'] );
+				}
+			}
+
+			self::assertSame(
+				wp_parse_url( NativeLoginGate::url(), PHP_URL_PATH ),
+				wp_parse_url( $confirm_admin_url, PHP_URL_PATH )
+			);
 
 			$previous_user_id = get_current_user_id();
 			$had_reauth       = array_key_exists( 'reauth', $_REQUEST );

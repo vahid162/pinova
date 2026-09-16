@@ -27,9 +27,11 @@ final class NativeLoginGateTest extends TestCase {
 	}
 
 	public function test_only_non_authentication_core_actions_bypass_account_login_blocking(): void {
+		self::assertTrue( NativeLoginGate::is_public_core_action_request( 'confirm_admin_email' ) );
 		self::assertTrue( NativeLoginGate::is_public_core_action_request( 'postpass' ) );
 		self::assertTrue( NativeLoginGate::is_public_core_action_request( 'logout' ) );
 		self::assertTrue( NativeLoginGate::is_public_core_action_request( 'confirmaction' ) );
+		self::assertTrue( NativeLoginGate::is_public_core_action_request( 'exit_recovery_mode' ) );
 		self::assertFalse( NativeLoginGate::is_public_core_action_request( 'POSTPASS' ) );
 		self::assertFalse( NativeLoginGate::is_public_core_action_request( ' postpass ' ) );
 		self::assertFalse( NativeLoginGate::is_public_core_action_request( 'login' ) );

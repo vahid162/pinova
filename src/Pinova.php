@@ -158,7 +158,7 @@ class Pinova {
 	}
 
 	public static function get_login_url( ?string $back_url = null, bool $force_reauth = false ): string {
-		$url = site_url( 'login' );
+		$url  = home_url( '/login' );
 		$args = [];
 
 		if ( $back_url ) {
@@ -194,7 +194,7 @@ class Pinova {
 	}
 
 	public static function get_logout_url( ?string $back_url = null ): string {
-		$url = site_url( 'logout' );
+		$url = home_url( '/logout' );
 
 		if ( $back_url ) {
 			$url = add_query_arg( 'back_url', urlencode( $back_url ), $url );

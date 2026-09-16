@@ -176,17 +176,27 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 			self::assertSame( 'test-confirm-key', $privacy_query['confirm_key'] ?? null );
 			self::assertStringNotContainsString( '###CONFIRM_URL###', $privacy_content );
 
-			$had_action      = array_key_exists( 'action', $GLOBALS );
-			$previous_action = $GLOBALS['action'] ?? null;
+			$had_action       = array_key_exists( 'action', $GLOBALS );
+			$previous_action  = $GLOBALS['action'] ?? null;
+			$previous_user_id = get_current_user_id();
 
 			try {
 				$GLOBALS['action'] = 'confirm_admin_email';
-				$confirm_admin_url = $gate->rewrite_public_login_url(
+				wp_set_current_user( 0 );
+				$logged_out_confirmation_url = $gate->rewrite_public_login_url(
 					site_url( 'wp-login.php', 'login' ),
 					'',
 					false
 				);
+				wp_set_current_user( $administrator->ID );
+				$confirmation_base = $gate->rewrite_public_login_url(
+					site_url( 'wp-login.php', 'login' ),
+					home_url( '/wp-admin/' ),
+					false
+				);
+				$confirm_admin_url = add_query_arg( 'action', 'confirm_admin_email', $confirmation_base );
 			} finally {
+				wp_set_current_user( $previous_user_id );
 				if ( $had_action ) {
 					$GLOBALS['action'] = $previous_action;
 				} else {
@@ -194,10 +204,15 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 				}
 			}
 
+			self::assertSame( '/login', wp_parse_url( $logged_out_confirmation_url, PHP_URL_PATH ) );
+			self::assertStringNotContainsString( NativeLoginGate::slug(), $logged_out_confirmation_url );
 			self::assertSame(
-				wp_parse_url( NativeLoginGate::url(), PHP_URL_PATH ),
-				wp_parse_url( $confirm_admin_url, PHP_URL_PATH )
+				'wp-login.php',
+				basename( (string) wp_parse_url( $confirm_admin_url, PHP_URL_PATH ) )
 			);
+			$confirm_admin_args = [];
+			wp_parse_str( (string) wp_parse_url( $confirm_admin_url, PHP_URL_QUERY ), $confirm_admin_args );
+			self::assertSame( 'confirm_admin_email', $confirm_admin_args['action'] ?? null );
 
 			$previous_user_id = get_current_user_id();
 			$had_reauth       = array_key_exists( 'reauth', $_REQUEST );
@@ -220,21 +235,7 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 				}
 			}
 		} finally {
-			remove_action( 'template_redirect', [ $gate, 'serve_private_login' ], 0 );
-			remove_action( 'login_init', [ $gate, 'block_canonical_login' ], 0 );
-			remove_filter( 'site_url', [ $gate, 'rewrite_site_url' ], 10 );
-			remove_filter( 'network_site_url', [ $gate, 'rewrite_network_site_url' ], 10 );
-			remove_filter( 'wp_redirect', [ $gate, 'rewrite_redirect' ], 10 );
-			remove_filter( 'authenticate', [ $gate, 'enforce_native_only_role' ], PHP_INT_MAX );
-			remove_filter( 'allow_password_reset', [ $gate, 'allow_native_only_password_reset' ], 99 );
-			remove_action( 'validate_password_reset', [ $gate, 'validate_native_only_password_reset' ], PHP_INT_MAX );
-			remove_action( 'login_form_register', [ $gate, 'redirect_public_registration' ], 0 );
-			remove_filter( 'login_url', [ $gate, 'rewrite_public_login_url' ], 20 );
-			remove_filter( 'register_url', [ $gate, 'rewrite_public_register_url' ], 20 );
-			remove_filter( 'lostpassword_url', [ $gate, 'rewrite_public_lost_password_url' ], 20 );
-			remove_filter( 'retrieve_password_message', [ $gate, 'rewrite_native_reset_message' ], 99 );
-			remove_filter( 'recovery_mode_email', [ $gate, 'rewrite_recovery_mode_email' ], 99 );
-			remove_filter( 'user_request_action_email_content', [ $gate, 'rewrite_privacy_request_email_content' ], 99 );
+			self::remove_gate_hooks( $gate );
 
 			if ( null === $previous ) {
 				delete_option( 'pinova_advanced' );
@@ -242,5 +243,87 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 				update_option( 'pinova_advanced', $previous );
 			}
 		}
+	}
+
+	public function test_private_native_flow_rewrites_admin_email_confirmation_at_construction(): void {
+		$previous_options    = get_option( 'pinova_advanced', null );
+		$previous_request    = $_SERVER['REQUEST_URI'] ?? null;
+		$previous_script     = $_SERVER['SCRIPT_NAME'] ?? null;
+		$had_pagenow         = array_key_exists( 'pagenow', $GLOBALS );
+		$previous_pagenow    = $GLOBALS['pagenow'] ?? null;
+		$options             = is_array( $previous_options ) ? $previous_options : [];
+		$options['block_native_login'] = '1';
+		$options['native_login_slug']  = 'pinova-admin-safe1234';
+		update_option( 'pinova_advanced', $options );
+
+		$_SERVER['REQUEST_URI'] = (string) wp_parse_url( NativeLoginGate::url(), PHP_URL_PATH );
+		$_SERVER['SCRIPT_NAME'] = '/index.php';
+		$gate                   = new NativeLoginGate();
+
+		try {
+			$redirect_url = home_url( '/wp-admin/' );
+			$login_url    = wp_login_url( $redirect_url );
+			$confirm_url  = add_query_arg(
+				[
+					'action'  => 'confirm_admin_email',
+					'wp_lang' => 'fa_IR',
+				],
+				$login_url
+			);
+			$query        = [];
+			wp_parse_str( (string) wp_parse_url( $confirm_url, PHP_URL_QUERY ), $query );
+
+			self::assertSame(
+				wp_parse_url( NativeLoginGate::url(), PHP_URL_PATH ),
+				wp_parse_url( $confirm_url, PHP_URL_PATH )
+			);
+			self::assertSame( 'confirm_admin_email', $query['action'] ?? null );
+			self::assertSame( 'fa_IR', $query['wp_lang'] ?? null );
+			self::assertSame( $redirect_url, $query['redirect_to'] ?? null );
+		} finally {
+			self::remove_gate_hooks( $gate );
+
+			if ( null === $previous_request ) {
+				unset( $_SERVER['REQUEST_URI'] );
+			} else {
+				$_SERVER['REQUEST_URI'] = $previous_request;
+			}
+
+			if ( null === $previous_script ) {
+				unset( $_SERVER['SCRIPT_NAME'] );
+			} else {
+				$_SERVER['SCRIPT_NAME'] = $previous_script;
+			}
+
+			if ( $had_pagenow ) {
+				$GLOBALS['pagenow'] = $previous_pagenow;
+			} else {
+				unset( $GLOBALS['pagenow'] );
+			}
+
+			if ( null === $previous_options ) {
+				delete_option( 'pinova_advanced' );
+			} else {
+				update_option( 'pinova_advanced', $previous_options );
+			}
+		}
+	}
+
+	private static function remove_gate_hooks( NativeLoginGate $gate ): void {
+		remove_action( 'template_redirect', [ $gate, 'serve_private_login' ], 0 );
+		remove_action( 'login_init', [ $gate, 'block_canonical_login' ], 0 );
+		remove_filter( 'site_url', [ $gate, 'rewrite_site_url' ], 10 );
+		remove_filter( 'network_site_url', [ $gate, 'rewrite_network_site_url' ], 10 );
+		remove_filter( 'wp_redirect', [ $gate, 'rewrite_redirect' ], 10 );
+		remove_filter( 'authenticate', [ $gate, 'enforce_native_only_role' ], PHP_INT_MAX );
+		remove_filter( 'allow_password_reset', [ $gate, 'allow_native_only_password_reset' ], 99 );
+		remove_action( 'validate_password_reset', [ $gate, 'validate_native_only_password_reset' ], PHP_INT_MAX );
+		remove_action( 'login_form_register', [ $gate, 'redirect_public_registration' ], 0 );
+		remove_filter( 'login_url', [ $gate, 'rewrite_public_login_url' ], 20 );
+		remove_filter( 'register_url', [ $gate, 'rewrite_public_register_url' ], 20 );
+		remove_filter( 'lostpassword_url', [ $gate, 'rewrite_public_lost_password_url' ], 20 );
+		remove_filter( 'retrieve_password_message', [ $gate, 'rewrite_native_reset_message' ], 99 );
+		remove_filter( 'recovery_mode_email', [ $gate, 'rewrite_recovery_mode_email' ], 99 );
+		remove_filter( 'user_request_action_email_content', [ $gate, 'rewrite_privacy_request_email_content' ], 99 );
 	}
 }

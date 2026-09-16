@@ -177,6 +177,10 @@ final class NativeLoginGate {
 			return $login_url;
 		}
 
+		if ( $this->is_logged_in_admin_email_confirmation() ) {
+			return $login_url;
+		}
+
 		if ( $this->should_use_private_login_url( $force_reauth ) ) {
 			return $this->rewrite_login_url( $login_url );
 		}
@@ -334,12 +338,6 @@ final class NativeLoginGate {
 	}
 
 	private function should_use_private_login_url( bool $force_reauth ): bool {
-		$core_action = $GLOBALS['action'] ?? null;
-
-		if ( 'confirm_admin_email' === $core_action ) {
-			return true;
-		}
-
 		if ( function_exists( 'wp_is_recovery_mode' ) && wp_is_recovery_mode() ) {
 			return true;
 		}
@@ -351,6 +349,14 @@ final class NativeLoginGate {
 		$user = wp_get_current_user();
 
 		return $user instanceof WP_User && $user->exists() && UserService::is_native_only( $user );
+	}
+
+	private function is_logged_in_admin_email_confirmation(): bool {
+		$core_action = $GLOBALS['action'] ?? null;
+
+		return 'confirm_admin_email' === $core_action
+			&& is_user_logged_in()
+			&& current_user_can( 'manage_options' );
 	}
 
 	private function request_matches_private_route(): bool {

@@ -7,7 +7,7 @@
 - تاریخچهٔ نسخه‌ها: [CHANGELOG.md](CHANGELOG.md)
 - مجوز: GPLv3
 
-> **وضعیت انتشار:** [`v1.2.6-rc4`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc4) اکنون pre-release تأییدشدهٔ خط امن ۱.۲.x و handoff فعلی نصب ۱.۲.۶ است. این نسخه از commit ادغام‌شدهٔ `0b89485` منتشر شده، Release آن `immutable: true` است، کنترل‌های CI و attestation موفق بوده‌اند و بازدانلود مستقل فایل [`pinova-1.2.6.zip`](https://github.com/vahid162/pinova/releases/download/v1.2.6-rc4/pinova-1.2.6.zip) مقدار SHA-256 برابر `9d2e8c8c7cfee0e2491551b1806a8328cf99f2b7261e5da7326221f6c7fe45b6` را تأیید کرده است. RC1 تا RC3 بدون تغییر به‌عنوان سابقه باقی می‌مانند و برای نصب تازه superseded هستند. RC4 هنوز stable/latest نیست و انتشار آن به‌تنهایی مجوز نصب یا فعال‌سازی مسدودسازی مسیر بومی روی production محسوب نمی‌شود؛ ابتدا gate سلامت و staging/canary توافق‌شده را اجرا کنید.
+> **وضعیت انتشار:** [`v1.2.6-rc5`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc5) اکنون pre-release تأییدشدهٔ خط امن ۱.۲.x و handoff فعلی نصب ۱.۲.۶ است. این نسخه از commit ادغام‌شدهٔ `b65370b` منتشر شده، Release آن `immutable: true` است، کنترل‌های CI و attestation موفق بوده‌اند و بازدانلود مستقل فایل [`pinova-1.2.6.zip`](https://github.com/vahid162/pinova/releases/download/v1.2.6-rc5/pinova-1.2.6.zip) مقدار SHA-256 برابر `1998a8c4c783f2624f16a650fcd3952a987e02ff9106fb585c7a9a96db3bfd36` را تأیید کرده است. RC1 تا RC4 بدون تغییر به‌عنوان سابقه باقی می‌مانند و برای نصب تازه superseded هستند. RC5 هنوز stable/latest نیست و انتشار آن به‌تنهایی مجوز نصب یا فعال‌سازی مسدودسازی مسیر بومی روی production محسوب نمی‌شود؛ ابتدا gate سلامت و پذیرش تعاملی دسکتاپ/موبایل را اجرا کنید.
 
 ## امکانات خط ۱.۲.x
 

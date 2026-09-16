@@ -116,6 +116,7 @@ body.pinova-account-page input:focus-visible {
 .pinova-auth-logo {
   display: flex;
   justify-content: center;
+  max-width: calc(100% - 104px);
   min-height: 54px;
   padding: 4px;
 }

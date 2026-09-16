@@ -108,6 +108,32 @@ test('existing WordPress passwords have no client-side minimum length', () => {
     assert.equal(state.forms.loginByPassword.inputs.password.rules.minLength, undefined);
 });
 
+test('identifier edit labels match email, mobile, and fallback identifiers', () => {
+    const { state } = harness();
+
+    state.forms.authenticate.inputs.identifier.value = 'buyer@example.test';
+    assert.equal(state.identifierEditLabel(), 'ویرایش ایمیل');
+
+    state.forms.authenticate.inputs.identifier.value = '۰۹۱۲ ۱۲۳ ۴۵۶۷';
+    assert.equal(state.identifierEditLabel(), 'ویرایش شماره');
+
+    state.forms.authenticate.inputs.identifier.value = 'customer-name';
+    assert.equal(state.identifierEditLabel(), 'ویرایش شناسه');
+});
+
+test('editing the identifier returns to the first step and clears OTP secrets', () => {
+    const { state } = harness();
+    state.stepName = 'loginByOtp';
+    state.forms.loginByOtp.inputs.jwt.value = 'otp-jwt';
+    state.forms.loginByOtp.inputs.code.value = '1234';
+
+    state.editIdentifier();
+
+    assert.equal(state.stepName, 'authenticate');
+    assert.equal(state.forms.loginByOtp.inputs.jwt.value, '');
+    assert.equal(state.forms.loginByOtp.inputs.code.value, '');
+});
+
 test('starting a timer clears the prior interval before replacing it', () => {
     const { clearedIntervals, state } = harness();
     state.time.timerInterval = 73;

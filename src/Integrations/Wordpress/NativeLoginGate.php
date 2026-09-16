@@ -281,6 +281,6 @@ final class NativeLoginGate {
 			return $url;
 		}
 
-		return (string) preg_replace( '#wp-login\.php(?=([/?#]|$))#i', self::slug(), $url, 1 );
+		return (string) preg_replace( '~wp-login\.php(?=([/?#]|$))~i', self::slug(), $url, 1 );
 	}
 }

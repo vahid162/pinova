@@ -209,7 +209,15 @@ final class NativeLoginGate {
 		);
 	}
 
-	public function allow_native_only_password_reset( $allow, int $user_id ): bool {
+	/**
+	 * @param bool|WP_Error $allow Result from earlier password-reset filters.
+	 * @return bool|WP_Error
+	 */
+	public function allow_native_only_password_reset( $allow, int $user_id ) {
+		if ( $allow instanceof WP_Error ) {
+			return $allow;
+		}
+
 		$user = get_userdata( $user_id );
 
 		return $user instanceof WP_User && UserService::is_native_only( $user ) && (bool) $allow;

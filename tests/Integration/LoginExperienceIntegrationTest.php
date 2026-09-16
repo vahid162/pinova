@@ -19,6 +19,27 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 		self::assertStringNotContainsString( '>', $message );
 	}
 
+	public function test_login_and_logout_return_urls_are_encoded_exactly_once(): void {
+		$return_url = home_url( '/protected/?foo=bar&baz=qux' );
+		$login_args = [];
+		wp_parse_str(
+			(string) wp_parse_url( Pinova::get_login_url( $return_url ), PHP_URL_QUERY ),
+			$login_args
+		);
+
+		$logout_args = [];
+		wp_parse_str(
+			(string) wp_parse_url(
+				html_entity_decode( Pinova::get_logout_url( $return_url ), ENT_QUOTES, 'UTF-8' ),
+				PHP_URL_QUERY
+			),
+			$logout_args
+		);
+
+		self::assertSame( $return_url, $login_args['back_url'] ?? null );
+		self::assertSame( $return_url, $logout_args['back_url'] ?? null );
+	}
+
 	public function test_enabled_native_login_gate_rewrites_generated_core_login_urls(): void {
 		$previous = get_option( 'pinova_advanced', null );
 		$options  = is_array( $previous ) ? $previous : [];
@@ -54,6 +75,11 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 			self::assertInstanceOf( \WP_Error::class, $gate->enforce_native_only_role( $customer ) );
 			self::assertTrue( $gate->allow_native_only_password_reset( true, $administrator->ID ) );
 			self::assertFalse( $gate->allow_native_only_password_reset( true, $customer->ID ) );
+			$security_denial = new \WP_Error( 'security_plugin_denied_reset' );
+			self::assertSame(
+				$security_denial,
+				$gate->allow_native_only_password_reset( $security_denial, $administrator->ID )
+			);
 			$reset_errors = new \WP_Error();
 			$gate->validate_native_only_password_reset( $reset_errors, $customer );
 			self::assertTrue( $reset_errors->has_errors() );

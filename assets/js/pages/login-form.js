@@ -519,6 +519,24 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             this.status.tone = 'info';
         },
 
+        identifierEditLabel(){
+            const identifier = String(this.forms.authenticate.inputs.identifier.value || '').trim();
+
+            if(identifier.includes('@')){
+                return 'ویرایش ایمیل';
+            }
+
+            if(/^[+()\s0-9۰-۹٠-٩-]+$/.test(identifier)){
+                return 'ویرایش شماره';
+            }
+
+            return 'ویرایش شناسه';
+        },
+
+        editIdentifier(){
+            this.changeStep('authenticate');
+        },
+
         handleRequestFailure(result){
             this.setStatus(result && result.message ? result.message : 'خطایی رخ داده است!');
         },

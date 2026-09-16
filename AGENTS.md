@@ -17,6 +17,7 @@ Before substantive work:
 
 - Repository: `https://github.com/vahid162/pinova`
 - `main` includes the 1.2.3 security line, reproducible-release hardening, structured logging, the 1.2.5 fresh-request database-bootstrap hotfix, the reviewed 1.2.6 account/Blocked List corrections merged by PR #8 at `270ace9`, native-immutable publisher hardening introduced by PR #9 at `cccf1c3`, the WooCommerce checkout-lifecycle correction, and the account-brand/native-login and redirect round-trip work merged by PR #15 at `0b89485`.
+- The focused OTP hierarchy follow-up is the next 1.2.6 change after RC4. It makes destination editing, configured-length guidance, primary verification, resend status, and alternate login actions unambiguous, but is not an installation handoff until its GitHub review, merge, immutable Release, attestations, and redownload checks pass.
 - Existing 1.2.3 pre-releases remain immutable. `v1.2.4-rc1` contains the Composer bootstrap regression and is superseded by `v1.2.5-rc1`; no RC is stable/latest.
 - `v1.2.6-rc1` is published and checksum-verified but reports `immutable: false` because it predates repository-level native Release Immutability; retain it unchanged as history. RC2 and RC3 remain immutable superseded history. `v1.2.6-rc4` is the current 1.2.6 installation handoff: annotated tag object `3935912` targets merged commit `0b89485`, Release `389750791` reports `immutable: true`, all PR/`main`/publish/publisher gates and attestations passed, and an independent redownload verified ZIP SHA-256 `9d2e8c8c7cfee0e2491551b1806a8328cf99f2b7261e5da7326221f6c7fe45b6`.
 - The RC1 1.2.3 asset predates later PHP 8.1 dependency, CI matrix, PHP 8.5, and reproducible-build changes. Do not relabel or overwrite it.
@@ -34,11 +35,12 @@ Verify all facts before acting and update this section whenever lineage, release
 ## Next expected milestones
 
 1. Treat `v1.2.4-rc1` as superseded; do not install, retag, or overwrite it.
-2. Retain RC1–RC3 unchanged as publication history. Use only the installable `pinova-1.2.6.zip` asset from immutable `v1.2.6-rc4` for the account-brand/native-login staging or controlled canary; never substitute GitHub's automatic source archives.
-3. Do not install RC1 or RC2 for a new canary, and do not install an implementation branch or worktree artifact. Investigate later defects from a separate worktree and uniquely named disposable environment; never reuse preserved logging, RC2, or 1.2.5 verification assets without explicit authorization.
-4. Keep future publication independent of an Administration-scoped secret and repository Ruleset. After the repository owner confirms native Release Immutability is enabled, publish only from an exact reviewed and green `main` commit and require the post-publication Release API, attestations, and redownload checks to pass. Preserve any failed tag or Release unchanged and use a new RC tag after correcting the cause.
-5. Stop before installation. Complete the active stability observation and repeat the read-only production health gate first; production changes then require a fresh backup, an exact rollback plan, and explicit authorization at execution time.
-6. After the 1.2.x canary, merge current `main` into the 1.3 development line, resolve drift, retest identity migration, and create a new reviewed 1.3 RC rather than reusing `v1.3.0-rc1`.
+2. Review the focused OTP hierarchy follow-up through GitHub CI, merge it, and publish a new immutable 1.2.6 RC before handing that UI to the site for testing. Until every publication gate passes, `v1.2.6-rc4` remains the current installation handoff and branch/worktree artifacts are not installable versions.
+3. Retain RC1–RC3 unchanged as publication history. Use only the installable `pinova-1.2.6.zip` asset from immutable `v1.2.6-rc4` for the account-brand/native-login staging or controlled canary; never substitute GitHub's automatic source archives.
+4. Do not install RC1 or RC2 for a new canary, and do not install an implementation branch or worktree artifact. Investigate later defects from a separate worktree and uniquely named disposable environment; never reuse preserved logging, RC2, or 1.2.5 verification assets without explicit authorization.
+5. Keep future publication independent of an Administration-scoped secret and repository Ruleset. After the repository owner confirms native Release Immutability is enabled, publish only from an exact reviewed and green `main` commit and require the post-publication Release API, attestations, and redownload checks to pass. Preserve any failed tag or Release unchanged and use a new RC tag after correcting the cause.
+6. Stop before installation. Complete the active stability observation and repeat the read-only production health gate first; production changes then require a fresh backup, an exact rollback plan, and explicit authorization at execution time.
+7. After the 1.2.x canary, merge current `main` into the 1.3 development line, resolve drift, retest identity migration, and create a new reviewed 1.3 RC rather than reusing `v1.3.0-rc1`.
 
 ## Source routing
 

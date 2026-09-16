@@ -35,4 +35,4 @@ Date: 2026-09-16 (Asia/Tehran)
 
 ## Handoff decision
 
-The sole RC4 installation artifact is `pinova-1.2.6.zip` attached to `v1.2.6-rc4`; GitHub's automatic source archives are not installation packages. RC1–RC3 remain unchanged as immutable history and are superseded for a new 1.2.6 installation. RC4 is ready for the separately authorized staging or controlled production canary gate, but it is not stable/latest and its publication does not authorize installation or activation of the native-login block.
+The sole RC4 installation artifact is `pinova-1.2.6.zip` attached to `v1.2.6-rc4`; GitHub's automatic source archives are not installation packages. RC1 remains unchanged as non-immutable publication history, while RC2 and RC3 remain unchanged as immutable superseded history; all three are superseded for a new 1.2.6 installation. RC4 is ready for the separately authorized staging or controlled production canary gate, but it is not stable/latest and its publication does not authorize installation or activation of the native-login block.

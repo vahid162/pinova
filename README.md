@@ -7,7 +7,7 @@
 - تاریخچهٔ نسخه‌ها: [CHANGELOG.md](CHANGELOG.md)
 - مجوز: GPLv3
 
-> **وضعیت انتشار:** [`v1.2.6-rc5`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc5) پیش‌انتشار immutable فعلی خط ۱.۲.x است. این نسخه از commit ادغام‌شدهٔ `b65370b` منتشر شده، کنترل‌های CI و attestation موفق بوده‌اند و بازدانلود مستقل فایل [`pinova-1.2.6.zip`](https://github.com/vahid162/pinova/releases/download/v1.2.6-rc5/pinova-1.2.6.zip) مقدار SHA-256 برابر `1998a8c4c783f2624f16a650fcd3952a987e02ff9106fb585c7a9a96db3bfd36` را تأیید کرده است. با این حال، پذیرش بصری بعدی چیدمان دوپنلهٔ صفحهٔ حساب را رد کرد؛ RC5 و نسخه‌های پیشین بدون تغییر به‌عنوان سابقه می‌مانند و برای نصب تازه باید منتظر RC جدیدِ بازبینی‌شده و immutable ماند. انتشار GitHub به‌تنهایی مجوز نصب یا فعال‌سازی مسدودسازی مسیر بومی روی production نیست.
+> **وضعیت انتشار:** [`v1.2.6-rc6`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc6) پیش‌انتشار immutable فعلی خط ۱.۲.x و نامزد نصب بعدی است. این نسخه از commit ادغام‌شدهٔ `c327c715` منتشر شده، Release آن `immutable: true` است، کنترل‌های CI و attestation موفق بوده‌اند و بازدانلود مستقل فایل [`pinova-1.2.6.zip`](https://github.com/vahid162/pinova/releases/download/v1.2.6-rc6/pinova-1.2.6.zip) مقدار SHA-256 برابر `612a0ef051ea46e9a05b3f352c867b6e4704bc56bdc380c04df29ebdd7886d43` را تأیید کرده است. RC1 تا RC5 بدون تغییر به‌عنوان سابقه باقی می‌مانند و برای نصب تازه superseded هستند. RC6 هنوز stable/latest نیست؛ انتشار GitHub به‌تنهایی مجوز نصب روی production یا فعال‌سازی مسدودسازی مسیر بومی نیست و پذیرش تعاملی دسکتاپ/موبایل پس از نصب همچنان الزامی است.
 
 ## امکانات خط ۱.۲.x
 

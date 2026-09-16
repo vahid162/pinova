@@ -6,6 +6,7 @@ namespace Pinova\Tests\Integration;
 
 use Pinova\Integrations\Wordpress\NativeLoginGate;
 use Pinova\Objects\Identifier;
+use Pinova\Pinova;
 use Pinova\Services\ChannelService;
 
 final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
@@ -65,6 +66,29 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 					$administrator
 				)
 			);
+
+			$privacy_content = $gate->rewrite_privacy_request_email_content(
+				'Confirm: ###CONFIRM_URL###',
+				[
+					'confirm_url' => add_query_arg(
+						[
+							'action'      => 'confirmaction',
+							'request_id'  => 42,
+							'confirm_key' => 'test-confirm-key',
+						],
+						Pinova::get_login_url()
+					),
+				]
+			);
+			$privacy_url     = substr( $privacy_content, strlen( 'Confirm: ' ) );
+			$privacy_query   = [];
+			wp_parse_str( (string) wp_parse_url( $privacy_url, PHP_URL_QUERY ), $privacy_query );
+
+			self::assertSame( 'wp-login.php', basename( (string) wp_parse_url( $privacy_url, PHP_URL_PATH ) ) );
+			self::assertSame( 'confirmaction', $privacy_query['action'] ?? null );
+			self::assertSame( '42', $privacy_query['request_id'] ?? null );
+			self::assertSame( 'test-confirm-key', $privacy_query['confirm_key'] ?? null );
+			self::assertStringNotContainsString( '###CONFIRM_URL###', $privacy_content );
 		} finally {
 			remove_action( 'template_redirect', [ $gate, 'serve_private_login' ], 0 );
 			remove_action( 'login_init', [ $gate, 'block_canonical_login' ], 0 );
@@ -80,6 +104,7 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 			remove_filter( 'lostpassword_url', [ $gate, 'rewrite_public_lost_password_url' ], 20 );
 			remove_filter( 'retrieve_password_message', [ $gate, 'rewrite_native_reset_message' ], 99 );
 			remove_filter( 'recovery_mode_email', [ $gate, 'rewrite_recovery_mode_email' ], 99 );
+			remove_filter( 'user_request_action_email_content', [ $gate, 'rewrite_privacy_request_email_content' ], 99 );
 
 			if ( null === $previous ) {
 				delete_option( 'pinova_advanced' );

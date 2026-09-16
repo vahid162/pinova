@@ -50,6 +50,7 @@ final class NativeLoginGate {
 			add_filter( 'lostpassword_url', [ $this, 'rewrite_public_lost_password_url' ], 20, 2 );
 			add_filter( 'retrieve_password_message', [ $this, 'rewrite_native_reset_message' ], 99, 4 );
 			add_filter( 'recovery_mode_email', [ $this, 'rewrite_recovery_mode_email' ], 99 );
+			add_filter( 'user_request_action_email_content', [ $this, 'rewrite_privacy_request_email_content' ], 99, 2 );
 		}
 	}
 
@@ -122,7 +123,7 @@ final class NativeLoginGate {
 	public function block_canonical_login(): void {
 		if (
 			$this->private_request
-			|| self::is_post_password_request()
+			|| self::is_public_core_action_request()
 			|| ! self::is_canonical_login_request()
 		) {
 			return;
@@ -245,6 +246,48 @@ final class NativeLoginGate {
 		return $email;
 	}
 
+	/**
+	 * Restore the canonical non-authentication endpoint in privacy-request emails.
+	 *
+	 * Core adds the confirmaction query after calling wp_login_url(), so the
+	 * ordinary login_url filter cannot distinguish this flow from authentication.
+	 */
+	public function rewrite_privacy_request_email_content( string $content, array $email_data ): string {
+		if ( ! isset( $email_data['confirm_url'] ) || ! is_string( $email_data['confirm_url'] ) ) {
+			return $content;
+		}
+
+		$query = [];
+		wp_parse_str( (string) wp_parse_url( $email_data['confirm_url'], PHP_URL_QUERY ), $query );
+
+		if (
+			'confirmaction' !== ( $query['action'] ?? '' )
+			|| ! isset( $query['request_id'], $query['confirm_key'] )
+			|| ! is_scalar( $query['request_id'] )
+			|| ! is_string( $query['confirm_key'] )
+		) {
+			return $content;
+		}
+
+		$request_id  = absint( $query['request_id'] );
+		$confirm_key = sanitize_text_field( $query['confirm_key'] );
+
+		if ( 1 > $request_id || '' === $confirm_key ) {
+			return $content;
+		}
+
+		$confirm_url = add_query_arg(
+			[
+				'action'      => 'confirmaction',
+				'request_id'  => $request_id,
+				'confirm_key' => $confirm_key,
+			],
+			site_url( 'wp-login.php', 'login' )
+		);
+
+		return str_replace( '###CONFIRM_URL###', esc_url_raw( $confirm_url ), $content );
+	}
+
 	public static function is_canonical_login_request( ?string $request_uri = null, ?string $script_name = null ): bool {
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- Only the path is compared to a fixed filename and never rendered or persisted.
 		$request_uri = null === $request_uri ? (string) ( $_SERVER['REQUEST_URI'] ?? '' ) : $request_uri;
@@ -256,9 +299,10 @@ final class NativeLoginGate {
 	}
 
 	/**
-	 * Keep WordPress's non-authentication handler for password-protected posts.
+	 * Keep the core actions that do not authenticate or recover an account.
+	 * Match exactly because core normalizes unknown variants back to login.
 	 */
-	public static function is_post_password_request( ?string $action = null ): bool {
+	public static function is_public_core_action_request( ?string $action = null ): bool {
 		if ( null === $action ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- This only selects a core handler; wp-login.php processes the request.
 			$request_action = $_REQUEST['action'] ?? '';
@@ -266,7 +310,7 @@ final class NativeLoginGate {
 			$action = is_string( $request_action ) ? (string) wp_unslash( $request_action ) : '';
 		}
 
-		return 'postpass' === strtolower( trim( $action ) );
+		return in_array( $action, [ 'confirmaction', 'logout', 'postpass' ], true );
 	}
 
 	private function request_matches_private_route(): bool {

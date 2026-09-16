@@ -26,11 +26,14 @@ final class NativeLoginGateTest extends TestCase {
 		self::assertFalse( NativeLoginGate::is_canonical_login_request( '/article-about-wp-login.php', '/index.php' ) );
 	}
 
-	public function test_only_the_post_password_action_bypasses_account_login_blocking(): void {
-		self::assertTrue( NativeLoginGate::is_post_password_request( 'postpass' ) );
-		self::assertTrue( NativeLoginGate::is_post_password_request( ' POSTPASS ' ) );
-		self::assertFalse( NativeLoginGate::is_post_password_request( 'login' ) );
-		self::assertFalse( NativeLoginGate::is_post_password_request( 'lostpassword' ) );
-		self::assertFalse( NativeLoginGate::is_post_password_request( '' ) );
+	public function test_only_non_authentication_core_actions_bypass_account_login_blocking(): void {
+		self::assertTrue( NativeLoginGate::is_public_core_action_request( 'postpass' ) );
+		self::assertTrue( NativeLoginGate::is_public_core_action_request( 'logout' ) );
+		self::assertTrue( NativeLoginGate::is_public_core_action_request( 'confirmaction' ) );
+		self::assertFalse( NativeLoginGate::is_public_core_action_request( 'POSTPASS' ) );
+		self::assertFalse( NativeLoginGate::is_public_core_action_request( ' postpass ' ) );
+		self::assertFalse( NativeLoginGate::is_public_core_action_request( 'login' ) );
+		self::assertFalse( NativeLoginGate::is_public_core_action_request( 'lostpassword' ) );
+		self::assertFalse( NativeLoginGate::is_public_core_action_request( '' ) );
 	}
 }

@@ -8,7 +8,7 @@ Read this reference when locating code, reviewing authentication or identifiers,
 - `src/API/`: REST controllers and response envelope.
 - `src/Services/`: OTP, users, validation, rate limiting, firewall, SMS, channels, and API orchestration.
 - `src/Objects/`: normalized request identifiers and mobile handling.
-- `src/Integrations/Wordpress/`: profiles, users list, export authorization, Excel, and VCF.
+- `src/Integrations/Wordpress/`: profiles, users list, export authorization, Excel, VCF, and the staged native-login gate.
 - `src/Integrations/Woocommerce/`: login/account/checkout and constrained customer creation.
 - `src/Helpers/IP.php`: client-address and trusted-proxy handling.
 - `src/Logging/`: PSR-3 logger, safe-context allowlist, database handler, retention repository, and fallback handling.
@@ -44,9 +44,9 @@ The 1.2.x Eloquent models depend on the connection initializer in `utils/class-d
 
 - Exports require `list_users`, nonce validation, safe strings, VCF escaping, batching, and XLSX row limits.
 - WooCommerce customer creation accepts only allowed billing/shipping input and forces role `customer`.
-- Redirects require `wp_validate_redirect()` and the allowed-host policy.
+- Redirects require `wp_validate_redirect()` and the allowed-host policy; public login/logout routes derive from `home_url()`, and a nested return URL is encoded exactly once before `add_query_arg()` so a single request-query decode restores the exact destination. A core force-reauthentication URL retains `reauth=1`: public-role sessions are cleared before Pinova renders, while native-only users continue through the private core handler.
 - Public password/forgot/OTP responses do not expose account existence or native-only role membership.
-- Native administrator password/2FA login remains available through `wp-login.php` according to policy.
+- Native administrator password/2FA login remains available through the private Pinova administrator route, which internally executes `wp-login.php` and its core/security-plugin hooks. Canonical account actions can return 404 only after the opt-in gate is enabled; exact core handlers remain available for password-protected posts, nonce-protected logout, keyed privacy confirmation, administrator-email confirmation, and nonce-protected Recovery Mode exit. The private route remains testable before enablement, is derived from the public home URL even when WordPress core is installed in a subdirectory, and is never rendered by the public account template.
 - Rate limits hash identifiers and return HTTP 429 with `Retry-After`.
 - Active mobile, email, username, and IP blocks deny the corresponding public authentication path without exposing account existence. Block messages may identify the blocked input type but never disclose whether a WordPress account exists.
 - Logs retain stable codes, keyed identifier fingerprints, and bounded context—not raw identifiers, secrets, exception messages, or traces. REST responses include `X-Pinova-Correlation-ID` for support correlation.

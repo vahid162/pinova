@@ -5,6 +5,7 @@
     <file>src/Helpers/IP.php</file>
     <file>src/Logging</file>
     <file>src/Admin/Logs.php</file>
+    <file>src/Integrations/Wordpress/NativeLoginGate.php</file>
     <file>src/Services/RateLimitService.php</file>
     <exclude-pattern>vendor/*</exclude-pattern>
     <arg name="extensions" value="php"/>

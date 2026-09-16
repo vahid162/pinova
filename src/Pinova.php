@@ -89,6 +89,7 @@ class Pinova {
 		}
 
 		if ( $wp->request === 'login' || get_query_var( 'pinova_login' ) ) {
+			self::prepare_force_reauthentication();
 
 			if ( get_current_user_id() ) {
 				Helper::redirect_to( Helper::get_login_back_url() );
@@ -156,18 +157,44 @@ class Pinova {
 		return $attributes;
 	}
 
-	public static function get_login_url( ?string $back_url = null ): string {
-		$url = site_url( 'login' );
+	public static function get_login_url( ?string $back_url = null, bool $force_reauth = false ): string {
+		$url  = home_url( '/login' );
+		$args = [];
 
 		if ( $back_url ) {
-			$url = add_query_arg( 'back_url', urlencode( $back_url ), $url );
+			$args['back_url'] = urlencode( $back_url );
+		}
+
+		if ( $force_reauth ) {
+			$args['reauth'] = '1';
+		}
+
+		if ( $args ) {
+			$url = add_query_arg( $args, $url );
 		}
 
 		return $url;
 	}
 
+	/**
+	 * Match WordPress force-reauthentication behavior on the public Pinova route.
+	 */
+	public static function prepare_force_reauthentication(): bool {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Core uses this selector to require fresh credentials; it does not authorize a privileged action.
+		if ( empty( $_REQUEST['reauth'] ) ) {
+			return false;
+		}
+
+		if ( get_current_user_id() ) {
+			wp_clear_auth_cookie();
+			wp_set_current_user( 0 );
+		}
+
+		return true;
+	}
+
 	public static function get_logout_url( ?string $back_url = null ): string {
-		$url = site_url( 'logout' );
+		$url = home_url( '/logout' );
 
 		if ( $back_url ) {
 			$url = add_query_arg( 'back_url', urlencode( $back_url ), $url );

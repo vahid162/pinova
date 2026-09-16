@@ -1,5 +1,6 @@
 <?php
 
+// phpcs:ignore WordPress.WP.CapitalPDangit.MisspelledNamespaceName -- Preserve the established public namespace.
 namespace Pinova\Integrations\Wordpress;
 
 use Pinova\Pinova;
@@ -24,6 +25,7 @@ final class NativeLoginGate {
 		$this->private_request = $this->request_matches_private_route();
 
 		if ( $this->private_request ) {
+			// phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Native login integrations inspect this core request marker.
 			$GLOBALS['pagenow'] = 'wp-login.php';
 			$this->prepare_native_login_environment();
 		}
@@ -63,7 +65,8 @@ final class NativeLoginGate {
 
 	public static function default_slug(): string {
 		$site_key = (string) get_option( 'home', 'pinova' );
-		$hash     = hash_hmac( 'sha256', $site_key, wp_salt( 'auth' ) );
+		$secret   = defined( 'AUTH_KEY' ) ? (string) constant( 'AUTH_KEY' ) : ABSPATH;
+		$hash     = hash_hmac( 'sha256', $site_key, $secret );
 
 		return 'pinova-admin-' . substr( $hash, 0, 16 );
 	}
@@ -242,7 +245,7 @@ final class NativeLoginGate {
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- Only the path is compared to a fixed filename and never rendered or persisted.
 		$request_uri = null === $request_uri ? (string) ( $_SERVER['REQUEST_URI'] ?? '' ) : $request_uri;
 		$script_name = null === $script_name ? sanitize_text_field( wp_unslash( (string) ( $_SERVER['SCRIPT_NAME'] ?? '' ) ) ) : $script_name;
-		$path         = explode( '?', $request_uri, 2 )[0];
+		$path        = explode( '?', $request_uri, 2 )[0];
 
 		return 1 === preg_match( '#(?:^|/)wp-login\.php(?:/|$)#i', $path )
 			|| 'wp-login.php' === basename( $script_name );

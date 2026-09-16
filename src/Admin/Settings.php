@@ -2,6 +2,7 @@
 
 namespace Pinova\Admin;
 
+use Pinova\Integrations\Wordpress\NativeLoginGate;
 use Pinova\Services\SMSService;
 use Pinova\Services\UserService;
 use Psr\Log\LogLevel;
@@ -86,6 +87,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 			static fn( array $role ): string => $role['name'] . ' - ' . translate_user_role( $role['name'] ),
 			get_editable_roles()
 		);
+		$native_login_url = NativeLoginGate::url();
 
 		$settings_fields = [
 			'pinova_general'    => [
@@ -285,8 +287,27 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'options'     => $all_roles,
 					'default'     => [ 'administrator' ],
 					'attributes'  => [ 'multiple' => true ],
-					'desc'        => 'این نقش‌ها فقط از wp-login.php و سازوکار رمز/2FA وردپرس وارد می‌شوند. پیش‌فرض: مدیرکل.',
+					'desc'        => 'این نقش‌ها فقط از مسیر خصوصی ورود مدیریتی و سازوکار رمز/2FA وردپرس وارد می‌شوند. پیش‌فرض: مدیرکل.',
 					'sanitize_callback' => [ self::class, 'sanitize_native_only_roles' ],
+				],
+				[
+					'id'                => 'native_login_slug',
+					'label'             => 'مسیر خصوصی ورود مدیر',
+					'type'              => 'text',
+					'default'           => NativeLoginGate::default_slug(),
+					'field_class'       => 'ltr',
+					'desc'              => sprintf(
+						'ابتدا این آدرس را در یک پنجرهٔ خصوصی مرورگر آزمایش و ذخیره کنید: <span class="ltr">%s</span>. این مسیر محرمانه جای رمز عبور و 2FA را نمی‌گیرد.',
+						esc_html( $native_login_url )
+					),
+					'sanitize_callback' => [ NativeLoginGate::class, 'sanitize_slug' ],
+				],
+				[
+					'id'      => 'block_native_login',
+					'label'   => 'مسدودسازی مسیر اصلی وردپرس',
+					'type'    => 'checkbox',
+					'default' => false,
+					'desc'    => 'پس از آزمایش موفق مسیر خصوصی، این گزینه را فعال کنید تا درخواست مستقیم wp-login.php پاسخ 404 بگیرد. برای بازیابی اضطراری می‌توان PINOVA_BLOCK_NATIVE_LOGIN را در wp-config.php برابر false قرار داد.',
 				],
 				[
 					'id'      => 'trusted_proxy_header',

@@ -28,7 +28,8 @@ Work from a repository checkout or disposable worktree, never from an installed 
 - In 1.2.3, a valid physical `pinova_mobile` user-meta value is an explicit override and takes precedence over every older fallback alias, including a mobile-shaped legacy username and Digits metadata. Read that physical row with a prepared database query; calling `get_user_meta()` or `get_metadata_raw()` from the virtual `get_user_metadata` path recurses. Once an override exists, an older mobile value must not remain a Pinova login alias.
 - If one mobile deterministically matches multiple legacy User IDs, fail closed and emit `pinova/identity_conflict_detected`; never choose the first row. Multi-ID merge belongs to the separately tested 1.3 identity workflow.
 - Password authentication must resolve the User ID first, then call `wp_signon()` with the real `user_login`, preserving 2FA, Wordfence, and standard login hooks.
-- Public authentication and recovery responses must not reveal whether an identifier exists, has a password, or belongs to a native-only role. Native-only roles still use `wp-login.php`, but that policy is not exposed through account-specific REST output.
+- Public authentication and recovery responses must not reveal whether an identifier exists, has a password, or belongs to a native-only role. Native-only roles use Pinova's private administrator route, which executes the native WordPress login pipeline without exposing that policy through account-specific REST output. Never replace that route with a custom password check that bypasses Wordfence, 2FA, passkeys, or core authentication hooks.
+- Treat canonical `wp-login.php` blocking as a staged, opt-in gate. The private administrator route must remain testable while the gate is off; enable the 404 only after a logged-out private-window login succeeds and the URL is stored securely. Restrict private-route authentication and password reset to configured native-only roles, route public core login/register/lost-password helpers to Pinova, and rewrite only native administrator reset/recovery emails to the private route. Keep `PINOVA_BLOCK_NATIVE_LOGIN=false` as an emergency recovery override, never log canonical-path probes per request, and never print the private route in public account markup or logs.
 - The shared browser REST helper must return valid non-2xx Pinova/WordPress JSON responses to its callers instead of replacing them with a transport error. Prefer the field-specific WordPress validation message, preserve HTTP status, `Retry-After`, and Pinova correlation metadata, and show a generic helper-level notification only for network or malformed responses. Do not emit a duplicate notification from both the helper and its caller.
 - Role allowlists must be revalidated after filters. A filter cannot admit roles with administrative, user-management, plugin-management, WooCommerce-management, or order-edit capabilities.
 - Legacy upgrade methods are additive/no-op against WordPress core tables. Do not alter/drop core columns or indexes, rewrite core identity data, or add foreign keys to core tables.
@@ -63,11 +64,12 @@ Work from a repository checkout or disposable worktree, never from an installed 
 3. Make the smallest coherent change and preserve the REST envelope `{success,message,data}` where compatibility requires it.
 4. For mobile profile changes, store the normalized value in physical `pinova_mobile` meta, validate ownership/conflicts, and keep `user_login` immutable.
 5. For Blocked List changes, test every supported identifier type, permanent/temporary expiry, system-block immutability, capability denial, filtered pagination, privacy-safe logs, and both issuance-time and verification-time authentication denial.
-6. For logging changes, update the event catalogue and privacy allowlist in `references/logging.md`, add a no-secret regression test, and exercise schema upgrade plus retention cleanup.
-7. Run targeted checks and the proportional suite in the quality reference.
-8. Update public documentation plus both `CHANGELOG.md` and the `readme.txt` Changelog section when behavior changes.
-9. Meaningfully update this `SKILL.md` in the same change set whenever runtime code, schema, dependencies, tests, tooling, CI, commands, integrations, or release behavior changes.
-10. Run `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree` before handoff.
+6. For native-login routing changes, verify that the private route keeps the core login form/action flow and security hooks, accepts only native-only roles, direct `wp-login.php` returns 404 only after opt-in, public core login/register/recovery helpers resolve to Pinova, native administrator reset/recovery emails use the private route, the public Pinova account page exposes neither native route, and the emergency constant restores canonical access.
+7. For logging changes, update the event catalogue and privacy allowlist in `references/logging.md`, add a no-secret regression test, and exercise schema upgrade plus retention cleanup.
+8. Run targeted checks and the proportional suite in the quality reference.
+9. Update public documentation plus both `CHANGELOG.md` and the `readme.txt` Changelog section when behavior changes.
+10. Meaningfully update this `SKILL.md` in the same change set whenever runtime code, schema, dependencies, tests, tooling, CI, commands, integrations, or release behavior changes.
+11. Run `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree` before handoff.
 
 ### Migrate or merge identities
 

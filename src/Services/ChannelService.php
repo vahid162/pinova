@@ -157,11 +157,7 @@ class ChannelService {
 	public static function get_message( array $successful_channels, Identifier $identifier, ?int $user_id = null ): string {
 
 		$channel_labels = [
-			'bale'  => sprintf(
-				'<a href="%s" target="_blank"><img style="display: inline-block !important; height: 16px !important;" src="%s" /></a>',
-				'https://ble.ir/verification_code_bot',
-				PINOVA_URL . 'assets/images/icons/bale_logo.svg',
-			),
+			'bale'  => 'پیام‌رسان بله',
 			'call'  => 'تماس',
 			'sms'   => 'پیامک',
 			'email' => 'ایمیل',
@@ -173,11 +169,12 @@ class ChannelService {
 
 		$successful_channels = array_intersect_key( $channel_labels, array_flip( $successful_channels ) );
 
+		$destination = strip_tags( (string) $identifier->get_value() );
+
 		return sprintf(
-			__( 'کد %s از طریق %s به <span style="text-align: left !important;" dir="ltr">%s</span> ارسال شد.', 'pinova' ),
-			'تایید',
+			__( 'کد تأیید از طریق %1$s به %2$s ارسال شد.', 'pinova' ),
 			implode( ' و ', array_values( $successful_channels ) ),
-			$identifier->get_value()
+			"\u{2066}" . $destination . "\u{2069}"
 		);
 	}
 

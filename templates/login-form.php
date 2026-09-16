@@ -1,6 +1,5 @@
 <?php
 
-use Pinova\Helper;
 use Pinova\Pinova;
 use Pinova\Services\OTPService;
 
@@ -12,8 +11,6 @@ if ( function_exists( 'nocache_headers' ) ) {
 
 $site_name        = get_bloginfo( 'name' );
 $home_url         = home_url( '/' );
-$back_url         = Helper::get_login_back_url();
-$native_login_url = wp_login_url( $back_url );
 $privacy_url      = get_privacy_policy_url();
 $logo_url         = Pinova::get_option( 'design.logo', admin_url( 'images/wordpress-logo.svg' ) );
 
@@ -48,19 +45,8 @@ $logo_url         = Pinova::get_option( 'design.logo', admin_url( 'images/wordpr
         class="pinova-auth-layout"
         pinova-bind:aria-busy="pageLoaderIsActive"
     >
-        <aside class="pinova-auth-intro" aria-label="معرفی <?php echo esc_attr( $site_name ); ?>">
-            <p class="pinova-auth-eyebrow">حساب کاربری</p>
-            <h1>ورود امن و سریع</h1>
-            <p>برای ادامه خرید، پیگیری سفارش‌ها و مدیریت حساب خود وارد شوید.</p>
-            <ul class="pinova-auth-benefits">
-                <li>ورود با رمز عبور یا رمز یک‌بارمصرف</li>
-                <li>حفاظت از اطلاعات حساب کاربری</li>
-                <li>دسترسی سریع به سفارش‌ها</li>
-            </ul>
-            <a class="pinova-auth-store-link" href="<?php echo esc_url( $home_url ); ?>">بازگشت به فروشگاه</a>
-        </aside>
-
         <section class="pinova-auth-card" aria-label="فرم ورود و ثبت‌نام">
+            <h1 class="pinova-visually-hidden">ورود به حساب کاربری <?php echo esc_html( $site_name ); ?></h1>
             <div
                 pinova-cloak
                 pinova-show="pageLoaderIsActive"
@@ -235,21 +221,31 @@ $logo_url         = Pinova::get_option( 'design.logo', admin_url( 'images/wordpr
                 </form>
             </template>
 
-            <footer class="pinova-auth-footer">
-                <a href="<?php echo esc_url( $native_login_url ); ?>">ورود از مسیر اصلی وردپرس</a>
-                <?php if ( $privacy_url ) : ?>
+            <?php if ( $privacy_url ) : ?>
+                <footer class="pinova-auth-footer">
                     <a href="<?php echo esc_url( $privacy_url ); ?>">حریم خصوصی</a>
-                <?php endif; ?>
-            </footer>
+                </footer>
+            <?php endif; ?>
         </section>
+
+        <aside class="pinova-auth-intro" aria-label="معرفی <?php echo esc_attr( $site_name ); ?>">
+            <p class="pinova-auth-eyebrow">حساب کاربری</p>
+            <h2 class="pinova-auth-intro-title">ورود امن و سریع</h2>
+            <p>برای ادامه خرید، پیگیری سفارش‌ها و مدیریت حساب خود وارد شوید.</p>
+            <ul class="pinova-auth-benefits">
+                <li>ورود با رمز عبور یا رمز یک‌بارمصرف</li>
+                <li>حفاظت از اطلاعات حساب کاربری</li>
+                <li>دسترسی سریع به سفارش‌ها</li>
+            </ul>
+            <a class="pinova-auth-store-link" href="<?php echo esc_url( $home_url ); ?>">بازگشت به فروشگاه</a>
+        </aside>
     </div>
 </main>
 
 <noscript>
     <div class="pinova-auth-noscript" role="alert">
-        برای استفاده از ورود سریع، JavaScript را فعال کنید یا از
-        <a href="<?php echo esc_url( $native_login_url ); ?>">صفحه ورود اصلی وردپرس</a>
-        استفاده کنید.
+        برای ورود به حساب کاربری، JavaScript مرورگر را فعال کنید.
+        <a href="<?php echo esc_url( $home_url ); ?>">بازگشت به فروشگاه</a>
     </div>
 </noscript>
 

@@ -23,6 +23,7 @@ class Load {
 	}
 
 	public function __construct() {
+		new NativeLoginGate();
 		new ExportUsers();
 		new UsersList();
 		new UserProfile();

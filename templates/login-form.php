@@ -62,7 +62,7 @@ $logo_url         = Pinova::get_option( 'design.logo', admin_url( 'images/wordpr
             <header class="pinova-auth-header">
                 <button
                     pinova-cloak
-                    pinova-show="stepName !== 'authenticate'"
+                    pinova-show="stepName === 'loginByPassword' || stepName === 'changePassword'"
                     pinova-on:click="backStep()"
                     class="pinova-auth-icon-button"
                     type="button"
@@ -87,7 +87,7 @@ $logo_url         = Pinova::get_option( 'design.logo', admin_url( 'images/wordpr
 
             <template pinova-if="stepName === 'authenticate'">
                 <form id="authenticate" class="pinova-auth-form" pinova-on:submit.prevent="submit()" novalidate>
-                    <h2>ورود یا ثبت‌نام</h2>
+                    <h2>ورود / ثبت‌نام</h2>
                     <p class="pinova-auth-description">شماره موبایل، نام کاربری یا ایمیل خود را وارد کنید.</p>
                     <div class="pinova-auth-field">
                         <label for="pinova-identifier">شماره موبایل، نام کاربری یا ایمیل</label>
@@ -100,16 +100,21 @@ $logo_url         = Pinova::get_option( 'design.logo', admin_url( 'images/wordpr
 
             <template pinova-if="stepName === 'signIn'">
                 <form id="signIn" class="pinova-auth-form" pinova-on:submit.prevent="submit()" novalidate>
-                    <h2>کد تأیید را وارد کنید</h2>
+                    <h2>کد تأیید</h2>
                     <p class="pinova-auth-description pinova-auth-otp-copy" pinova-text="forms.signIn.msg"></p>
-                    <div class="pinova-auth-destination">
-                        <span>شناسهٔ واردشده</span>
-                        <bdi pinova-text="forms.authenticate.inputs.identifier.value"></bdi>
+                    <div class="pinova-auth-edit">
                         <button pinova-on:click="editIdentifier()" pinova-text="identifierEditLabel()" type="button"></button>
                     </div>
-                    <div class="pinova-auth-field">
+                    <div class="pinova-auth-field pinova-auth-code-field">
                         <label for="pinova-signin-code">کد تأیید</label>
-                        <input id="pinova-signin-code" pinova-on:input="forms.signIn.inputs.code.value = pinovaCleanNumericInput(forms.signIn.inputs.code.value); if (forms.signIn.inputs.code.value.length === codeLength) submit();" pinova-model="forms.signIn.inputs.code.value" pinova-bind:maxlength="codeLength" pinova-bind:aria-invalid="Boolean(forms.signIn.inputs.code.errorMsg)" aria-describedby="pinova-signin-code-hint pinova-signin-code-error" type="text" inputmode="numeric" autocomplete="one-time-code" dir="ltr">
+                        <div class="pinova-auth-code-input" pinova-bind:style="`--pinova-code-length: ${codeLength}`" pinova-bind:class="{'has-error': Boolean(forms.signIn.inputs.code.errorMsg)}">
+                            <div class="pinova-auth-code-slots" aria-hidden="true">
+                                <template pinova-for="digitIndex in codeLength" pinova-bind:key="digitIndex">
+                                    <span class="pinova-auth-code-slot" pinova-bind:class="{'is-filled': forms.signIn.inputs.code.value.length >= digitIndex, 'is-active': forms.signIn.inputs.code.value.length === digitIndex - 1 || (forms.signIn.inputs.code.value.length === codeLength && digitIndex === codeLength)}" pinova-text="forms.signIn.inputs.code.value.charAt(digitIndex - 1)"></span>
+                                </template>
+                            </div>
+                            <input id="pinova-signin-code" pinova-on:focus="$el.setSelectionRange($el.value.length, $el.value.length)" pinova-on:click="$el.setSelectionRange($el.value.length, $el.value.length)" pinova-on:input="forms.signIn.inputs.code.value = pinovaCleanNumericInput(forms.signIn.inputs.code.value); if (forms.signIn.inputs.code.value.length === codeLength) submit();" pinova-model="forms.signIn.inputs.code.value" pinova-bind:maxlength="codeLength" pinova-bind:aria-invalid="Boolean(forms.signIn.inputs.code.errorMsg)" aria-describedby="pinova-signin-code-hint pinova-signin-code-error" type="text" inputmode="numeric" autocomplete="one-time-code" dir="ltr">
+                        </div>
                         <p id="pinova-signin-code-hint" class="pinova-auth-hint" pinova-text="`کد ${codeLength} رقمی را وارد کنید.`"></p>
                         <p id="pinova-signin-code-error" class="pinova-auth-error" pinova-show="forms.signIn.inputs.code.errorMsg" pinova-text="forms.signIn.inputs.code.errorMsg"></p>
                     </div>
@@ -148,16 +153,21 @@ $logo_url         = Pinova::get_option( 'design.logo', admin_url( 'images/wordpr
 
             <template pinova-if="stepName === 'loginByOtp'">
                 <form id="loginByOtp" class="pinova-auth-form" pinova-on:submit.prevent="submit()" novalidate>
-                    <h2>کد تأیید را وارد کنید</h2>
+                    <h2>کد تأیید</h2>
                     <p class="pinova-auth-description pinova-auth-otp-copy" pinova-text="forms.loginByOtp.msg"></p>
-                    <div class="pinova-auth-destination">
-                        <span>شناسهٔ واردشده</span>
-                        <bdi pinova-text="forms.authenticate.inputs.identifier.value"></bdi>
+                    <div class="pinova-auth-edit">
                         <button pinova-on:click="editIdentifier()" pinova-text="identifierEditLabel()" type="button"></button>
                     </div>
-                    <div class="pinova-auth-field">
+                    <div class="pinova-auth-field pinova-auth-code-field">
                         <label for="pinova-login-otp">کد تأیید</label>
-                        <input id="pinova-login-otp" pinova-on:input="forms.loginByOtp.inputs.code.value = pinovaCleanNumericInput(forms.loginByOtp.inputs.code.value); if (forms.loginByOtp.inputs.code.value.length === codeLength) submit();" pinova-model="forms.loginByOtp.inputs.code.value" pinova-bind:maxlength="codeLength" pinova-bind:aria-invalid="Boolean(forms.loginByOtp.inputs.code.errorMsg)" aria-describedby="pinova-login-otp-hint pinova-login-otp-error" type="text" inputmode="numeric" autocomplete="one-time-code" dir="ltr">
+                        <div class="pinova-auth-code-input" pinova-bind:style="`--pinova-code-length: ${codeLength}`" pinova-bind:class="{'has-error': Boolean(forms.loginByOtp.inputs.code.errorMsg)}">
+                            <div class="pinova-auth-code-slots" aria-hidden="true">
+                                <template pinova-for="digitIndex in codeLength" pinova-bind:key="digitIndex">
+                                    <span class="pinova-auth-code-slot" pinova-bind:class="{'is-filled': forms.loginByOtp.inputs.code.value.length >= digitIndex, 'is-active': forms.loginByOtp.inputs.code.value.length === digitIndex - 1 || (forms.loginByOtp.inputs.code.value.length === codeLength && digitIndex === codeLength)}" pinova-text="forms.loginByOtp.inputs.code.value.charAt(digitIndex - 1)"></span>
+                                </template>
+                            </div>
+                            <input id="pinova-login-otp" pinova-on:focus="$el.setSelectionRange($el.value.length, $el.value.length)" pinova-on:click="$el.setSelectionRange($el.value.length, $el.value.length)" pinova-on:input="forms.loginByOtp.inputs.code.value = pinovaCleanNumericInput(forms.loginByOtp.inputs.code.value); if (forms.loginByOtp.inputs.code.value.length === codeLength) submit();" pinova-model="forms.loginByOtp.inputs.code.value" pinova-bind:maxlength="codeLength" pinova-bind:aria-invalid="Boolean(forms.loginByOtp.inputs.code.errorMsg)" aria-describedby="pinova-login-otp-hint pinova-login-otp-error" type="text" inputmode="numeric" autocomplete="one-time-code" dir="ltr">
+                        </div>
                         <p id="pinova-login-otp-hint" class="pinova-auth-hint" pinova-text="`کد ${codeLength} رقمی را وارد کنید.`"></p>
                         <p id="pinova-login-otp-error" class="pinova-auth-error" pinova-show="forms.loginByOtp.inputs.code.errorMsg" pinova-text="forms.loginByOtp.inputs.code.errorMsg"></p>
                     </div>
@@ -174,16 +184,21 @@ $logo_url         = Pinova::get_option( 'design.logo', admin_url( 'images/wordpr
 
             <template pinova-if="stepName === 'forgotPassword'">
                 <form id="forgotPassword" class="pinova-auth-form" pinova-on:submit.prevent="submit()" novalidate>
-                    <h2>کد تأیید را وارد کنید</h2>
+                    <h2>کد تأیید</h2>
                     <p class="pinova-auth-description pinova-auth-otp-copy" pinova-text="forms.forgotPassword.msg"></p>
-                    <div class="pinova-auth-destination">
-                        <span>شناسهٔ واردشده</span>
-                        <bdi pinova-text="forms.authenticate.inputs.identifier.value"></bdi>
+                    <div class="pinova-auth-edit">
                         <button pinova-on:click="editIdentifier()" pinova-text="identifierEditLabel()" type="button"></button>
                     </div>
-                    <div class="pinova-auth-field">
+                    <div class="pinova-auth-field pinova-auth-code-field">
                         <label for="pinova-forgot-otp">کد تأیید</label>
-                        <input id="pinova-forgot-otp" pinova-on:input="forms.forgotPassword.inputs.code.value = pinovaCleanNumericInput(forms.forgotPassword.inputs.code.value); if (forms.forgotPassword.inputs.code.value.length === codeLength) submit();" pinova-model="forms.forgotPassword.inputs.code.value" pinova-bind:maxlength="codeLength" pinova-bind:aria-invalid="Boolean(forms.forgotPassword.inputs.code.errorMsg)" aria-describedby="pinova-forgot-otp-hint pinova-forgot-otp-error" type="text" inputmode="numeric" autocomplete="one-time-code" dir="ltr">
+                        <div class="pinova-auth-code-input" pinova-bind:style="`--pinova-code-length: ${codeLength}`" pinova-bind:class="{'has-error': Boolean(forms.forgotPassword.inputs.code.errorMsg)}">
+                            <div class="pinova-auth-code-slots" aria-hidden="true">
+                                <template pinova-for="digitIndex in codeLength" pinova-bind:key="digitIndex">
+                                    <span class="pinova-auth-code-slot" pinova-bind:class="{'is-filled': forms.forgotPassword.inputs.code.value.length >= digitIndex, 'is-active': forms.forgotPassword.inputs.code.value.length === digitIndex - 1 || (forms.forgotPassword.inputs.code.value.length === codeLength && digitIndex === codeLength)}" pinova-text="forms.forgotPassword.inputs.code.value.charAt(digitIndex - 1)"></span>
+                                </template>
+                            </div>
+                            <input id="pinova-forgot-otp" pinova-on:focus="$el.setSelectionRange($el.value.length, $el.value.length)" pinova-on:click="$el.setSelectionRange($el.value.length, $el.value.length)" pinova-on:input="forms.forgotPassword.inputs.code.value = pinovaCleanNumericInput(forms.forgotPassword.inputs.code.value); if (forms.forgotPassword.inputs.code.value.length === codeLength) submit();" pinova-model="forms.forgotPassword.inputs.code.value" pinova-bind:maxlength="codeLength" pinova-bind:aria-invalid="Boolean(forms.forgotPassword.inputs.code.errorMsg)" aria-describedby="pinova-forgot-otp-hint pinova-forgot-otp-error" type="text" inputmode="numeric" autocomplete="one-time-code" dir="ltr">
+                        </div>
                         <p id="pinova-forgot-otp-hint" class="pinova-auth-hint" pinova-text="`کد ${codeLength} رقمی را وارد کنید.`"></p>
                         <p id="pinova-forgot-otp-error" class="pinova-auth-error" pinova-show="forms.forgotPassword.inputs.code.errorMsg" pinova-text="forms.forgotPassword.inputs.code.errorMsg"></p>
                     </div>
@@ -194,6 +209,7 @@ $logo_url         = Pinova::get_option( 'design.logo', admin_url( 'images/wordpr
                         </p>
                         <button class="pinova-auth-resend-button" pinova-cloak pinova-show="time.btnResendIsActive" pinova-on:click="authenticate({forget: '1', force_otp: '1'})" type="button">ارسال دوبارهٔ کد</button>
                     </div>
+                    <div class="pinova-auth-actions"><button pinova-on:click="changeStep('loginByPassword')" type="button">ورود با رمز عبور</button></div>
                 </form>
             </template>
 
@@ -236,24 +252,16 @@ $logo_url         = Pinova::get_option( 'design.logo', admin_url( 'images/wordpr
                 </form>
             </template>
 
+            <nav class="pinova-auth-navigation" aria-label="پیوندهای حساب کاربری">
+                <a class="pinova-auth-store-link" href="<?php echo esc_url( $home_url ); ?>">بازگشت به فروشگاه</a>
+            </nav>
+
             <?php if ( $privacy_url ) : ?>
                 <footer class="pinova-auth-footer">
                     <a href="<?php echo esc_url( $privacy_url ); ?>">حریم خصوصی</a>
                 </footer>
             <?php endif; ?>
         </section>
-
-        <aside class="pinova-auth-intro" aria-label="معرفی <?php echo esc_attr( $site_name ); ?>">
-            <p class="pinova-auth-eyebrow">حساب کاربری</p>
-            <h2 class="pinova-auth-intro-title">ورود امن و سریع</h2>
-            <p>برای ادامه خرید، پیگیری سفارش‌ها و مدیریت حساب خود وارد شوید.</p>
-            <ul class="pinova-auth-benefits">
-                <li>ورود با رمز عبور یا رمز یک‌بارمصرف</li>
-                <li>حفاظت از اطلاعات حساب کاربری</li>
-                <li>دسترسی سریع به سفارش‌ها</li>
-            </ul>
-            <a class="pinova-auth-store-link" href="<?php echo esc_url( $home_url ); ?>">بازگشت به فروشگاه</a>
-        </aside>
     </div>
 </main>
 

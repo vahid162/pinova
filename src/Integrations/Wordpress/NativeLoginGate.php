@@ -304,10 +304,16 @@ final class NativeLoginGate {
 	 */
 	public static function is_public_core_action_request( ?string $action = null ): bool {
 		if ( null === $action ) {
-			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- This only selects a core handler; wp-login.php processes the request.
-			$request_action = $_REQUEST['action'] ?? '';
-			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- Compared to one fixed action and never rendered or persisted.
-			$action = is_string( $request_action ) ? (string) wp_unslash( $request_action ) : '';
+			$core_action = $GLOBALS['action'] ?? null;
+
+			if ( is_string( $core_action ) ) {
+				$action = $core_action;
+			} else {
+				// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- This only selects a core handler; wp-login.php processes the request.
+				$request_action = $_REQUEST['action'] ?? '';
+				// phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- Compared to a fixed allowlist and never rendered or persisted.
+				$action = is_string( $request_action ) ? (string) wp_unslash( $request_action ) : '';
+			}
 		}
 
 		return in_array( $action, [ 'confirmaction', 'logout', 'postpass' ], true );

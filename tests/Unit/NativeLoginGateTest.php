@@ -36,4 +36,25 @@ final class NativeLoginGateTest extends TestCase {
 		self::assertFalse( NativeLoginGate::is_public_core_action_request( 'lostpassword' ) );
 		self::assertFalse( NativeLoginGate::is_public_core_action_request( '' ) );
 	}
+
+	public function test_runtime_bypass_uses_the_action_normalized_by_wordpress_core(): void {
+		$had_action      = array_key_exists( 'action', $GLOBALS );
+		$previous_action = $GLOBALS['action'] ?? null;
+
+		// phpcs:disable WordPress.WP.GlobalVariablesOverride.Prohibited -- Exercise the core action state and restore it below.
+		try {
+			$GLOBALS['action'] = 'resetpass';
+			self::assertFalse( NativeLoginGate::is_public_core_action_request() );
+
+			$GLOBALS['action'] = 'postpass';
+			self::assertTrue( NativeLoginGate::is_public_core_action_request() );
+		} finally {
+			if ( $had_action ) {
+				$GLOBALS['action'] = $previous_action;
+			} else {
+				unset( $GLOBALS['action'] );
+			}
+		}
+		// phpcs:enable WordPress.WP.GlobalVariablesOverride.Prohibited
+	}
 }

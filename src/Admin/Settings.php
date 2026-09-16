@@ -307,7 +307,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'label'   => 'مسدودسازی مسیر اصلی وردپرس',
 					'type'    => 'checkbox',
 					'default' => false,
-					'desc'    => 'پس از آزمایش موفق مسیر خصوصی، این گزینه را فعال کنید تا درخواست مستقیم wp-login.php پاسخ 404 بگیرد. برای بازیابی اضطراری می‌توان PINOVA_BLOCK_NATIVE_LOGIN را در wp-config.php برابر false قرار داد.',
+					'desc'    => 'پس از آزمایش موفق مسیر خصوصی، این گزینه را فعال کنید تا ورود، ثبت‌نام و بازیابی حساب از wp-login.php پاسخ 404 بگیرد. پردازش داخلی رمز نوشته‌های محافظت‌شده حفظ می‌شود. برای بازیابی اضطراری می‌توان PINOVA_BLOCK_NATIVE_LOGIN را در wp-config.php برابر false قرار داد.',
 				],
 				[
 					'id'      => 'trusted_proxy_header',

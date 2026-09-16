@@ -120,7 +120,11 @@ final class NativeLoginGate {
 	}
 
 	public function block_canonical_login(): void {
-		if ( $this->private_request || ! self::is_canonical_login_request() ) {
+		if (
+			$this->private_request
+			|| self::is_post_password_request()
+			|| ! self::is_canonical_login_request()
+		) {
 			return;
 		}
 
@@ -251,6 +255,20 @@ final class NativeLoginGate {
 			|| 'wp-login.php' === basename( $script_name );
 	}
 
+	/**
+	 * Keep WordPress's non-authentication handler for password-protected posts.
+	 */
+	public static function is_post_password_request( ?string $action = null ): bool {
+		if ( null === $action ) {
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- This only selects a core handler; wp-login.php processes the request.
+			$request_action = $_REQUEST['action'] ?? '';
+			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- Compared to one fixed action and never rendered or persisted.
+			$action = is_string( $request_action ) ? (string) wp_unslash( $request_action ) : '';
+		}
+
+		return 'postpass' === strtolower( trim( $action ) );
+	}
+
 	private function request_matches_private_route(): bool {
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- The decoded path is only matched with hash_equals against the sanitized configured slug.
 		$request_uri  = (string) ( $_SERVER['REQUEST_URI'] ?? '' );
@@ -279,11 +297,45 @@ final class NativeLoginGate {
 		}
 	}
 
-	private function rewrite_login_url( string $url ): string {
-		if ( ! str_contains( $url, 'wp-login.php' ) ) {
+	private function rewrite_login_url( string $value ): string {
+		if ( false === stripos( $value, 'wp-login.php' ) ) {
+			return $value;
+		}
+
+		$rewritten = preg_replace_callback(
+			'~https?://[^\s<>"\']*wp-login\.php[^\s<>"\']*~i',
+			function ( array $matches ): string {
+				return $this->rewrite_single_login_url( $matches[0] );
+			},
+			$value
+		);
+
+		if ( is_string( $rewritten ) && $rewritten !== $value ) {
+			return $rewritten;
+		}
+
+		return $this->rewrite_single_login_url( $value );
+	}
+
+	private function rewrite_single_login_url( string $url ): string {
+		$path = (string) wp_parse_url( $url, PHP_URL_PATH );
+
+		if ( 'wp-login.php' !== basename( $path ) ) {
 			return $url;
 		}
 
-		return (string) preg_replace( '~wp-login\.php(?=([/?#]|$))~i', self::slug(), $url, 1 );
+		$query       = (string) wp_parse_url( $url, PHP_URL_QUERY );
+		$fragment    = (string) wp_parse_url( $url, PHP_URL_FRAGMENT );
+		$private_url = self::url();
+
+		if ( '' !== $query ) {
+			$private_url .= '?' . $query;
+		}
+
+		if ( '' !== $fragment ) {
+			$private_url .= '#' . $fragment;
+		}
+
+		return $private_url;
 	}
 }

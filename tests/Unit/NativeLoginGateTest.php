@@ -25,4 +25,12 @@ final class NativeLoginGateTest extends TestCase {
 		self::assertFalse( NativeLoginGate::is_canonical_login_request( '/pinova-admin-safe1234/', '/index.php' ) );
 		self::assertFalse( NativeLoginGate::is_canonical_login_request( '/article-about-wp-login.php', '/index.php' ) );
 	}
+
+	public function test_only_the_post_password_action_bypasses_account_login_blocking(): void {
+		self::assertTrue( NativeLoginGate::is_post_password_request( 'postpass' ) );
+		self::assertTrue( NativeLoginGate::is_post_password_request( ' POSTPASS ' ) );
+		self::assertFalse( NativeLoginGate::is_post_password_request( 'login' ) );
+		self::assertFalse( NativeLoginGate::is_post_password_request( 'lostpassword' ) );
+		self::assertFalse( NativeLoginGate::is_post_password_request( '' ) );
+	}
 }

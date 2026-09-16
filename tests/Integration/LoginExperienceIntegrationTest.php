@@ -19,11 +19,16 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 	}
 
 	public function test_enabled_native_login_gate_rewrites_generated_core_login_urls(): void {
-		$previous = get_option( 'pinova_advanced', null );
-		$options  = is_array( $previous ) ? $previous : [];
+		$previous         = get_option( 'pinova_advanced', null );
+		$previous_home    = get_option( 'home' );
+		$previous_siteurl = get_option( 'siteurl' );
+		$options          = is_array( $previous ) ? $previous : [];
+
 		$options['block_native_login'] = '1';
 		$options['native_login_slug']  = 'pinova-admin-safe1234';
 		$options['native_only_roles']  = [ 'administrator' ];
+		update_option( 'home', 'https://example.test' );
+		update_option( 'siteurl', 'https://example.test/wordpress' );
 		update_option( 'pinova_advanced', $options );
 
 		$gate = new NativeLoginGate();
@@ -31,7 +36,7 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 		try {
 			$public_url  = wp_login_url( home_url( '/wp-admin/' ) );
 			$private_url = $gate->rewrite_site_url(
-				home_url( '/wp-login.php?action=login' ),
+				'https://example.test/wordpress/wp-login.php?action=login#form',
 				'wp-login.php',
 				'login',
 				null
@@ -39,7 +44,11 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 
 			self::assertStringContainsString( '/login', $public_url );
 			self::assertStringNotContainsString( 'wp-login.php', $public_url );
-			self::assertStringContainsString( '/pinova-admin-safe1234', $private_url );
+			self::assertSame(
+				'https://example.test/pinova-admin-safe1234/?action=login#form',
+				$private_url
+			);
+			self::assertStringNotContainsString( '/wordpress/pinova-admin-safe1234', $private_url );
 
 			$administrator = get_userdata( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
 			$customer      = get_userdata( self::factory()->user->create( [ 'role' => 'subscriber' ] ) );
@@ -75,6 +84,8 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 			remove_filter( 'lostpassword_url', [ $gate, 'rewrite_public_lost_password_url' ], 20 );
 			remove_filter( 'retrieve_password_message', [ $gate, 'rewrite_native_reset_message' ], 99 );
 			remove_filter( 'recovery_mode_email', [ $gate, 'rewrite_recovery_mode_email' ], 99 );
+			update_option( 'home', $previous_home );
+			update_option( 'siteurl', $previous_siteurl );
 
 			if ( null === $previous ) {
 				delete_option( 'pinova_advanced' );

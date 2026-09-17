@@ -35,6 +35,8 @@ tar -C "${project_dir}" \
   --exclude='.phpstan.cache' \
   --exclude='.phpunit.result.cache' \
   --exclude='node_modules' \
+  --exclude='playwright-report' \
+  --exclude='test-results' \
   --exclude='vendor' \
   --exclude='tests' \
   --exclude='tools' \

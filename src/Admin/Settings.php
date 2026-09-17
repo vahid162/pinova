@@ -337,6 +337,49 @@ class Settings extends \Nabik\Utils\V1\Settings {
 		return apply_filters( 'pinova/settings_fields', $settings_fields );
 	}
 
+	/**
+	 * Keep native-login activation in the same atomic option update as its
+	 * setting while leaving every other settings section on the base sanitizer.
+	 *
+	 * @param mixed $options
+	 * @return mixed
+	 */
+	public function sanitize_options( $options ) {
+		if (
+			NativeLoginGate::is_runtime_invalidation_update()
+			&& function_exists( 'current_filter' )
+			&& 'sanitize_option_pinova_advanced' === current_filter()
+		) {
+			return $options;
+		}
+
+		$sanitized = parent::sanitize_options( $options );
+
+		if (
+			! is_array( $sanitized )
+			|| ! function_exists( 'current_filter' )
+			|| 'sanitize_option_pinova_advanced' !== current_filter()
+		) {
+			return $sanitized;
+		}
+
+		$previous  = get_option( 'pinova_advanced', [] );
+		$previous  = is_array( $previous ) ? $previous : [];
+		$requested = ! empty( $sanitized['block_native_login'] );
+		$sanitized = NativeLoginGate::reconcile_advanced_options( $sanitized, $previous );
+
+		if ( $requested && empty( $sanitized['block_native_login'] ) && function_exists( 'add_settings_error' ) ) {
+			add_settings_error(
+				'pinova_advanced',
+				'pinova_native_login_arm_required',
+				__( 'مسدودسازی فعال نشد. مسیر خصوصی را ذخیره کنید، سپس با یک مدیر مجاز از همان مسیر وارد شوید و حداکثر تا ۳۰ دقیقه دوباره تلاش کنید.', 'pinova' ),
+				'error'
+			);
+		}
+
+		return $sanitized;
+	}
+
 	public static function sanitize_registration_role( $role ): string {
 		$role    = sanitize_key( (string) $role );
 		$allowed = UserService::allowed_registration_roles();

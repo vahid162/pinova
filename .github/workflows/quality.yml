@@ -35,6 +35,62 @@ jobs:
           node-version: '20'
       - run: npm run test:js
 
+  browser-account-ui:
+    name: Account UI / Stage 1 Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:8890
+      WP_ENV_HOME: ${{ runner.temp }}/pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
+      WP_ENV_PORT: '8890'
+      WP_ENV_TESTS_PORT: '8891'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:2.10.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: composer install --no-interaction --prefer-dist
+      - run: npm install --ignore-scripts
+      - run: npm run env:configure
+        env:
+          WP_VERSION: '7.1'
+          WC_VERSION: '11.1.0'
+      - run: npx playwright install --with-deps chromium
+      - run: npm run env:start -- --update
+      - name: Install PDO MySQL in the disposable browser containers
+        run: |
+          npx wp-env run wordpress sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
+          npx wp-env run wordpress sudo apache2ctl -k graceful
+          npx wp-env run cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
+      - name: Prepare the real Pinova login route
+        run: |
+          npx wp-env run cli wp rewrite structure '/%postname%/' --hard
+          npx wp-env run cli wp rewrite flush --hard
+          curl --fail --retry 10 --retry-delay 2 --retry-connrefused "${PLAYWRIGHT_BASE_URL}/login" --output /dev/null
+      - name: Run Stage 1 browser acceptance
+        run: npm run test:browser
+      - name: Upload browser diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: account-ui-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            playwright-report/browser
+            test-results/browser
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Destroy the disposable browser environment
+        if: always()
+        continue-on-error: true
+        run: npx wp-env destroy
+
   php:
     runs-on: ubuntu-latest
     strategy:

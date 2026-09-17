@@ -74,6 +74,9 @@ Adding a context key requires all of:
 | `security.rate_limited` | warning | A subject entered the limited state for one window |
 | `security.block_added` | notice | An administrator added or updated a block |
 | `security.block_removed` | notice | An administrator removed a non-system block |
+| `security.native_login_armed` | notice | A successful private-route administrator login created a short-lived activation arm |
+| `security.native_login_gate_enabled` | warning | An authorized settings save consumed an arm and activated canonical-login blocking |
+| `security.native_login_gate_disabled` | warning | An authorized settings save, slug change, or invalidation disabled canonical-login blocking |
 | `user.export_generated` | notice | Excel or VCF content was generated for download |
 | `user.export_failed` | error | Export generation failed |
 | `user.registered` | notice | Pinova created a WordPress user |
@@ -83,6 +86,8 @@ Event names are API-like identifiers, not translated prose. Renaming an event is
 The `security.block_added` and `security.block_removed` contexts may contain the selected identifier type, keyed identifier fingerprint, block status, authorized administrator User ID, and block resource ID. They must never contain the raw mobile, email, username, or IP. Do not emit a new persistent event for every attacker-controlled blocked login attempt; the administrator mutation events provide the bounded audit trail without log amplification.
 
 The two `admin.sms_test_*` events are bounded, capability-protected audit actions. They bypass the configured minimum level so a deliberate test always leaves a privacy-safe result, including when the site stores only `error` events. This exception must not be generalized to request-driven authentication, OTP, or channel events.
+
+Native-login arming and gate-state events are bounded control-plane records. Their context may contain the authorized administrator User ID plus short `status`, `reason`, or `operation` codes. Never include the private slug, route URL, slug HMAC, transient arm contents, authentication material, or a reversible derivative of the route. Do not emit an event for canonical-login probes; only a successful eligible private login and an actual activation/invalidation transition are catalogued.
 
 ## Operational workflow
 

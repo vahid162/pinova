@@ -7,14 +7,19 @@ const loginScript = (
     await readFile(new URL('../../assets/js/pages/login-form.js', import.meta.url), 'utf8')
 ).replace(/^import pinovaAlpine[^\n]*\r?\n/m, '');
 
-function harness(apiResponse = { success: false, message: 'این شناسه مسدود شده است.', data: {} }) {
+function harness(
+    apiResponse = { success: false, message: 'این شناسه مسدود شده است.', data: {} },
+    options = {},
+) {
     let factory = null;
     let nextTimer = 100;
     const clearedIntervals = [];
+    const apiCalls = [];
     const pushedStates = [];
     const replacedStates = [];
     const listeners = {};
     const focused = [];
+    const navigator = {};
 
     const history = {
         state: null,
@@ -28,6 +33,25 @@ function harness(apiResponse = { success: false, message: 'این شناسه م�
             replacedStates.push(state);
         },
     };
+    const windowObject = {
+        addEventListener(name, callback) {
+            listeners[name] = callback;
+        },
+        frameElement: null,
+        history,
+        location: { origin: 'https://example.test', href: 'https://example.test/my-account/' },
+        parent: { document: { querySelector: () => null } },
+    };
+
+    if (options.webOtpCode) {
+        windowObject.OTPCredential = function OTPCredential() {};
+        navigator.credentials = {
+            async get() {
+                return { code: options.webOtpCode };
+            },
+        };
+    }
+
     const context = vm.createContext({
         clearInterval(id) {
             clearedIntervals.push(id);
@@ -38,16 +62,20 @@ function harness(apiResponse = { success: false, message: 'این شناسه م�
             body: { classList: { add() {} } },
             getElementById(id) {
                 return {
-                    querySelector() {
-                        return { focus: () => focused.push(id) };
+                    querySelector(selector) {
+                        return {
+                            focus(focusOptions) {
+                                focused.push({ id, selector, options: focusOptions });
+                            },
+                        };
                     },
                 };
             },
         },
         history,
         location: { origin: 'https://example.test', href: 'https://example.test/my-account/' },
-        navigator: {},
-        pinova: { code_length: 4, logo: '/logo.svg' },
+        navigator,
+        pinova: { code_length: options.codeLength || 4, logo: '/logo.svg' },
         pinovaAlpine: {
             data(name, callback) {
                 assert.equal(name, 'pinovaLoginForm');
@@ -56,17 +84,24 @@ function harness(apiResponse = { success: false, message: 'این شناسه م�
             prefix() {},
             start() {},
         },
-        pinovaApiRequest: async () => apiResponse,
+        pinovaApiRequest: async (...args) => {
+            apiCalls.push(args);
+            return typeof apiResponse === 'function' ? apiResponse(...args) : apiResponse;
+        },
         pinovaCleanNumericInput(value) {
-            return String(value);
+            const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
+            const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
+
+            return String(value ?? '')
+                .replace(/[۰-۹]/g, digit => persianDigits.indexOf(digit))
+                .replace(/[٠-٩]/g, digit => arabicDigits.indexOf(digit))
+                .replace(/[^0-9]/g, '');
         },
         pinovaGetQueryParam() {
             return null;
         },
         pinovaNotyf: { error() {}, success() {} },
-        pinovaValidateField(field) {
-            return field;
-        },
+        pinovaValidateField: options.validateField || (field => field),
         setInterval() {
             nextTimer += 1;
             return nextTimer;
@@ -76,21 +111,14 @@ function harness(apiResponse = { success: false, message: 'این شناسه م�
             return 1;
         },
         URL,
-        window: {
-            addEventListener(name, callback) {
-                listeners[name] = callback;
-            },
-            frameElement: null,
-            history,
-            location: { origin: 'https://example.test', href: 'https://example.test/my-account/' },
-            parent: { document: { querySelector: () => null } },
-        },
+        window: windowObject,
     });
 
     vm.runInContext(loginScript, context, { filename: 'assets/js/pages/login-form.js' });
     assert.equal(typeof factory, 'function');
 
     return {
+        apiCalls,
         clearedIntervals,
         focused,
         history,
@@ -106,6 +134,110 @@ test('existing WordPress passwords have no client-side minimum length', () => {
 
     assert.equal(state.forms.loginByPassword.inputs.password.rules.required, true);
     assert.equal(state.forms.loginByPassword.inputs.password.rules.minLength, undefined);
+});
+
+test('initialization leaves inputs unfocused and later steps focus their heading', () => {
+    const { focused, state } = harness();
+
+    state.init();
+    assert.deepEqual(focused, []);
+
+    state.changeStep('loginByPassword');
+
+    assert.equal(focused.length, 1);
+    assert.equal(focused[0].id, 'loginByPassword');
+    assert.equal(focused[0].selector, '[data-pinova-step-heading]');
+    assert.equal(focused[0].options.preventScroll, true);
+});
+
+test('client validation focuses the first field marked invalid', () => {
+    const { focused, state } = harness(undefined, {
+        validateField(field) {
+            if (field.rules?.required && !String(field.value || '').trim()) {
+                return { ...field, errorMsg: 'این فیلد نمی‌تواند خالی باشد' };
+            }
+
+            return field;
+        },
+    });
+
+    state.submit();
+
+    assert.equal(focused.length, 1);
+    assert.equal(focused[0].id, 'authenticate');
+    assert.equal(focused[0].selector, '[aria-invalid="true"]');
+});
+
+test('OTP input normalizes digits and autosubmits each complete code exactly once', () => {
+    for (const codeLength of [4, 5, 6]) {
+        for (const formName of ['signIn', 'loginByOtp', 'forgotPassword']) {
+            const { state } = harness(undefined, { codeLength });
+            let submissions = 0;
+            state.submit = () => {
+                submissions += 1;
+            };
+
+            const persianCode = '۱۲۳۴۵۶'.slice(0, codeLength);
+            const asciiCode = '123456'.slice(0, codeLength);
+            state.forms[formName].inputs.code.value = `${persianCode}-ignored`;
+
+            state.handleOtpInput(formName);
+            state.handleOtpInput(formName);
+
+            assert.equal(state.forms[formName].inputs.code.value, asciiCode);
+            assert.equal(submissions, 1, `${formName}: ${codeLength}-digit code should autosubmit once`);
+
+            state.forms[formName].inputs.code.value = asciiCode.slice(0, -1);
+            state.handleOtpInput(formName);
+            state.forms[formName].inputs.code.value = persianCode;
+            state.handleOtpInput(formName);
+
+            assert.equal(submissions, 2, `${formName}: replacement should autosubmit once`);
+        }
+    }
+});
+
+test('WebOTP uses the normalized exact-length autosubmit path', async () => {
+    const { listeners, state } = harness(undefined, { codeLength: 4, webOtpCode: '۱۲٣٤' });
+    let submissions = 0;
+    state.stepName = 'signIn';
+    state.submit = () => {
+        submissions += 1;
+    };
+
+    state.init();
+    assert.equal(typeof listeners.DOMContentLoaded, 'function');
+    listeners.DOMContentLoaded();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(state.forms.signIn.inputs.code.value, '1234');
+    assert.equal(submissions, 1);
+});
+
+test('the centralized request lock rejects concurrent actions', async () => {
+    let resolveRequest;
+    const pendingResponse = new Promise(resolve => {
+        resolveRequest = resolve;
+    });
+    const { apiCalls, state } = harness(() => pendingResponse);
+    state.forms.authenticate.inputs.identifier.value = 'buyer@example.test';
+
+    const firstRequest = state.authenticate();
+    const duplicateRequests = [
+        state.authenticate({ force_otp: '1' }),
+        state.authenticate({ forget: '1' }, 'forgotPassword'),
+        state.loginByPassword(),
+    ];
+
+    assert.equal(state.pageLoaderIsActive, true);
+    assert.equal(apiCalls.length, 1);
+
+    resolveRequest({ success: false, message: 'دوباره تلاش کنید.', data: {} });
+    await Promise.all([firstRequest, ...duplicateRequests]);
+
+    assert.equal(state.pageLoaderIsActive, false);
+    assert.equal(apiCalls.length, 1);
 });
 
 test('identifier edit labels match email, mobile, and fallback identifiers', () => {

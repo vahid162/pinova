@@ -78,13 +78,25 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 	}
 
 	public function test_enabled_native_login_gate_rewrites_generated_core_login_urls(): void {
-		$previous = get_option( 'pinova_advanced', null );
-		$options  = is_array( $previous ) ? $previous : [];
+		$previous      = get_option( 'pinova_advanced', null );
+		$options       = is_array( $previous ) ? $previous : [];
+		$administrator = get_userdata( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		$previous_user = get_current_user_id();
 
-		$options['block_native_login'] = '1';
+		$options['block_native_login'] = '0';
 		$options['native_login_slug']  = 'pinova-admin-safe1234';
 		$options['native_only_roles']  = [ 'administrator' ];
 		update_option( 'pinova_advanced', $options );
+		$this->arm_with_private_login( $administrator );
+
+		try {
+			wp_set_current_user( $administrator->ID );
+			$options                        = get_option( 'pinova_advanced', [] );
+			$options['block_native_login'] = '1';
+			update_option( 'pinova_advanced', $options );
+		} finally {
+			wp_set_current_user( $previous_user );
+		}
 
 		$gate = new NativeLoginGate();
 
@@ -111,7 +123,6 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 			);
 			self::assertSame( '/pinova-admin-safe1234/', wp_parse_url( $private_url, PHP_URL_PATH ) );
 
-			$administrator = get_userdata( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
 			$customer      = get_userdata( self::factory()->user->create( [ 'role' => 'subscriber' ] ) );
 			$previous_user = get_current_user_id();
 
@@ -252,7 +263,7 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 		$had_pagenow         = array_key_exists( 'pagenow', $GLOBALS );
 		$previous_pagenow    = $GLOBALS['pagenow'] ?? null;
 		$options             = is_array( $previous_options ) ? $previous_options : [];
-		$options['block_native_login'] = '1';
+		$options['block_native_login'] = '0';
 		$options['native_login_slug']  = 'pinova-admin-safe1234';
 		update_option( 'pinova_advanced', $options );
 
@@ -319,11 +330,47 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 		remove_filter( 'allow_password_reset', [ $gate, 'allow_native_only_password_reset' ], 99 );
 		remove_action( 'validate_password_reset', [ $gate, 'validate_native_only_password_reset' ], PHP_INT_MAX );
 		remove_action( 'login_form_register', [ $gate, 'redirect_public_registration' ], 0 );
+		remove_action( 'wp_login', [ $gate, 'arm_after_private_login' ], PHP_INT_MAX );
 		remove_filter( 'login_url', [ $gate, 'rewrite_public_login_url' ], 20 );
 		remove_filter( 'register_url', [ $gate, 'rewrite_public_register_url' ], 20 );
 		remove_filter( 'lostpassword_url', [ $gate, 'rewrite_public_lost_password_url' ], 20 );
 		remove_filter( 'retrieve_password_message', [ $gate, 'rewrite_native_reset_message' ], 99 );
 		remove_filter( 'recovery_mode_email', [ $gate, 'rewrite_recovery_mode_email' ], 99 );
 		remove_filter( 'user_request_action_email_content', [ $gate, 'rewrite_privacy_request_email_content' ], 99 );
+	}
+
+	private function arm_with_private_login( \WP_User $user ): void {
+		$previous_request = $_SERVER['REQUEST_URI'] ?? null;
+		$previous_script  = $_SERVER['SCRIPT_NAME'] ?? null;
+		$had_pagenow      = array_key_exists( 'pagenow', $GLOBALS );
+		$previous_pagenow = $GLOBALS['pagenow'] ?? null;
+
+		$_SERVER['REQUEST_URI'] = (string) wp_parse_url( NativeLoginGate::url(), PHP_URL_PATH );
+		$_SERVER['SCRIPT_NAME'] = '/index.php';
+		$gate                   = new NativeLoginGate();
+
+		try {
+			$gate->arm_after_private_login( $user->user_login, $user );
+		} finally {
+			self::remove_gate_hooks( $gate );
+
+			if ( null === $previous_request ) {
+				unset( $_SERVER['REQUEST_URI'] );
+			} else {
+				$_SERVER['REQUEST_URI'] = $previous_request;
+			}
+
+			if ( null === $previous_script ) {
+				unset( $_SERVER['SCRIPT_NAME'] );
+			} else {
+				$_SERVER['SCRIPT_NAME'] = $previous_script;
+			}
+
+			if ( $had_pagenow ) {
+				$GLOBALS['pagenow'] = $previous_pagenow;
+			} else {
+				unset( $GLOBALS['pagenow'] );
+			}
+		}
 	}
 }

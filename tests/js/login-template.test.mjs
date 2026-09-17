@@ -10,6 +10,18 @@ const accountCss = await readFile(
     new URL('../../assets/css/account.css', import.meta.url),
     'utf8',
 );
+const sharedCss = await readFile(
+    new URL('../../assets/css/style.css', import.meta.url),
+    'utf8',
+);
+const sharedCssSource = await readFile(
+    new URL('../../assets/css/index.scss', import.meta.url),
+    'utf8',
+);
+const sharedCssIntermediate = await readFile(
+    new URL('../../assets/css/index.css', import.meta.url),
+    'utf8',
+);
 
 function formMarkup(id) {
     const match = template.match(new RegExp(`<form id="${id}"[\\s\\S]*?<\\/form>`));
@@ -17,8 +29,31 @@ function formMarkup(id) {
     return match[0];
 }
 
+function cssHexVariable(name) {
+    const match = accountCss.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, 'i'));
+    assert.ok(match, `CSS variable --${name} should exist`);
+    return match[1];
+}
+
+function relativeLuminance(hex) {
+    const channels = hex.slice(1).match(/.{2}/g).map(value => Number.parseInt(value, 16) / 255);
+    const linear = channels.map(value => (
+        value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+    ));
+    return (0.2126 * linear[0]) + (0.7152 * linear[1]) + (0.0722 * linear[2]);
+}
+
+function contrastRatio(first, second) {
+    const firstLuminance = relativeLuminance(first);
+    const secondLuminance = relativeLuminance(second);
+    const lighter = Math.max(firstLuminance, secondLuminance);
+    const darker = Math.min(firstLuminance, secondLuminance);
+    return (lighter + 0.05) / (darker + 0.05);
+}
+
 test('standalone account document declares Persian RTL semantics', () => {
     assert.match(template, /<html[^>]*lang="fa"[^>]*dir="rtl"/i);
+    assert.match(template, /<meta[^>]*name="viewport"[^>]*viewport-fit=cover/i);
     assert.match(template, /<main\b/i);
     assert.match(template, /<h1\b/i);
 });
@@ -46,6 +81,7 @@ test('every interactive step uses a real submit form and associated labels', () 
     ]) {
         assert.match(template, new RegExp(`id="${id}"`));
         assert.match(template, new RegExp(`for="${id}"`));
+        assert.match(template, new RegExp(`<input[^>]*id="${id}"[^>]*\\brequired(?:\\s|>)`, 'i'));
     }
 });
 
@@ -57,6 +93,27 @@ test('keyboard controls, image alternatives, and live feedback are explicit', ()
     );
     assert.match(template, /aria-live="polite"/i);
     assert.match(template, /role="status"/i);
+    assert.equal((template.match(/<h2[^>]*data-pinova-step-heading[^>]*tabindex="-1"/gi) || []).length, 6);
+    assert.equal((template.match(/class="pinova-auth-error"[^>]*role="alert"[^>]*aria-atomic="true"/gi) || []).length, 7);
+    assert.match(template, /class="pinova-auth-content"[^>]*pinova-bind:inert="pageLoaderIsActive"/i);
+    assert.match(template, /id="pinova-identifier"[^>]*dir="auto"/i);
+});
+
+test('changed standalone assets use an account-specific cache revision', () => {
+    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.1'/);
+
+    for (const asset of [
+        'assets/css/style.css',
+        'assets/css/account.css',
+        'assets/js/pages/login-form.js',
+    ]) {
+        assert.match(
+            template,
+            new RegExp(`${asset.replaceAll('.', '\\.')}\\?ver=' \\. \\$account_asset_version`),
+        );
+    }
+
+    assert.match(template, /assets\/js\/global\.js\?ver=' \. PINOVA_VERSION/);
 });
 
 test('dead links and public native-login references are absent', () => {
@@ -109,6 +166,7 @@ test('OTP boxes are a dynamic visual layer over one accessible input', () => {
         assert.match(form, /class="pinova-auth-code-slots" aria-hidden="true"/);
         assert.match(form, /\.charAt\(digitIndex - 1\)/);
         assert.match(form, /type="text" inputmode="numeric" autocomplete="one-time-code"/);
+        assert.match(form, new RegExp(`pinova-on:input="handleOtpInput\\('${id}'\\)"`));
         assert.match(form, /pinova-on:focus="\$el\.setSelectionRange\(\$el\.value\.length, \$el\.value\.length\)"/);
         assert.match(form, /pinova-on:click="\$el\.setSelectionRange\(\$el\.value\.length, \$el\.value\.length\)"/);
     }
@@ -162,7 +220,53 @@ test('account stylesheet protects small screens, focus, and touch targets', () =
     assert.match(accountCss, /@media\s*\(max-width:\s*420px\)/i);
     assert.match(accountCss, /@media\s*\(forced-colors:\s*active\)/i);
     assert.match(accountCss, /outline-color:\s*Highlight/i);
+    assert.match(accountCss, /env\(safe-area-inset-top,\s*0px\)/i);
+    assert.match(accountCss, /env\(safe-area-inset-right,\s*0px\)/i);
+    assert.match(accountCss, /env\(safe-area-inset-bottom,\s*0px\)/i);
+    assert.match(accountCss, /env\(safe-area-inset-left,\s*0px\)/i);
     assert.doesNotMatch(accountCss, /overflow-x:\s*auto/i);
+});
+
+test('account typography and paragraph spacing override the shared reset', () => {
+    assert.match(
+        accountCss,
+        /body\.pinova-account-page\s*{[^}]*font-family:\s*"Yekan Bakh FaNum",\s*Tahoma,\s*sans-serif/is,
+    );
+    for (const stylesheet of [sharedCss, sharedCssSource, sharedCssIntermediate]) {
+        assert.match(stylesheet, /YekanBakhFaNum-Thin\.woff2/);
+        assert.doesNotMatch(stylesheet, /YekanBakhFaNum-thin\.woff2/);
+    }
+
+    for (const selector of [
+        'pinova-auth-description',
+        'pinova-auth-otp-copy',
+        'pinova-auth-error',
+        'pinova-auth-hint',
+        'pinova-auth-resend-status',
+    ]) {
+        assert.match(
+            accountCss,
+            new RegExp(`\\.pinova-account-page\\s+\\.${selector}\\s*\\{`, 'i'),
+        );
+    }
+});
+
+test('control borders and the single focus outline meet non-text contrast', () => {
+    assert.ok(contrastRatio(cssHexVariable('gp-control-border'), '#ffffff') >= 3);
+    assert.ok(contrastRatio(cssHexVariable('gp-focus'), '#ffffff') >= 3);
+    assert.match(
+        accountCss,
+        /input:focus-visible\s*{[^}]*outline:\s*2px solid var\(--gp-focus\)/is,
+    );
+    assert.match(
+        accountCss,
+        /\.pinova-auth-code-input:focus-within \.pinova-auth-code-slot\.is-active\s*{[^}]*box-shadow:\s*none[^}]*outline:\s*2px solid var\(--gp-focus\)/is,
+    );
+    assert.doesNotMatch(
+        accountCss,
+        /(?:input:focus|focus-within)[^{]*\{[^}]*border-color:\s*var\(--gp-focus\)/is,
+    );
+    assert.doesNotMatch(accountCss, /0 0 0 4px var\(--gp-orange-soft\)/i);
 });
 
 test('the account page is one centered card with one tertiary store exit', () => {

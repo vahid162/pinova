@@ -3,6 +3,7 @@
 // phpcs:ignore WordPress.WP.CapitalPDangit.MisspelledNamespaceName -- Preserve the established public namespace.
 namespace Pinova\Integrations\Wordpress;
 
+use Pinova\Logging\Logger;
 use Pinova\Pinova;
 use Pinova\Services\UserService;
 use WP_Error;
@@ -18,8 +19,15 @@ use WP_User;
  * URL has been saved and tested.
  */
 final class NativeLoginGate {
+	private const ACTIVATION_KEY = 'native_login_activation';
+	private const ARM_OPTION = 'pinova_native_login_arm';
+	private const ARM_TTL = 1800;
 
 	private bool $private_request;
+
+	private static bool $state_logging_registered = false;
+	private static ?string $state_change_reason = null;
+	private static bool $runtime_invalidation_update = false;
 
 	public function __construct() {
 		$this->private_request = $this->request_matches_private_route();
@@ -31,6 +39,12 @@ final class NativeLoginGate {
 		}
 
 		add_action( 'template_redirect', [ $this, 'serve_private_login' ], 0 );
+
+		if ( ! self::$state_logging_registered ) {
+			add_action( 'update_option_pinova_advanced', [ self::class, 'log_gate_state_change' ], 10, 3 );
+			self::$state_logging_registered = true;
+		}
+
 		$enabled = self::is_enabled();
 
 		if ( $this->private_request ) {
@@ -41,6 +55,7 @@ final class NativeLoginGate {
 			add_filter( 'allow_password_reset', [ $this, 'allow_native_only_password_reset' ], 99, 2 );
 			add_action( 'validate_password_reset', [ $this, 'validate_native_only_password_reset' ], PHP_INT_MAX, 2 );
 			add_action( 'login_form_register', [ $this, 'redirect_public_registration' ], 0 );
+			add_action( 'wp_login', [ $this, 'arm_after_private_login' ], PHP_INT_MAX, 2 );
 		}
 
 		if ( $enabled ) {
@@ -55,13 +70,32 @@ final class NativeLoginGate {
 	}
 
 	public static function is_enabled(): bool {
-		if ( defined( 'PINOVA_BLOCK_NATIVE_LOGIN' ) ) {
-			return (bool) constant( 'PINOVA_BLOCK_NATIVE_LOGIN' );
+		$options  = self::advanced_options();
+
+		if ( self::invalidate_runtime_activation_if_needed( $options ) ) {
+			return false;
 		}
 
-		$enabled = (bool) Pinova::get_option( 'advanced.block_native_login', false );
+		$override = defined( 'PINOVA_BLOCK_NATIVE_LOGIN' )
+			? (bool) constant( 'PINOVA_BLOCK_NATIVE_LOGIN' )
+			: null;
+		$enabled  = self::resolve_gate_state( self::configuration_is_activated( $options ), $override );
 
-		return (bool) apply_filters( 'pinova/native_login_gate_enabled', $enabled );
+		if ( ! $enabled ) {
+			return false;
+		}
+
+		return (bool) apply_filters( 'pinova/native_login_gate_enabled', true );
+	}
+
+	/**
+	 * Resolve the emergency constant without allowing a true value to bypass
+	 * the persisted setting and matching activation record.
+	 *
+	 * @internal Public for deterministic unit coverage.
+	 */
+	public static function resolve_gate_state( bool $configured_and_activated, ?bool $constant_override ): bool {
+		return false === $constant_override ? false : $configured_and_activated;
 	}
 
 	public static function default_slug(): string {
@@ -73,15 +107,7 @@ final class NativeLoginGate {
 	}
 
 	public static function slug(): string {
-		$fallback = self::default_slug();
-
-		if ( defined( 'PINOVA_NATIVE_LOGIN_SLUG' ) ) {
-			return self::normalize_slug( (string) constant( 'PINOVA_NATIVE_LOGIN_SLUG' ), $fallback );
-		}
-
-		$slug = (string) Pinova::get_option( 'advanced.native_login_slug', $fallback );
-
-		return self::normalize_slug( $slug, $fallback );
+		return self::effective_slug_for_options( self::advanced_options() );
 	}
 
 	public static function url(): string {
@@ -118,6 +144,250 @@ final class NativeLoginGate {
 		}
 
 		return $slug;
+	}
+
+	/**
+	 * Reconcile a complete advanced-settings update without recursively writing
+	 * the option being sanitized. The activation record is returned as part of
+	 * the same atomic option update as the enable flag.
+	 *
+	 * @param array<string, mixed> $options
+	 * @param array<string, mixed> $previous
+	 * @return array<string, mixed>
+	 */
+	public static function reconcile_advanced_options( array $options, array $previous, ?int $now = null ): array {
+		$now              = $now ?? time();
+		$requested        = ! empty( $options['block_native_login'] );
+		$current_slug     = self::persisted_slug_from_options( $options );
+		$previous_slug    = self::persisted_slug_from_options( $previous );
+		$slug_changed     = $current_slug !== $previous_slug;
+		$was_requested    = ! empty( $previous['block_native_login'] );
+		$prior_activation = isset( $previous[ self::ACTIVATION_KEY ] ) && is_array( $previous[ self::ACTIVATION_KEY ] )
+			? $previous[ self::ACTIVATION_KEY ]
+			: [];
+
+		$options['block_native_login'] = $requested ? '1' : '0';
+		unset( $options[ self::ACTIVATION_KEY ] );
+
+		if ( ! $requested || '' === $current_slug || $slug_changed ) {
+			$options['block_native_login'] = '0';
+			self::clear_arm();
+			return $options;
+		}
+
+		if ( $was_requested && self::activation_record_matches( $prior_activation, $current_slug ) ) {
+			$options[ self::ACTIVATION_KEY ] = $prior_activation;
+			return $options;
+		}
+
+		$current_user_id = get_current_user_id();
+
+		if ( $current_user_id < 1 || ! current_user_can( 'manage_options' ) ) {
+			self::clear_arm();
+			$options['block_native_login'] = '0';
+			return $options;
+		}
+
+		$activation = self::consume_arm( $current_slug, $now, $current_user_id );
+
+		if ( null === $activation ) {
+			$options['block_native_login'] = '0';
+			return $options;
+		}
+
+		$options[ self::ACTIVATION_KEY ] = $activation;
+
+		return $options;
+	}
+
+	/**
+	 * Whether a complete advanced option contains the setting and matching
+	 * durable activation needed by the runtime gate.
+	 *
+	 * @param array<string, mixed> $options
+	 * @internal Public for integration coverage.
+	 */
+	public static function configuration_is_activated( array $options ): bool {
+		if ( empty( $options['block_native_login'] ) ) {
+			return false;
+		}
+
+		$slug = self::persisted_slug_from_options( $options );
+
+		if ( '' === $slug || ! hash_equals( self::effective_slug_for_options( $options ), $slug ) ) {
+			return false;
+		}
+
+		$activation = $options[ self::ACTIVATION_KEY ] ?? null;
+
+		return is_array( $activation ) && self::activation_record_matches( $activation, $slug );
+	}
+
+	/**
+	 * Permanently fail closed when a previously durable activation no longer
+	 * matches its effective route, plugin version, or keyed binding. Without
+	 * this write, restoring an older constant or version could revive the old
+	 * activation without another private login.
+	 *
+	 * @param array<string, mixed> $options
+	 * @internal Public for integration coverage.
+	 */
+	public static function invalidate_runtime_activation_if_needed(
+		array $options,
+		?string $effective_slug = null
+	): bool {
+		$activation = $options[ self::ACTIVATION_KEY ] ?? null;
+
+		if ( empty( $options['block_native_login'] ) ) {
+			return false;
+		}
+
+		$persisted_slug = self::persisted_slug_from_options( $options );
+		$effective_slug = $effective_slug ?? self::effective_slug_for_options( $options );
+		$reason         = 'activation_invalid';
+
+		if ( '' === $persisted_slug || ! hash_equals( $effective_slug, $persisted_slug ) ) {
+			$reason = 'slug_changed';
+		} elseif ( is_array( $activation ) && self::activation_record_matches( $activation, $persisted_slug ) ) {
+			return false;
+		}
+
+		$options['block_native_login'] = '0';
+		unset( $options[ self::ACTIVATION_KEY ] );
+		self::clear_arm();
+		self::$state_change_reason = $reason;
+		self::$runtime_invalidation_update = true;
+
+		try {
+			update_option( 'pinova_advanced', $options );
+		} finally {
+			self::$state_change_reason = null;
+			self::$runtime_invalidation_update = false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Identify the narrow internal option write used to fail a stale gate
+	 * closed during plugin bootstrap. The value already came from the stored
+	 * option and only the gate flag/activation were removed, so rerunning the
+	 * complete admin settings sanitizer is neither needed nor bootstrap-safe.
+	 *
+	 * @internal Used by the Pinova settings sanitizer only.
+	 */
+	public static function is_runtime_invalidation_update(): bool {
+		return self::$runtime_invalidation_update;
+	}
+
+	/**
+	 * A successful native private-route login creates a short-lived arm. It is
+	 * intentionally separate from the durable setting so merely knowing or
+	 * saving the route cannot enable canonical login blocking.
+	 */
+	public function arm_after_private_login( string $user_login, WP_User $user ): void {
+		unset( $user_login );
+
+		if (
+			! $this->private_request
+			|| ! UserService::is_native_only( $user )
+			|| ! $user->has_cap( 'manage_options' )
+		) {
+			return;
+		}
+
+		$options        = self::advanced_options();
+		$persisted_slug = self::persisted_slug_from_options( $options );
+
+		if (
+			'' === $persisted_slug
+			|| ! hash_equals( self::effective_slug_for_options( $options ), $persisted_slug )
+		) {
+			return;
+		}
+
+		$now = time();
+		$arm = [
+			'slug_hmac'     => self::slug_hmac( $persisted_slug ),
+			'user_id'       => (int) $user->ID,
+			'plugin_version' => self::plugin_version(),
+			'expires_at'    => $now + self::ARM_TTL,
+		];
+
+		$stored = update_option( self::ARM_OPTION, $arm, false );
+
+		if ( ! $stored && $arm !== get_option( self::ARM_OPTION, null ) ) {
+			return;
+		}
+
+		Logger::instance()->notice(
+			'security.native_login_armed',
+			[
+				'user_id'   => (int) $user->ID,
+				'operation' => 'native_login_arm',
+				'status'    => 'ready',
+			]
+		);
+	}
+
+	/**
+	 * Log only bounded configuration transitions, never canonical-route probes.
+	 *
+	 * @param mixed $old_value
+	 * @param mixed $value
+	 */
+	public static function log_gate_state_change( $old_value, $value, string $option ): void {
+		unset( $option );
+
+		$old = is_array( $old_value ) ? $old_value : [];
+		$new = is_array( $value ) ? $value : [];
+		$was = self::configuration_is_activated( $old );
+		$is  = self::configuration_is_activated( $new );
+
+		if ( ! $was && null !== self::$state_change_reason ) {
+			$was = ! empty( $old['block_native_login'] );
+		}
+
+		if ( $was === $is ) {
+			return;
+		}
+
+		if ( $is ) {
+			$activation = is_array( $new[ self::ACTIVATION_KEY ] ?? null ) ? $new[ self::ACTIVATION_KEY ] : [];
+			Logger::instance()->audit(
+				'warning',
+				'security.native_login_gate_enabled',
+				[
+					'user_id'   => (int) ( $activation['user_id'] ?? 0 ),
+					'operation' => 'native_login_gate',
+					'status'    => 'enabled',
+				]
+			);
+			return;
+		}
+
+		$old_activation = is_array( $old[ self::ACTIVATION_KEY ] ?? null ) ? $old[ self::ACTIVATION_KEY ] : [];
+		$current_user   = function_exists( 'wp_get_current_user' ) ? get_current_user_id() : 0;
+		$reason         = self::$state_change_reason
+			?? ( empty( $new['block_native_login'] ) ? 'setting_disabled' : 'activation_invalid' );
+
+		if (
+			null === self::$state_change_reason
+			&& self::persisted_slug_from_options( $old ) !== self::persisted_slug_from_options( $new )
+		) {
+			$reason = 'slug_changed';
+		}
+
+		Logger::instance()->audit(
+			'warning',
+			'security.native_login_gate_disabled',
+			[
+				'user_id'   => $current_user > 0 ? $current_user : (int) ( $old_activation['user_id'] ?? 0 ),
+				'operation' => 'native_login_gate',
+				'status'    => 'disabled',
+				'reason'    => $reason,
+			]
+		);
 	}
 
 	public function block_canonical_login(): void {
@@ -357,6 +627,107 @@ final class NativeLoginGate {
 		return 'confirm_admin_email' === $core_action
 			&& is_user_logged_in()
 			&& current_user_can( 'manage_options' );
+	}
+
+	/** @return array<string, mixed> */
+	private static function advanced_options(): array {
+		$options = get_option( 'pinova_advanced', [] );
+
+		return is_array( $options ) ? $options : [];
+	}
+
+	/** @param array<string, mixed> $options */
+	private static function persisted_slug_from_options( array $options ): string {
+		if ( ! isset( $options['native_login_slug'] ) || ! is_string( $options['native_login_slug'] ) ) {
+			return '';
+		}
+
+		return self::normalize_slug( $options['native_login_slug'], '' );
+	}
+
+	/** @param array<string, mixed> $options */
+	private static function effective_slug_for_options( array $options ): string {
+		$fallback = self::default_slug();
+
+		if ( defined( 'PINOVA_NATIVE_LOGIN_SLUG' ) ) {
+			return self::normalize_slug( (string) constant( 'PINOVA_NATIVE_LOGIN_SLUG' ), $fallback );
+		}
+
+		$persisted = self::persisted_slug_from_options( $options );
+
+		return '' !== $persisted ? $persisted : $fallback;
+	}
+
+	private static function plugin_version(): string {
+		return defined( 'PINOVA_VERSION' ) ? (string) constant( 'PINOVA_VERSION' ) : 'unknown';
+	}
+
+	private static function slug_hmac( string $slug ): string {
+		$auth_key  = defined( 'AUTH_KEY' ) ? (string) constant( 'AUTH_KEY' ) : '';
+		$auth_salt = defined( 'AUTH_SALT' ) ? (string) constant( 'AUTH_SALT' ) : '';
+		$secret    = $auth_key . '|' . $auth_salt;
+
+		if ( '|' === $secret ) {
+			$secret = self::default_slug();
+		}
+
+		return hash_hmac( 'sha256', 'native-login-gate:' . $slug, $secret );
+	}
+
+	/** @param array<string, mixed> $record */
+	private static function activation_record_matches( array $record, string $slug ): bool {
+		$activated_at = $record['activated_at'] ?? null;
+
+		return self::record_binding_matches( $record, $slug )
+			&& is_numeric( $activated_at )
+			&& (int) $activated_at > 0;
+	}
+
+	/** @param array<string, mixed> $record */
+	private static function record_binding_matches( array $record, string $slug ): bool {
+		$slug_hmac = $record['slug_hmac'] ?? null;
+		$version   = $record['plugin_version'] ?? null;
+		$user_id   = $record['user_id'] ?? null;
+
+		return is_string( $slug_hmac )
+			&& 1 === preg_match( '/\A[a-f0-9]{64}\z/', $slug_hmac )
+			&& hash_equals( self::slug_hmac( $slug ), $slug_hmac )
+			&& is_string( $version )
+			&& hash_equals( self::plugin_version(), $version )
+			&& is_numeric( $user_id )
+			&& (int) $user_id > 0;
+	}
+
+	/** @return array<string, int|string>|null */
+	private static function consume_arm( string $slug, int $now, int $current_user_id ): ?array {
+		$arm = get_option( self::ARM_OPTION, null );
+
+		if (
+			! is_array( $arm )
+			|| ! self::record_binding_matches( $arm, $slug )
+			|| (int) ( $arm['user_id'] ?? 0 ) !== $current_user_id
+			|| ! isset( $arm['expires_at'] )
+			|| ! is_numeric( $arm['expires_at'] )
+			|| (int) $arm['expires_at'] <= $now
+		) {
+			self::clear_arm();
+			return null;
+		}
+
+		if ( ! delete_option( self::ARM_OPTION ) ) {
+			return null;
+		}
+
+		return [
+			'slug_hmac'      => (string) $arm['slug_hmac'],
+			'user_id'        => (int) $arm['user_id'],
+			'plugin_version' => (string) $arm['plugin_version'],
+			'activated_at'   => $now,
+		];
+	}
+
+	private static function clear_arm(): void {
+		delete_option( self::ARM_OPTION );
 	}
 
 	private function request_matches_private_route(): bool {

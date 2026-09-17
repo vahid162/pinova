@@ -126,7 +126,7 @@ test('real login page loads Yekan and preserves spacing, contrast, and one focus
         await document.fonts.ready;
         const bodyStyle = getComputedStyle(document.body);
         const inputStyle = getComputedStyle(document.querySelector('#pinova-identifier'));
-        const descriptionStyle = getComputedStyle(document.querySelector('.pinova-auth-description'));
+        const leadFieldStyle = getComputedStyle(document.querySelector('.pinova-auth-field--lead'));
         const shellStyle = getComputedStyle(document.querySelector('.pinova-auth-shell'));
         return {
             loadedFaceCount: loadedFaces.length,
@@ -134,8 +134,7 @@ test('real login page loads Yekan and preserves spacing, contrast, and one focus
             inputFont: inputStyle.fontFamily,
             borderColor: inputStyle.borderTopColor,
             backgroundColor: inputStyle.backgroundColor,
-            descriptionMarginTop: parseFloat(descriptionStyle.marginTop),
-            descriptionMarginBottom: parseFloat(descriptionStyle.marginBottom),
+            leadFieldMarginTop: parseFloat(leadFieldStyle.marginTop),
             safeAreaSupported: CSS.supports('padding-top', 'env(safe-area-inset-top, 0px)'),
             shellPadding: [
                 shellStyle.paddingTop,
@@ -150,8 +149,7 @@ test('real login page loads Yekan and preserves spacing, contrast, and one focus
     expect(presentation.loadedFaceCount).toBeGreaterThan(0);
     expect(presentation.bodyFont).toContain('Yekan Bakh FaNum');
     expect(presentation.inputFont).toContain('Yekan Bakh FaNum');
-    expect(presentation.descriptionMarginTop).toBe(0);
-    expect(presentation.descriptionMarginBottom).toBeGreaterThan(0);
+    expect(presentation.leadFieldMarginTop).toBeGreaterThan(0);
     expect(presentation.safeAreaSupported).toBe(true);
     expect(presentation.shellPadding.every(value => value > 0)).toBe(true);
     expect(presentation.viewport).toContain('viewport-fit=cover');

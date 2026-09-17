@@ -20,13 +20,13 @@ use WP_User;
  */
 final class NativeLoginGate {
 	private const ACTIVATION_KEY = 'native_login_activation';
-	private const ARM_OPTION = 'pinova_native_login_arm';
-	private const ARM_TTL = 1800;
+	private const ARM_OPTION     = 'pinova_native_login_arm';
+	private const ARM_TTL        = 1800;
 
 	private bool $private_request;
 
-	private static bool $state_logging_registered = false;
-	private static ?string $state_change_reason = null;
+	private static bool $state_logging_registered    = false;
+	private static ?string $state_change_reason      = null;
 	private static bool $runtime_invalidation_update = false;
 
 	public function __construct() {
@@ -70,7 +70,7 @@ final class NativeLoginGate {
 	}
 
 	public static function is_enabled(): bool {
-		$options  = self::advanced_options();
+		$options = self::advanced_options();
 
 		if ( self::invalidate_runtime_activation_if_needed( $options ) ) {
 			return false;
@@ -255,13 +255,13 @@ final class NativeLoginGate {
 		$options['block_native_login'] = '0';
 		unset( $options[ self::ACTIVATION_KEY ] );
 		self::clear_arm();
-		self::$state_change_reason = $reason;
+		self::$state_change_reason         = $reason;
 		self::$runtime_invalidation_update = true;
 
 		try {
 			update_option( 'pinova_advanced', $options );
 		} finally {
-			self::$state_change_reason = null;
+			self::$state_change_reason         = null;
 			self::$runtime_invalidation_update = false;
 		}
 
@@ -308,15 +308,15 @@ final class NativeLoginGate {
 
 		$now = time();
 		$arm = [
-			'slug_hmac'     => self::slug_hmac( $persisted_slug ),
-			'user_id'       => (int) $user->ID,
+			'slug_hmac'      => self::slug_hmac( $persisted_slug ),
+			'user_id'        => (int) $user->ID,
 			'plugin_version' => self::plugin_version(),
-			'expires_at'    => $now + self::ARM_TTL,
+			'expires_at'     => $now + self::ARM_TTL,
 		];
 
 		$stored = update_option( self::ARM_OPTION, $arm, false );
 
-		if ( ! $stored && $arm !== get_option( self::ARM_OPTION, null ) ) {
+		if ( false === $stored && $arm !== get_option( self::ARM_OPTION, null ) ) {
 			return;
 		}
 

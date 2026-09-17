@@ -33,7 +33,7 @@ export default defineConfig({
         },
     ],
     use: {
-        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:8890',
+        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8890',
         actionTimeout: 10_000,
         navigationTimeout: 20_000,
         screenshot: 'only-on-failure',

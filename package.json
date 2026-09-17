@@ -5,10 +5,12 @@
     "env:configure": "node tools/configure-wp-env.mjs",
     "env:start": "wp-env start",
     "env:stop": "wp-env stop",
+    "test:browser": "playwright test --config tests/browser/playwright.config.mjs",
     "test:js": "node --test tests/js/*.test.mjs",
     "test:integration": "bash tools/run-integration.sh"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.0",
     "@wordpress/env": "10.35.0"
   }
 }

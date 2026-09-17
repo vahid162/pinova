@@ -10,17 +10,19 @@ body.pinova-account-page {
   --gp-background: #f8f3ea;
   --gp-surface: #fffdfa;
   --gp-border: #ded6cb;
+  --gp-control-border: #91877b;
+  --gp-focus: #9b5f00;
   --gp-danger: #9f241d;
   min-width: 320px;
   margin: 0;
   overflow-x: hidden;
   color: var(--gp-dark);
+  font-family: "Yekan Bakh FaNum", Tahoma, sans-serif;
   background:
     radial-gradient(circle at 12% 8%, rgba(244, 165, 28, 0.13), transparent 34rem),
     linear-gradient(145deg, var(--gp-surface), var(--gp-background) 55%, #f3ece2);
 }
 
-body.pinova-account-page,
 body.pinova-account-page button,
 body.pinova-account-page input {
   font-family: inherit;
@@ -44,8 +46,8 @@ body.pinova-account-page [pinova-cloak] {
 body.pinova-account-page a:focus-visible,
 body.pinova-account-page button:focus-visible,
 body.pinova-account-page input:focus-visible {
-  outline: 3px solid var(--gp-dark) !important;
-  outline-offset: 3px;
+  outline: 2px solid var(--gp-focus) !important;
+  outline-offset: 2px;
 }
 
 .pinova-auth-shell {
@@ -54,6 +56,10 @@ body.pinova-account-page input:focus-visible {
   min-height: 100vh;
   min-height: 100svh;
   padding: clamp(18px, 5vw, 56px) 16px;
+  padding-top: max(clamp(18px, 5vw, 56px), env(safe-area-inset-top, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: max(clamp(18px, 5vw, 56px), env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
 }
 
 .pinova-auth-layout {
@@ -139,7 +145,7 @@ body.pinova-account-page input:focus-visible {
   text-align: center;
 }
 
-.pinova-auth-description {
+.pinova-account-page .pinova-auth-description {
   margin: 0 0 24px;
   color: var(--gp-muted);
   line-height: 1.8;
@@ -148,7 +154,7 @@ body.pinova-account-page input:focus-visible {
   unicode-bidi: plaintext;
 }
 
-.pinova-auth-otp-copy {
+.pinova-account-page .pinova-auth-otp-copy {
   margin-bottom: 2px;
 }
 
@@ -195,7 +201,7 @@ body.pinova-account-page input:focus-visible {
   padding: 11px 14px;
   color: var(--gp-dark);
   background-color: #fff !important;
-  border: 1px solid #a89f94;
+  border: 1px solid var(--gp-control-border);
   border-radius: 11px;
   box-shadow: 0 1px 3px rgba(80, 75, 69, 0.06);
   font-size: 16px;
@@ -206,13 +212,12 @@ body.pinova-account-page input:focus-visible {
 }
 
 .pinova-account-page .pinova-auth-field input:focus {
-  border-color: var(--gp-orange-hover);
-  box-shadow: 0 0 0 4px var(--gp-orange-soft);
+  box-shadow: none;
 }
 
 .pinova-account-page .pinova-auth-field input[aria-invalid="true"] {
   border-color: var(--gp-danger);
-  box-shadow: 0 0 0 4px rgba(159, 36, 29, 0.1);
+  box-shadow: none;
 }
 
 .pinova-account-page .pinova-auth-field input[dir="ltr"] {
@@ -256,7 +261,7 @@ body.pinova-account-page input:focus-visible {
   height: clamp(50px, 12vw, 64px);
   color: var(--gp-dark);
   background: #fff;
-  border: 1px solid #bdb4a9;
+  border: 1px solid var(--gp-control-border);
   border-radius: 12px;
   box-shadow: 0 2px 7px rgba(80, 75, 69, 0.06);
   font-size: clamp(20px, 5vw, 26px);
@@ -266,19 +271,18 @@ body.pinova-account-page input:focus-visible {
 }
 
 .pinova-auth-code-slot.is-filled {
-  border-color: #91877b;
+  border-color: var(--gp-control-border);
 }
 
 .pinova-auth-code-input:focus-within .pinova-auth-code-slot.is-active {
-  border-color: var(--gp-orange-hover);
-  box-shadow: 0 0 0 4px var(--gp-orange-soft);
-  outline: 2px solid var(--gp-orange-hover);
+  box-shadow: none;
+  outline: 2px solid var(--gp-focus);
   outline-offset: 2px;
 }
 
 .pinova-auth-code-input.has-error .pinova-auth-code-slot {
   border-color: var(--gp-danger);
-  box-shadow: 0 0 0 3px rgba(159, 36, 29, 0.08);
+  box-shadow: none;
 }
 
 .pinova-account-page .pinova-auth-code-input > input {
@@ -313,7 +317,7 @@ body.pinova-account-page input:focus-visible {
   text-align: center;
 }
 
-.pinova-auth-error {
+.pinova-account-page .pinova-auth-error {
   min-height: 20px;
   margin: 6px 0 0;
   color: var(--gp-danger);
@@ -321,7 +325,7 @@ body.pinova-account-page input:focus-visible {
   line-height: 1.6;
 }
 
-.pinova-auth-hint {
+.pinova-account-page .pinova-auth-hint {
   margin: 6px 0 0;
   color: var(--gp-muted);
   font-size: 13px;
@@ -420,7 +424,7 @@ body.pinova-account-page input:focus-visible {
   text-align: center;
 }
 
-.pinova-auth-resend-status {
+.pinova-account-page .pinova-auth-resend-status {
   margin: 0;
   color: var(--gp-muted);
   font-size: 13px;
@@ -639,8 +643,8 @@ body.pinova-account-page input:focus-visible {
 
 @media (min-width: 840px) {
   .pinova-auth-shell {
-    padding-right: 28px;
-    padding-left: 28px;
+    padding-right: max(28px, env(safe-area-inset-right, 0px));
+    padding-left: max(28px, env(safe-area-inset-left, 0px));
   }
 
   .pinova-auth-card {
@@ -666,6 +670,10 @@ body.pinova-account-page input:focus-visible {
     min-height: 100vh;
     min-height: 100svh;
     padding: 22px 16px 20px;
+    padding-top: max(22px, env(safe-area-inset-top, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
   }
 
   .pinova-auth-header {

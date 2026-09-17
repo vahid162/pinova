@@ -8,6 +8,14 @@ use PHPUnit\Framework\TestCase;
 use Pinova\Integrations\Wordpress\NativeLoginGate;
 
 final class NativeLoginGateTest extends TestCase {
+	public function test_emergency_false_override_is_unconditional_but_true_does_not_bypass_activation(): void {
+		self::assertFalse( NativeLoginGate::resolve_gate_state( true, false ) );
+		self::assertFalse( NativeLoginGate::resolve_gate_state( false, null ) );
+		self::assertFalse( NativeLoginGate::resolve_gate_state( false, true ) );
+		self::assertTrue( NativeLoginGate::resolve_gate_state( true, true ) );
+		self::assertTrue( NativeLoginGate::resolve_gate_state( true, null ) );
+	}
+
 	public function test_private_slug_is_normalized_and_reserved_or_weak_values_fall_back(): void {
 		$fallback = 'pinova-admin-safe1234';
 

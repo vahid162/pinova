@@ -21,6 +21,11 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             message: '',
             tone: 'info'
         },
+        otpSubmittedCodes: {
+            signIn: '',
+            loginByOtp: '',
+            forgotPassword: ''
+        },
 
         forms: {
             authenticate:{
@@ -167,7 +172,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
         },
 
         init(){
-            this.changeStep(this.stepName, {replace: true, fromHistory: true});
+            this.changeStep(this.stepName, {replace: true, fromHistory: true, focus: false});
 
             window.addEventListener('popstate', (event) => {
                 const targetStep = event.state && event.state.pinovaStep;
@@ -189,19 +194,19 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                             switch (this.stepName) {
                                 case 'loginByOtp': {
                                     this.forms.loginByOtp.inputs.code.value = pinovaCleanNumericInput(otp.code);
-                                    this.submit();
+                                    this.handleOtpInput('loginByOtp');
                                     break;
                                 }
 
                                 case 'signIn': {
                                     this.forms.signIn.inputs.code.value = pinovaCleanNumericInput(otp.code);
-                                    this.submit();
+                                    this.handleOtpInput('signIn');
                                     break;
                                 }
 
                                 case 'forgotPassword': {
                                     this.forms.forgotPassword.inputs.code.value = pinovaCleanNumericInput(otp.code);
-                                    this.submit();
+                                    this.handleOtpInput('forgotPassword');
                                     break;
                                 }
                             }
@@ -239,6 +244,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             }
 
             if(hasError){
+                this.focusFirstInvalidField();
                 return;
             }
 
@@ -279,9 +285,11 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
         //requests
         async authenticate(otherData = {}, nextStepName = null){
-            try{
-                this.pageLoaderIsActive = true;
+            if(!this.beginRequest()){
+                return;
+            }
 
+            try{
                 const data = {...otherData};
                 for (const key in this.forms.authenticate.inputs) {
                     if(this.forms.authenticate.inputs[key].value !== null){
@@ -307,6 +315,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                         this.changeStep("forgotPassword");
                         this.forms.forgotPassword.inputs.jwt.value = responseData.jwt;
                         this.forms.forgotPassword.inputs.code.value = '';
+                        this.resetOtpAutoSubmit('forgotPassword');
                         this.forms.forgotPassword.msg = result.message;
                         this.time.duration = responseData.ttl * 1000;
                         this.startTime();
@@ -314,6 +323,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                         this.changeStep("loginByOtp");
                         this.forms.loginByOtp.inputs.jwt.value = responseData.jwt;
                         this.forms.loginByOtp.inputs.code.value = '';
+                        this.resetOtpAutoSubmit('loginByOtp');
                         this.forms.loginByOtp.msg = result.message;
                         this.time.duration = responseData.ttl * 1000;
                         this.startTime();
@@ -333,19 +343,23 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                 console.error('Error fetching posts:', error);
                 this.handleRequestException(error);
             }finally{
-                this.pageLoaderIsActive = false;
+                this.endRequest();
             }
         },
 
         async loginByOtp(){
-            try{
-                this.pageLoaderIsActive = true;
+            if(!this.beginRequest()){
+                return;
+            }
 
+            const formName = this.stepName;
+
+            try{
                 const data = {};
 
-                for (const key in this.forms[this.stepName].inputs) {
-                    if(this.forms[this.stepName].inputs[key].value !== null) {
-                        data[key] = this.forms[this.stepName].inputs[key].value
+                for (const key in this.forms[formName].inputs) {
+                    if(this.forms[formName].inputs[key].value !== null) {
+                        data[key] = this.forms[formName].inputs[key].value
                     }
                 }
 
@@ -374,21 +388,24 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                         return;
                     }
                     this.handleRequestFailure(result);
-                    this.forms[this.stepName].inputs.code.value = '';
+                    this.forms[formName].inputs.code.value = '';
+                    this.resetOtpAutoSubmit(formName);
                 }
 
             }catch (error){
                 console.error('Error fetching posts:', error);
                 this.handleRequestException(error);
             }finally{
-                this.pageLoaderIsActive = false;
+                this.endRequest();
             }
         },
 
         async loginByPassword(){
-            try{
-                this.pageLoaderIsActive = true;
+            if(!this.beginRequest()){
+                return;
+            }
 
+            try{
                 const data = {};
                 for (const key in this.forms.loginByPassword.inputs) {
                     if(this.forms.loginByPassword.inputs[key].value !== null) {
@@ -427,14 +444,16 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                 console.error('Error fetching posts:', error);
                 this.handleRequestException(error);
             }finally{
-                this.pageLoaderIsActive = false;
+                this.endRequest();
             }
         },
 
         async forgotPassword(){
-            try{
-                this.pageLoaderIsActive = true;
+            if(!this.beginRequest()){
+                return;
+            }
 
+            try{
                 const data = {};
                 for (const key in this.forms.forgotPassword.inputs) {
                     if(this.forms.forgotPassword.inputs[key].value !== null) {
@@ -461,20 +480,23 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                 }else{
                     this.handleRequestFailure(result);
                     this.forms.forgotPassword.inputs.code.value = '';
+                    this.resetOtpAutoSubmit('forgotPassword');
                 }
 
             }catch (error){
                 console.error('Error fetching posts:', error);
                 this.handleRequestException(error);
             }finally{
-                this.pageLoaderIsActive = false;
+                this.endRequest();
             }
         },
 
         async changePassword(){
-            try{
-                this.pageLoaderIsActive = true;
+            if(!this.beginRequest()){
+                return;
+            }
 
+            try{
                 const data = {};
                 for (const key in this.forms.changePassword.inputs) {
                     if(this.forms.changePassword.inputs[key].value !== null) {
@@ -504,7 +526,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                 console.error('Error fetching posts:', error);
                 this.handleRequestException(error);
             }finally{
-                this.pageLoaderIsActive = false;
+                this.endRequest();
             }
         },
 
@@ -517,6 +539,67 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
         clearStatus(){
             this.status.message = '';
             this.status.tone = 'info';
+        },
+
+        beginRequest(){
+            if(this.pageLoaderIsActive){
+                return false;
+            }
+
+            this.pageLoaderIsActive = true;
+            return true;
+        },
+
+        endRequest(){
+            this.pageLoaderIsActive = false;
+        },
+
+        handleOtpInput(formName){
+            if(!Object.prototype.hasOwnProperty.call(this.otpSubmittedCodes, formName)){
+                return;
+            }
+
+            const field = this.forms[formName].inputs.code;
+            const normalizedCode = pinovaCleanNumericInput(field.value).slice(0, this.codeLength);
+            field.value = normalizedCode;
+
+            if(normalizedCode.length !== Number(this.codeLength)){
+                this.resetOtpAutoSubmit(formName);
+                return;
+            }
+
+            if(this.otpSubmittedCodes[formName] === normalizedCode || this.pageLoaderIsActive){
+                return;
+            }
+
+            this.otpSubmittedCodes[formName] = normalizedCode;
+            this.submit();
+        },
+
+        resetOtpAutoSubmit(formName){
+            if(Object.prototype.hasOwnProperty.call(this.otpSubmittedCodes, formName)){
+                this.otpSubmittedCodes[formName] = '';
+            }
+        },
+
+        focusFirstInvalidField(){
+            setTimeout(()=>{
+                const step = document.getElementById(this.stepName);
+                const firstInvalidField = step && step.querySelector('[aria-invalid="true"]');
+                if(firstInvalidField){
+                    firstInvalidField.focus();
+                }
+            }, 0);
+        },
+
+        focusStepHeading(stepName){
+            setTimeout(()=>{
+                const step = document.getElementById(stepName);
+                const heading = step && step.querySelector('[data-pinova-step-heading]');
+                if(heading){
+                    heading.focus({preventScroll: true});
+                }
+            }, 100);
         },
 
         identifierEditLabel(){
@@ -550,16 +633,19 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                 case 'signIn':
                     this.forms.signIn.inputs.jwt.value = '';
                     this.forms.signIn.inputs.code.value = '';
+                    this.resetOtpAutoSubmit('signIn');
                     this.stopTimer();
                     break;
                 case 'loginByOtp':
                     this.forms.loginByOtp.inputs.jwt.value = '';
                     this.forms.loginByOtp.inputs.code.value = '';
+                    this.resetOtpAutoSubmit('loginByOtp');
                     this.stopTimer();
                     break;
                 case 'forgotPassword':
                     this.forms.forgotPassword.inputs.jwt.value = '';
                     this.forms.forgotPassword.inputs.code.value = '';
+                    this.resetOtpAutoSubmit('forgotPassword');
                     this.stopTimer();
                     break;
                 case 'changePassword':
@@ -578,10 +664,13 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             this.stopTimer();
             this.forms.signIn.inputs.jwt.value = '';
             this.forms.signIn.inputs.code.value = '';
+            this.resetOtpAutoSubmit('signIn');
             this.forms.loginByOtp.inputs.jwt.value = '';
             this.forms.loginByOtp.inputs.code.value = '';
+            this.resetOtpAutoSubmit('loginByOtp');
             this.forms.forgotPassword.inputs.jwt.value = '';
             this.forms.forgotPassword.inputs.code.value = '';
+            this.resetOtpAutoSubmit('forgotPassword');
             this.forms.changePassword.inputs.jwt.value = '';
             this.forms.changePassword.inputs.reset_key.value = '';
             this.forms.changePassword.inputs.password_1.value = '';
@@ -613,13 +702,9 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                 window.history.replaceState({pinovaStep: newStep}, '', window.location.href);
             }
 
-            setTimeout(()=>{
-                const step = document.getElementById(newStep);
-                const firstInput = step && step.querySelector('input');
-                if(firstInput){
-                    firstInput.focus();
-                }
-            }, 100)
+            if(options.focus !== false){
+                this.focusStepHeading(newStep);
+            }
         },
 
         stopTimer(){

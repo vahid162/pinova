@@ -100,7 +100,7 @@ test('keyboard controls, image alternatives, and live feedback are explicit', ()
 });
 
 test('changed standalone assets use an account-specific cache revision', () => {
-    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.1'/);
+    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.2'/);
 
     for (const asset of [
         'assets/css/style.css',
@@ -139,6 +139,60 @@ test('the first step has no duplicate header exit control', () => {
         /pinova-show="stepName === 'loginByPassword' \|\| stepName === 'changePassword'"/,
     );
     assert.doesNotMatch(template, /pinova-show="stepName !== 'authenticate'"/);
+});
+
+test('identifier and password instructions are concise bold field labels', () => {
+    const authenticate = formMarkup('authenticate');
+    const password = formMarkup('loginByPassword');
+
+    assert.match(
+        authenticate,
+        /<label for="pinova-identifier">شماره موبایل، نام کاربری یا ایمیل خود را وارد کنید<\/label>/,
+    );
+    assert.doesNotMatch(authenticate, /<p[^>]*>شماره موبایل، نام کاربری یا ایمیل خود را وارد کنید\.<\/p>/);
+    assert.match(
+        password,
+        /<label for="pinova-password">رمز عبور خود را وارد کنید<\/label>/,
+    );
+    assert.doesNotMatch(password, /رمز عبور حساب خود را وارد کنید\./);
+    assert.match(accountCss, /\.pinova-auth-field label\s*{[^}]*font-weight:\s*800/is);
+});
+
+test('password controls are LTR with the visibility toggle on the right', () => {
+    for (const id of [
+        'pinova-password',
+        'pinova-password-new',
+        'pinova-password-confirm',
+    ]) {
+        assert.match(template, new RegExp(`id="${id}"[^>]*dir="ltr"[^>]*required`, 'i'));
+    }
+
+    assert.match(accountCss, /\.pinova-password-field\s*{[^}]*direction:\s*ltr/is);
+    assert.match(
+        accountCss,
+        /button\.pinova-password-toggle\s*{[^}]*right:\s*3px[^}]*left:\s*auto/is,
+    );
+    assert.match(
+        accountCss,
+        /\.pinova-password-field input\s*{[^}]*padding-right:\s*54px[^}]*text-align:\s*left/is,
+    );
+});
+
+test('password alternatives are equal-width normal-weight link actions with a pipe', () => {
+    const password = formMarkup('loginByPassword');
+
+    assert.match(password, /class="pinova-auth-actions pinova-auth-actions--split"/);
+    assert.match(password, />ورود با رمز یک‌بارمصرف<\/button>/);
+    assert.match(password, />رمز عبور را فراموش کرده‌ام<\/button>/);
+    assert.match(
+        accountCss,
+        /\.pinova-auth-actions--split\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*50%\)/is,
+    );
+    assert.match(accountCss, /\.pinova-auth-actions--split::after\s*{[^}]*content:\s*"\|"/is);
+    assert.match(
+        accountCss,
+        /\.pinova-auth-actions--split button\s*{[^}]*width:\s*100%[^}]*font-weight:\s*400[^}]*text-decoration:\s*underline/is,
+    );
 });
 
 test('OTP steps keep the safe server copy and an explicit edit action', () => {
@@ -215,9 +269,18 @@ test('account stylesheet protects small screens, focus, and touch targets', () =
     assert.match(accountCss, /\.pinova-auth-card\s*{[^}]*direction:\s*rtl/is);
     assert.match(
         accountCss,
-        /\.pinova-auth-logo\s*{[^}]*max-width:\s*calc\(100%\s*-\s*104px\)/is,
+        /\.pinova-auth-logo\s*{[^}]*left:\s*50%[^}]*width:\s*min\(240px,\s*calc\(100%\s*-\s*104px\)\)[^}]*transform:\s*translate\(-50%,\s*-50%\)/is,
     );
+    assert.match(accountCss, /\.pinova-auth-logo img\s*{[^}]*object-fit:\s*contain/is);
     assert.match(accountCss, /@media\s*\(max-width:\s*420px\)/i);
+    assert.match(
+        accountCss,
+        /@media\s*\(max-width:\s*420px\)[\s\S]*\.pinova-auth-main\s*{[^}]*flex:\s*1 0 auto[^}]*justify-content:\s*center/is,
+    );
+    assert.match(
+        accountCss,
+        /@media\s*\(max-width:\s*420px\)[\s\S]*\.pinova-auth-logo\s*{[^}]*width:\s*min\(210px,\s*calc\(100%\s*-\s*104px\)\)[^}]*height:\s*70px/is,
+    );
     assert.match(accountCss, /@media\s*\(forced-colors:\s*active\)/i);
     assert.match(accountCss, /outline-color:\s*Highlight/i);
     assert.match(accountCss, /env\(safe-area-inset-top,\s*0px\)/i);

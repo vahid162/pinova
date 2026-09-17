@@ -13,7 +13,7 @@ $site_name            = get_bloginfo( 'name' );
 $home_url             = home_url( '/' );
 $privacy_url          = get_privacy_policy_url();
 $logo_url             = Pinova::get_option( 'design.logo', admin_url( 'images/wordpress-logo.svg' ) );
-$account_asset_version = PINOVA_VERSION . '.1';
+$account_asset_version = PINOVA_VERSION . '.2';
 
 ?>
 <!DOCTYPE html>
@@ -78,6 +78,8 @@ $account_asset_version = PINOVA_VERSION . '.1';
                 </a>
             </header>
 
+            <div class="pinova-auth-main">
+
             <div
                 pinova-cloak
                 pinova-show="status.message"
@@ -91,9 +93,8 @@ $account_asset_version = PINOVA_VERSION . '.1';
             <template pinova-if="stepName === 'authenticate'">
                 <form id="authenticate" class="pinova-auth-form" pinova-on:submit.prevent="submit()" novalidate>
                     <h2 data-pinova-step-heading tabindex="-1">ورود / ثبت‌نام</h2>
-                    <p class="pinova-auth-description">شماره موبایل، نام کاربری یا ایمیل خود را وارد کنید.</p>
-                    <div class="pinova-auth-field">
-                        <label for="pinova-identifier">شماره موبایل، نام کاربری یا ایمیل</label>
+                    <div class="pinova-auth-field pinova-auth-field--lead">
+                        <label for="pinova-identifier">شماره موبایل، نام کاربری یا ایمیل خود را وارد کنید</label>
                         <input id="pinova-identifier" pinova-model="forms.authenticate.inputs.identifier.value" pinova-bind:aria-invalid="Boolean(forms.authenticate.inputs.identifier.errorMsg)" aria-describedby="pinova-identifier-error" name="username" type="text" autocomplete="username" autocapitalize="none" dir="auto" required>
                         <p id="pinova-identifier-error" class="pinova-auth-error" pinova-show="forms.authenticate.inputs.identifier.errorMsg" pinova-text="forms.authenticate.inputs.identifier.errorMsg" role="alert" aria-atomic="true"></p>
                     </div>
@@ -134,11 +135,10 @@ $account_asset_version = PINOVA_VERSION . '.1';
             <template pinova-if="stepName === 'loginByPassword'">
                 <form id="loginByPassword" class="pinova-auth-form" pinova-on:submit.prevent="submit()" novalidate>
                     <h2 data-pinova-step-heading tabindex="-1">ورود با رمز عبور</h2>
-                    <p class="pinova-auth-description">رمز عبور حساب خود را وارد کنید.</p>
-                    <div class="pinova-auth-field">
-                        <label for="pinova-password">رمز عبور</label>
+                    <div class="pinova-auth-field pinova-auth-field--lead">
+                        <label for="pinova-password">رمز عبور خود را وارد کنید</label>
                         <div pinova-data="{typeIsPassword: true}" class="pinova-password-field">
-                            <input id="pinova-password" pinova-model="forms.loginByPassword.inputs.password.value" pinova-bind:type="typeIsPassword ? 'password' : 'text'" pinova-bind:aria-invalid="Boolean(forms.loginByPassword.inputs.password.errorMsg)" aria-describedby="pinova-password-error" autocomplete="current-password" required>
+                            <input id="pinova-password" pinova-model="forms.loginByPassword.inputs.password.value" pinova-bind:type="typeIsPassword ? 'password' : 'text'" pinova-bind:aria-invalid="Boolean(forms.loginByPassword.inputs.password.errorMsg)" aria-describedby="pinova-password-error" autocomplete="current-password" dir="ltr" required>
                             <button class="pinova-password-toggle" pinova-on:click="typeIsPassword = !typeIsPassword" pinova-bind:aria-label="typeIsPassword ? 'نمایش رمز عبور' : 'پنهان کردن رمز عبور'" type="button">
                                 <img pinova-show="typeIsPassword" src="<?php echo esc_url( PINOVA_URL . 'assets/images/icons/eye.svg' ); ?>" alt="" aria-hidden="true">
                                 <img pinova-show="!typeIsPassword" src="<?php echo esc_url( PINOVA_URL . 'assets/images/icons/eye-off.svg' ); ?>" alt="" aria-hidden="true">
@@ -146,7 +146,7 @@ $account_asset_version = PINOVA_VERSION . '.1';
                         </div>
                         <p id="pinova-password-error" class="pinova-auth-error" pinova-show="forms.loginByPassword.inputs.password.errorMsg" pinova-text="forms.loginByPassword.inputs.password.errorMsg" role="alert" aria-atomic="true"></p>
                     </div>
-                    <div class="pinova-auth-actions">
+                    <div class="pinova-auth-actions pinova-auth-actions--split">
                         <button pinova-on:click="authenticate({force_otp: '1'}, 'loginByOtp')" type="button">ورود با رمز یک‌بارمصرف</button>
                         <button pinova-on:click="authenticate({forget: '1'}, 'forgotPassword')" type="button">رمز عبور را فراموش کرده‌ام</button>
                     </div>
@@ -223,7 +223,7 @@ $account_asset_version = PINOVA_VERSION . '.1';
                     <div class="pinova-auth-field">
                         <label for="pinova-password-new">رمز عبور جدید</label>
                         <div pinova-data="{typeIsPassword: true}" class="pinova-password-field">
-                            <input id="pinova-password-new" pinova-model="forms.changePassword.inputs.password_1.value" pinova-bind:type="typeIsPassword ? 'password' : 'text'" pinova-bind:aria-invalid="Boolean(forms.changePassword.inputs.password_1.errorMsg)" aria-describedby="pinova-password-new-error pinova-password-guidance" autocomplete="new-password" required>
+                            <input id="pinova-password-new" pinova-model="forms.changePassword.inputs.password_1.value" pinova-bind:type="typeIsPassword ? 'password' : 'text'" pinova-bind:aria-invalid="Boolean(forms.changePassword.inputs.password_1.errorMsg)" aria-describedby="pinova-password-new-error pinova-password-guidance" autocomplete="new-password" dir="ltr" required>
                             <button class="pinova-password-toggle" pinova-on:click="typeIsPassword = !typeIsPassword" pinova-bind:aria-label="typeIsPassword ? 'نمایش رمز عبور جدید' : 'پنهان کردن رمز عبور جدید'" type="button">
                                 <img pinova-show="typeIsPassword" src="<?php echo esc_url( PINOVA_URL . 'assets/images/icons/eye.svg' ); ?>" alt="" aria-hidden="true">
                                 <img pinova-show="!typeIsPassword" src="<?php echo esc_url( PINOVA_URL . 'assets/images/icons/eye-off.svg' ); ?>" alt="" aria-hidden="true">
@@ -243,7 +243,7 @@ $account_asset_version = PINOVA_VERSION . '.1';
                     <div class="pinova-auth-field">
                         <label for="pinova-password-confirm">تکرار رمز عبور</label>
                         <div pinova-data="{typeIsPassword: true}" class="pinova-password-field">
-                            <input id="pinova-password-confirm" pinova-model="forms.changePassword.inputs.password_2.value" pinova-bind:type="typeIsPassword ? 'password' : 'text'" pinova-bind:aria-invalid="Boolean(forms.changePassword.inputs.password_2.errorMsg)" aria-describedby="pinova-password-confirm-error" autocomplete="new-password" required>
+                            <input id="pinova-password-confirm" pinova-model="forms.changePassword.inputs.password_2.value" pinova-bind:type="typeIsPassword ? 'password' : 'text'" pinova-bind:aria-invalid="Boolean(forms.changePassword.inputs.password_2.errorMsg)" aria-describedby="pinova-password-confirm-error" autocomplete="new-password" dir="ltr" required>
                             <button class="pinova-password-toggle" pinova-on:click="typeIsPassword = !typeIsPassword" pinova-bind:aria-label="typeIsPassword ? 'نمایش تکرار رمز عبور' : 'پنهان کردن تکرار رمز عبور'" type="button">
                                 <img pinova-show="typeIsPassword" src="<?php echo esc_url( PINOVA_URL . 'assets/images/icons/eye.svg' ); ?>" alt="" aria-hidden="true">
                                 <img pinova-show="!typeIsPassword" src="<?php echo esc_url( PINOVA_URL . 'assets/images/icons/eye-off.svg' ); ?>" alt="" aria-hidden="true">
@@ -264,6 +264,7 @@ $account_asset_version = PINOVA_VERSION . '.1';
                     <a href="<?php echo esc_url( $privacy_url ); ?>">حریم خصوصی</a>
                 </footer>
             <?php endif; ?>
+            </div>
             </div>
         </section>
     </div>

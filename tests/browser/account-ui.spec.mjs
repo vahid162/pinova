@@ -55,6 +55,23 @@ async function mockOtpStart(page) {
     });
 }
 
+async function mockPasswordStart(page) {
+    await page.route(authenticateRoute, async route => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: responseBody({
+                success: true,
+                message: 'ورود با رمز عبور',
+                data: {
+                    login_method: 'password',
+                    ttl: 120,
+                },
+            }),
+        });
+    });
+}
+
 async function enterOtpStep(page) {
     await openLogin(page);
     await page.locator('#pinova-identifier').fill('09121234567');
@@ -157,6 +174,99 @@ test('real login page loads Yekan and preserves spacing, contrast, and one focus
     expect(focusStyle.outlineStyle).not.toBe('none');
     expect(focusStyle.outlineWidth).toBeGreaterThanOrEqual(2);
     expect(focusStyle.boxShadow).toBe('none');
+});
+
+test('logo stays centered and the mobile content group uses the remaining viewport', async ({ page }) => {
+    setCodeLength(4);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLogin(page);
+
+    const desktopLogo = await page.evaluate(() => {
+        const header = document.querySelector('.pinova-auth-header').getBoundingClientRect();
+        const logo = document.querySelector('.pinova-auth-logo').getBoundingClientRect();
+        return {
+            headerCenter: header.left + (header.width / 2),
+            logoCenter: logo.left + (logo.width / 2),
+            width: logo.width,
+            height: logo.height,
+        };
+    });
+    expect(Math.abs(desktopLogo.headerCenter - desktopLogo.logoCenter)).toBeLessThanOrEqual(1);
+    expect(desktopLogo.width).toBeCloseTo(240, 0);
+    expect(desktopLogo.height).toBeCloseTo(80, 0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const mobileLayout = await page.evaluate(() => {
+        const header = document.querySelector('.pinova-auth-header').getBoundingClientRect();
+        const logo = document.querySelector('.pinova-auth-logo').getBoundingClientRect();
+        const main = document.querySelector('.pinova-auth-main');
+        const mainRect = main.getBoundingClientRect();
+        const visibleChildren = [...main.children]
+            .filter(element => element.getBoundingClientRect().height > 0)
+            .map(element => element.getBoundingClientRect());
+        const groupTop = Math.min(...visibleChildren.map(rect => rect.top));
+        const groupBottom = Math.max(...visibleChildren.map(rect => rect.bottom));
+        return {
+            headerBottom: header.bottom,
+            headerCenter: header.left + (header.width / 2),
+            logoCenter: logo.left + (logo.width / 2),
+            logoWidth: logo.width,
+            logoHeight: logo.height,
+            mainTop: mainRect.top,
+            spaceBefore: groupTop - mainRect.top,
+            spaceAfter: mainRect.bottom - groupBottom,
+            justifyContent: getComputedStyle(main).justifyContent,
+        };
+    });
+
+    expect(Math.abs(mobileLayout.headerCenter - mobileLayout.logoCenter)).toBeLessThanOrEqual(1);
+    expect(mobileLayout.logoWidth).toBeCloseTo(210, 0);
+    expect(mobileLayout.logoHeight).toBeCloseTo(70, 0);
+    expect(mobileLayout.mainTop).toBeGreaterThanOrEqual(mobileLayout.headerBottom);
+    expect(mobileLayout.justifyContent).toBe('center');
+    expect(Math.abs(mobileLayout.spaceBefore - mobileLayout.spaceAfter)).toBeLessThanOrEqual(20);
+});
+
+test('password step uses an LTR field, right-side toggle, and split link actions', async ({ page }) => {
+    setCodeLength(4);
+    await mockPasswordStart(page);
+    await openLogin(page);
+    await page.locator('#pinova-identifier').fill('administrator');
+    await page.locator('#authenticate button[type="submit"]').click();
+    await expect(page.locator('#loginByPassword')).toBeVisible();
+
+    const presentation = await page.evaluate(() => {
+        const form = document.querySelector('#loginByPassword');
+        const field = form.querySelector('.pinova-password-field').getBoundingClientRect();
+        const input = form.querySelector('#pinova-password');
+        const toggle = form.querySelector('.pinova-password-toggle').getBoundingClientRect();
+        const actions = form.querySelector('.pinova-auth-actions--split');
+        const actionButtons = [...actions.querySelectorAll('button')];
+        const buttonRects = actionButtons.map(button => button.getBoundingClientRect());
+        const buttonStyles = actionButtons.map(button => getComputedStyle(button));
+        return {
+            descriptionPresent: Boolean(form.querySelector('.pinova-auth-description')),
+            label: form.querySelector('label[for="pinova-password"]').textContent.trim(),
+            inputDirection: getComputedStyle(input).direction,
+            inputTextAlign: getComputedStyle(input).textAlign,
+            toggleRightGap: Math.abs(field.right - toggle.right - 3),
+            widths: buttonRects.map(rect => rect.width),
+            fontWeights: buttonStyles.map(style => style.fontWeight),
+            decorations: buttonStyles.map(style => style.textDecorationLine),
+            separator: getComputedStyle(actions, '::after').content,
+        };
+    });
+
+    expect(presentation.descriptionPresent).toBe(false);
+    expect(presentation.label).toBe('رمز عبور خود را وارد کنید');
+    expect(presentation.inputDirection).toBe('ltr');
+    expect(presentation.inputTextAlign).toBe('left');
+    expect(presentation.toggleRightGap).toBeLessThanOrEqual(1);
+    expect(Math.abs(presentation.widths[0] - presentation.widths[1])).toBeLessThanOrEqual(1);
+    expect(presentation.fontWeights).toEqual(['400', '400']);
+    expect(presentation.decorations.every(value => value.includes('underline'))).toBe(true);
+    expect(presentation.separator).toBe('"|"');
 });
 
 test('blank validation announces the error and focuses the first invalid field', async ({ page }) => {

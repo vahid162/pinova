@@ -76,10 +76,20 @@ body.pinova-account-page input:focus-visible {
 
 .pinova-auth-card {
   position: relative;
+  display: flex;
   direction: rtl;
   width: 100%;
   padding: clamp(26px, 6vw, 50px) clamp(20px, 7vw, 56px) 28px;
   background: var(--gp-surface);
+}
+
+.pinova-auth-content,
+.pinova-auth-main {
+  width: 100%;
+}
+
+.pinova-auth-content {
+  flex: 1;
 }
 
 .pinova-auth-header {
@@ -87,7 +97,7 @@ body.pinova-account-page input:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 70px;
+  min-height: 88px;
   margin-bottom: 26px;
 }
 
@@ -119,20 +129,25 @@ body.pinova-account-page input:focus-visible {
   height: 22px;
 }
 
-.pinova-auth-logo {
+.pinova-account-page .pinova-auth-logo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: flex;
+  align-items: center;
   justify-content: center;
-  max-width: calc(100% - 104px);
-  min-height: 54px;
+  width: min(240px, calc(100% - 104px));
+  height: 80px;
   padding: 4px;
+  transform: translate(-50%, -50%);
 }
 
 .pinova-auth-logo img {
   display: block;
-  width: auto;
-  max-width: min(210px, 100%);
-  height: auto;
-  max-height: 70px;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
   object-fit: contain;
 }
 
@@ -186,6 +201,10 @@ body.pinova-account-page input:focus-visible {
   margin-bottom: 18px;
 }
 
+.pinova-auth-field--lead {
+  margin-top: 24px;
+}
+
 .pinova-auth-field label {
   display: block;
   margin-bottom: 8px;
@@ -220,7 +239,7 @@ body.pinova-account-page input:focus-visible {
   box-shadow: none;
 }
 
-.pinova-account-page .pinova-auth-field input[dir="ltr"] {
+.pinova-account-page .pinova-auth-code-field input[dir="ltr"] {
   text-align: center;
   letter-spacing: 0.45em;
 }
@@ -334,16 +353,21 @@ body.pinova-account-page input:focus-visible {
 
 .pinova-password-field {
   position: relative;
+  direction: ltr;
 }
 
 .pinova-account-page .pinova-password-field input {
-  padding-left: 54px;
+  padding-right: 54px;
+  padding-left: 14px;
+  text-align: left;
+  letter-spacing: normal;
 }
 
 .pinova-account-page button.pinova-password-toggle {
   position: absolute;
   top: 3px;
-  left: 3px;
+  right: 3px;
+  left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -491,6 +515,37 @@ body.pinova-account-page input:focus-visible {
   text-decoration: underline;
   text-decoration-color: var(--gp-orange);
   text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+.pinova-auth-actions--split {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, 50%);
+  gap: 0;
+  width: 100%;
+}
+
+.pinova-auth-actions--split::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  color: var(--gp-muted);
+  content: "|";
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.pinova-account-page .pinova-auth-actions--split button {
+  width: 100%;
+  min-width: 0;
+  padding-right: 18px;
+  padding-left: 18px;
+  font-weight: 400;
+  line-height: 1.7;
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+  text-decoration-thickness: 1px;
   text-underline-offset: 4px;
 }
 
@@ -676,9 +731,28 @@ body.pinova-account-page input:focus-visible {
     padding-left: max(16px, env(safe-area-inset-left, 0px));
   }
 
+  .pinova-auth-content {
+    display: flex;
+    flex-direction: column;
+  }
+
   .pinova-auth-header {
-    min-height: 58px;
-    margin-bottom: 20px;
+    flex: 0 0 auto;
+    min-height: 70px;
+    margin-bottom: 0;
+  }
+
+  .pinova-account-page .pinova-auth-logo {
+    width: min(210px, calc(100% - 104px));
+    height: 70px;
+  }
+
+  .pinova-auth-main {
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+    justify-content: center;
+    padding-top: 18px;
   }
 
   .pinova-auth-store-link {

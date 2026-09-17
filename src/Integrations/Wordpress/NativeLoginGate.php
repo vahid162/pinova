@@ -316,7 +316,7 @@ final class NativeLoginGate {
 
 		$stored = update_option( self::ARM_OPTION, $arm, false );
 
-		if ( false === $stored && $arm !== get_option( self::ARM_OPTION, null ) ) {
+		if ( false === $stored && get_option( self::ARM_OPTION, null ) !== $arm ) {
 			return;
 		}
 

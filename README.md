@@ -7,7 +7,7 @@
 - تاریخچهٔ نسخه‌ها: [CHANGELOG.md](CHANGELOG.md)
 - مجوز: GPLv3
 
-> **وضعیت انتشار:** [`v1.2.6-rc6`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc6) پیش‌انتشار immutable و baseline نصب‌شدهٔ خط ۱.۲.x است. این نسخه از commit ادغام‌شدهٔ `c327c715` منتشر شده، Release آن `immutable: true` است، کنترل‌های CI و attestation موفق بوده‌اند و بازدانلود مستقل فایل [`pinova-1.2.6.zip`](https://github.com/vahid162/pinova/releases/download/v1.2.6-rc6/pinova-1.2.6.zip) مقدار SHA-256 برابر `612a0ef051ea46e9a05b3f352c867b6e4704bc56bdc380c04df29ebdd7886d43` را تأیید کرده است. بازبینی فقط‌خواندنی بعدی چند نقص دسترس‌پذیری صفحهٔ حساب و نبود قفل ایمنی فنی برای فعال‌سازی مسیر بومی را مشخص کرد؛ بنابراین RC1 تا RC6 بدون تغییر به‌عنوان سابقه حفظ می‌شوند و پیش از نصب تازه باید RC جدیدِ بازبینی‌شده و immutable منتشر و مستقل راستی‌آزمایی شود. RC6 هنوز stable/latest نیست و انتشار GitHub به‌تنهایی مجوز نصب روی production یا فعال‌سازی مسدودسازی مسیر بومی نیست.
+> **وضعیت انتشار:** [`v1.2.6-rc7`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc7) پیش‌انتشار immutable اصلاح‌شدهٔ خط ۱.۲.x و نامزد مرحلهٔ پذیرش جداگانه است. این نسخه از commit ادغام‌شدهٔ `539f49c` منتشر شده، Release آن `immutable: true` است، کنترل‌های CI و attestation موفق بوده‌اند و دو بازدانلود مستقل فایل [`pinova-1.2.6.zip`](https://github.com/vahid162/pinova/releases/download/v1.2.6-rc7/pinova-1.2.6.zip) مقدار SHA-256 یکسان `564e13f41d1e071be1975011633546aceb54e417a6adedea0e66c9803250dba3` را تأیید کرده‌اند. `v1.2.6-rc6` بدون تغییر baseline نصب‌شده باقی می‌ماند و RC1 تا RC6 بدون جابه‌جایی یا بازنویسی به‌عنوان سابقه حفظ می‌شوند. RC7 هنوز stable/latest نیست؛ انتشار GitHub به‌تنهایی مجوز نصب روی staging یا production، تغییر تنظیمات، یا فعال‌سازی مسدودسازی مسیر بومی نیست.
 
 ## امکانات خط ۱.۲.x
 

@@ -202,6 +202,7 @@ final class NativeLoginGateActivationIntegrationTest extends \WP_UnitTestCase {
 			[ '%s' ]
 		);
 		wp_cache_delete( 'pinova_advanced', 'options' );
+		wp_cache_delete( 'alloptions', 'options' );
 
 		self::assertSame( '1', $this->advanced_options()['block_native_login'] ?? null );
 		self::assertFalse( NativeLoginGate::is_enabled() );

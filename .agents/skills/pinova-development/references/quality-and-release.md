@@ -44,7 +44,7 @@ npm run test:browser
 npm run env:stop
 ```
 
-The `Account UI / Stage 1 Chromium` CI job owns this lifecycle for pull requests and release branches, including a unique Compose project/home, the web- and development-CLI-container `pdo_mysql` prerequisite, failure diagnostics, and unconditional environment teardown. Do not start it on the shared production host.
+The `Account UI / Stage 1 Chromium` CI job owns this lifecycle for pull requests and release branches, including a unique Compose project/home, the web- and development-CLI-container `pdo_mysql` prerequisite, failure diagnostics, and unconditional environment teardown. Keep the Playwright base URL on `localhost`, matching wp-env's generated WordPress URLs, so module scripts and fonts stay same-origin. Use `wp-env destroy --force` for non-interactive teardown. Do not start it on the shared production host.
 
 Run integration tests only in an isolated WordPress environment:
 

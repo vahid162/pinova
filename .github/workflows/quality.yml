@@ -41,7 +41,7 @@ jobs:
     timeout-minutes: 30
     env:
       COMPOSE_PROJECT_NAME: pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
-      PLAYWRIGHT_BASE_URL: http://127.0.0.1:8890
+      PLAYWRIGHT_BASE_URL: http://localhost:8890
       # The runner context is unavailable in job-level env expressions.
       WP_ENV_HOME: /tmp/pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
       WP_ENV_PORT: '8890'
@@ -90,7 +90,7 @@ jobs:
       - name: Destroy the disposable browser environment
         if: always()
         continue-on-error: true
-        run: npx wp-env destroy
+        run: npx wp-env destroy --force
 
   php:
     runs-on: ubuntu-latest

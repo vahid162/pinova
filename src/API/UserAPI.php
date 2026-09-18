@@ -127,6 +127,7 @@ class UserAPI extends RestAPI {
 		$user         = $user_id ? get_userdata( $user_id ) : false;
 		$native_only  = $user instanceof WP_User && UserService::is_native_only( $user );
 		$login_method = ( $identifier->is_mobile() || $force_otp || $forget ) ? 'otp' : 'password';
+		$otp_type     = $forget ? OTP::TYPE_FORGET : ( $user_id ? OTP::TYPE_LOGIN : OTP::TYPE_REGISTER );
 		$data         = [
 			'login_method' => $login_method,
 			'ttl'          => JWT::DEFAULT_TTL,
@@ -165,6 +166,7 @@ class UserAPI extends RestAPI {
 		/** @var OTP|null $current_otp */
 		$current_otp = OTP::query()
 			->where( 'identifier', $identifier->get_value() )
+			->where( 'type', $otp_type )
 			->whereNull( 'verified_at' )
 			->where( 'expires_at', '>', Carbon::now() )
 			->first();
@@ -178,16 +180,10 @@ class UserAPI extends RestAPI {
 		}
 
 		try {
-			$type = $user_id ? OTP::TYPE_LOGIN : OTP::TYPE_REGISTER;
-
-			if ( $forget ) {
-				$type = OTP::TYPE_FORGET;
-			}
-
 			[ $data['jwt'], $successful_channels ] = OTPService::create(
 				$identifier,
 				ChannelService::get_channels( $identifier ),
-				$type,
+				$otp_type,
 				$user_id
 			);
 			$message = ChannelService::get_message( $successful_channels, $identifier );
@@ -297,7 +293,7 @@ class UserAPI extends RestAPI {
 		$code = $request->get_param( 'code' );
 
 		try {
-			$user = OTPService::verify( $jwt, $code );
+			$user = OTPService::verify( $jwt, $code, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ] );
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
@@ -324,7 +320,7 @@ class UserAPI extends RestAPI {
 		$code = $request->get_param( 'code' );
 
 		try {
-			$user = OTPService::verify( $jwt, $code );
+			$user = OTPService::verify( $jwt, $code, [ OTP::TYPE_FORGET ] );
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {

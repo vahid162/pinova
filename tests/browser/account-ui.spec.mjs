@@ -517,6 +517,71 @@ test('checkout errors stay inline and the explicit login action opens an accessi
     expect(closedState.password).toBe('');
 });
 
+test('checkout modal remains dismissible while an authentication request is pending', async ({ page }) => {
+    setCodeLength(4);
+    let releaseRequest;
+    const requestGate = new Promise(resolve => {
+        releaseRequest = resolve;
+    });
+
+    await page.route(authenticateRoute, async route => {
+        await requestGate;
+        try {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: responseBody({
+                    success: true,
+                    message: null,
+                    data: { login_method: 'password', ttl: 120 },
+                }),
+            });
+        } catch {
+            // Closing the modal aborts the browser request before this delayed response is released.
+        }
+    });
+
+    await openCheckout(page);
+    const opener = page.locator('.showlogin').first();
+    const modalViewport = page.locator('.pinova-auth-modal__viewport');
+    const modalMain = page.locator('#pinovaLoginModal .pinova-auth-main');
+    const closeButton = page.locator('#pinovaLoginModal .pinova-auth-close-button');
+
+    try {
+        await opener.click();
+        await page.locator('#pinova-modal-identifier').fill('buyer@example.test');
+        await page.locator('#pinova-modal-authenticate button[type="submit"]').click();
+
+        await expect(page.locator('#pinovaLoginModal .pinova-auth-layout')).toHaveAttribute('aria-busy', 'true');
+        await expect.poll(() => modalMain.evaluate(element => element.inert)).toBe(true);
+        await expect(closeButton).toBeVisible();
+        await expect(closeButton).toBeEnabled();
+        await closeButton.click();
+
+        await expect(modalViewport).toBeHidden();
+        await expect(opener).toBeFocused();
+
+        const closedState = await page.evaluate(() => {
+            const modal = document.querySelector('#pinovaLoginModal');
+            const state = modal._x_dataStack[0];
+            return {
+                busy: state.pageLoaderIsActive,
+                step: state.stepName,
+                bodyOverflow: document.body.style.overflow,
+                inertBackgroundCount: [...document.querySelectorAll('[inert]')]
+                    .filter(element => !modal.contains(element)).length,
+            };
+        });
+
+        expect(closedState.busy).toBe(false);
+        expect(closedState.step).toBe('authenticate');
+        expect(closedState.bodyOverflow).toBe('');
+        expect(closedState.inertBackgroundCount).toBe(0);
+    } finally {
+        releaseRequest();
+    }
+});
+
 test('checkout modal fills the supported mobile viewport without horizontal overflow', async ({ page }) => {
     setCodeLength(6);
     await page.setViewportSize({ width: 390, height: 844 });

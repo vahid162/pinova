@@ -9,6 +9,9 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
     pageLoaderIsActive: false,
     codeLength: pinova.code_length,
     returnFocusElement: null,
+    requestSequence: 0,
+    activeRequestId: 0,
+    activeRequestAbort: null,
     previousBodyOverflow: '',
     inertedElements: [],
     allowedSteps: [
@@ -252,7 +255,8 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
     },
 
     async authenticate(otherData = {}, nextStepName = null) {
-        if (!this.beginRequest()) {
+        const request = this.beginRequest();
+        if (!request) {
             return;
         }
 
@@ -270,9 +274,14 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 headers: {
                     nonce: null,
                 },
+                signal: request.signal,
                 form: true,
                 data,
             });
+
+            if (!this.requestIsCurrent(request)) {
+                return;
+            }
 
             if (result.success) {
                 const responseData = result.data || {};
@@ -305,15 +314,19 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 this.handleRequestFailure(result);
             }
         } catch (error) {
+            if (!this.requestIsCurrent(request)) {
+                return;
+            }
             console.error('Pinova authentication request failed:', error);
             this.handleRequestException();
         } finally {
-            this.endRequest();
+            this.endRequest(request);
         }
     },
 
     async loginByOtp() {
-        if (!this.beginRequest()) {
+        const request = this.beginRequest();
+        if (!request) {
             return;
         }
 
@@ -333,9 +346,14 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 headers: {
                     nonce: null,
                 },
+                signal: request.signal,
                 form: true,
                 data,
             });
+
+            if (!this.requestIsCurrent(request)) {
+                return;
+            }
 
             if (result.success) {
                 pinovaNotyf.success(result.message || 'درخواست با موفقیت انجام شد!');
@@ -350,15 +368,19 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 this.resetOtpAutoSubmit(formName);
             }
         } catch (error) {
+            if (!this.requestIsCurrent(request)) {
+                return;
+            }
             console.error('Pinova OTP login request failed:', error);
             this.handleRequestException();
         } finally {
-            this.endRequest();
+            this.endRequest(request);
         }
     },
 
     async loginByPassword() {
-        if (!this.beginRequest()) {
+        const request = this.beginRequest();
+        if (!request) {
             return;
         }
 
@@ -376,9 +398,14 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 headers: {
                     nonce: null,
                 },
+                signal: request.signal,
                 form: true,
                 data,
             });
+
+            if (!this.requestIsCurrent(request)) {
+                return;
+            }
 
             if (result.success) {
                 pinovaNotyf.success(result.message || 'درخواست با موفقیت انجام شد!');
@@ -391,15 +418,19 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 this.handleRequestFailure(result);
             }
         } catch (error) {
+            if (!this.requestIsCurrent(request)) {
+                return;
+            }
             console.error('Pinova password login request failed:', error);
             this.handleRequestException();
         } finally {
-            this.endRequest();
+            this.endRequest(request);
         }
     },
 
     async forgotPassword() {
-        if (!this.beginRequest()) {
+        const request = this.beginRequest();
+        if (!request) {
             return;
         }
 
@@ -417,9 +448,14 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 headers: {
                     nonce: null,
                 },
+                signal: request.signal,
                 form: true,
                 data,
             });
+
+            if (!this.requestIsCurrent(request)) {
+                return;
+            }
 
             if (result.success) {
                 const responseData = result.data || {};
@@ -432,15 +468,19 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 this.resetOtpAutoSubmit('forgotPassword');
             }
         } catch (error) {
+            if (!this.requestIsCurrent(request)) {
+                return;
+            }
             console.error('Pinova password recovery request failed:', error);
             this.handleRequestException();
         } finally {
-            this.endRequest();
+            this.endRequest(request);
         }
     },
 
     async changePassword() {
-        if (!this.beginRequest()) {
+        const request = this.beginRequest();
+        if (!request) {
             return;
         }
 
@@ -458,9 +498,14 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 headers: {
                     nonce: null,
                 },
+                signal: request.signal,
                 form: true,
                 data,
             });
+
+            if (!this.requestIsCurrent(request)) {
+                return;
+            }
 
             if (result.success) {
                 pinovaNotyf.success(result.message || 'درخواست با موفقیت انجام شد!');
@@ -469,10 +514,13 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 this.handleRequestFailure(result);
             }
         } catch (error) {
+            if (!this.requestIsCurrent(request)) {
+                return;
+            }
             console.error('Pinova password change request failed:', error);
             this.handleRequestException();
         } finally {
-            this.endRequest();
+            this.endRequest(request);
         }
     },
 
@@ -496,16 +544,46 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
 
     beginRequest() {
         if (this.pageLoaderIsActive) {
-            return false;
+            return null;
         }
+
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const request = {
+            id: ++this.requestSequence,
+            signal: controller ? controller.signal : null,
+        };
 
         this.clearStatus();
         this.pageLoaderIsActive = true;
-        return true;
+        this.activeRequestId = request.id;
+        this.activeRequestAbort = controller ? () => controller.abort() : null;
+
+        return request;
     },
 
-    endRequest() {
+    requestIsCurrent(request) {
+        return Boolean(request) && this.activeRequestId === request.id;
+    },
+
+    endRequest(request) {
+        if (!this.requestIsCurrent(request)) {
+            return;
+        }
+
+        this.activeRequestId = 0;
+        this.activeRequestAbort = null;
         this.pageLoaderIsActive = false;
+    },
+
+    cancelRequest() {
+        const abort = this.activeRequestAbort;
+        this.activeRequestId = 0;
+        this.activeRequestAbort = null;
+        this.pageLoaderIsActive = false;
+
+        if (typeof abort === 'function') {
+            abort();
+        }
     },
 
     handleOtpInput(formName) {
@@ -790,11 +868,12 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
     },
 
     closeModal() {
-        if (!this.modalIsOpen || this.pageLoaderIsActive) {
+        if (!this.modalIsOpen) {
             return;
         }
 
         const returnFocusElement = this.returnFocusElement;
+        this.cancelRequest();
         this.modalIsOpen = false;
         this.resetModalState();
         this.unlockPageInteraction();

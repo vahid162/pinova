@@ -162,8 +162,16 @@ async function pinovaApiRequest(url, options = {}) {
     }
     delete requestHeaders.nonce;
 
-    const controller = signal ? null : new AbortController();
-    const timeoutId = controller && timeout > 0
+    const controller = new AbortController();
+    const forwardAbort = () => controller.abort();
+    if (signal) {
+        if (signal.aborted) {
+            forwardAbort();
+        } else {
+            signal.addEventListener('abort', forwardAbort, { once: true });
+        }
+    }
+    const timeoutId = timeout > 0
         ? setTimeout(() => controller.abort(), timeout)
         : null;
 
@@ -171,7 +179,7 @@ async function pinovaApiRequest(url, options = {}) {
         const fetchOptions = {
             method,
             headers: requestHeaders,
-            signal: signal || controller.signal
+            signal: controller.signal
         };
 
         if (data && method !== 'GET') {
@@ -214,6 +222,9 @@ async function pinovaApiRequest(url, options = {}) {
         }
         throw err;
     } finally {
+        if (signal) {
+            signal.removeEventListener('abort', forwardAbort);
+        }
         if (timeoutId !== null) {
             clearTimeout(timeoutId);
         }

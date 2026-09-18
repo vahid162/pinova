@@ -43,7 +43,7 @@ $home_url  = home_url( '/' );
                         <span>در حال پردازش درخواست…</span>
                     </div>
 
-                    <div class="pinova-auth-content" pinova-bind:inert="pageLoaderIsActive">
+                    <div class="pinova-auth-content">
                         <h2 id="pinova-checkout-dialog-title" class="pinova-visually-hidden">ورود یا ثبت‌نام در <?php echo esc_html( $site_name ); ?></h2>
 
                         <header class="pinova-auth-header">
@@ -51,6 +51,7 @@ $home_url  = home_url( '/' );
                                 pinova-cloak
                                 pinova-show="stepName === 'loginByPassword' || stepName === 'changePassword'"
                                 pinova-on:click="backStep()"
+                                pinova-bind:inert="pageLoaderIsActive"
                                 class="pinova-auth-icon-button"
                                 type="button"
                                 aria-label="بازگشت به مرحله قبل"
@@ -58,13 +59,12 @@ $home_url  = home_url( '/' );
                                 <img src="<?php echo esc_url( PINOVA_URL . 'assets/images/icons/arrow-right.svg' ); ?>" alt="" aria-hidden="true">
                             </button>
 
-                            <a class="pinova-auth-logo" href="<?php echo esc_url( $home_url ); ?>" aria-label="بازگشت به <?php echo esc_attr( $site_name ); ?>">
+                            <a class="pinova-auth-logo" href="<?php echo esc_url( $home_url ); ?>" pinova-bind:inert="pageLoaderIsActive" aria-label="بازگشت به <?php echo esc_attr( $site_name ); ?>">
                                 <img pinova-bind:src="logo" alt="لوگوی <?php echo esc_attr( $site_name ); ?>">
                             </a>
 
                             <button
                                 pinova-on:click="closeModal()"
-                                pinova-bind:disabled="pageLoaderIsActive"
                                 class="pinova-auth-close-button"
                                 type="button"
                                 aria-label="بستن پنجرهٔ ورود"
@@ -73,7 +73,7 @@ $home_url  = home_url( '/' );
                             </button>
                         </header>
 
-                        <div class="pinova-auth-main">
+                        <div class="pinova-auth-main" pinova-bind:inert="pageLoaderIsActive">
                             <div
                                 pinova-cloak
                                 pinova-show="status.message"

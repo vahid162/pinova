@@ -69,7 +69,7 @@ Adding a context key requires all of:
 | `otp.created` | info | OTP record was created and at least one channel succeeded |
 | `otp.delivery_failed` | error | No usable OTP delivery completed |
 | `otp.channel_send_failed` | warning | One configured channel threw or failed |
-| `otp.verify_failed` | notice/warning | Verification failed; IP mismatch is warning |
+| `otp.verify_failed` | notice/warning | Verification failed because the token, record, code, purpose, state, block, or IP was invalid; IP mismatch is warning |
 | `otp.verified` | info | OTP was verified |
 | `security.rate_limited` | warning | A subject entered the limited state for one window |
 | `security.block_added` | notice | An administrator added or updated a block |

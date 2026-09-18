@@ -100,7 +100,7 @@ test('keyboard controls, image alternatives, and live feedback are explicit', ()
 });
 
 test('changed standalone assets use an account-specific cache revision', () => {
-    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.3'/);
+    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.4'/);
 
     for (const asset of [
         'assets/css/style.css',
@@ -248,6 +248,13 @@ test('OTP steps keep verification primary and resend secondary to the task', () 
             `${id} alternate password method should come after resend`,
         );
     }
+});
+
+test('password recovery resend remains in the recovery workflow', () => {
+    assert.match(
+        formMarkup('forgotPassword'),
+        /authenticate\(\{forget: '1', force_otp: '1'\}, 'forgotPassword'\)/,
+    );
 });
 
 test('OTP guidance follows the configured code length without hard-coding four digits', () => {

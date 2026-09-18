@@ -6,6 +6,10 @@ const template = await readFile(
     new URL('../../templates/login-form.php', import.meta.url),
     'utf8',
 );
+const themePartial = await readFile(
+    new URL('../../templates/login-partial.php', import.meta.url),
+    'utf8',
+);
 const accountCss = await readFile(
     new URL('../../assets/css/account.css', import.meta.url),
     'utf8',
@@ -100,7 +104,7 @@ test('keyboard controls, image alternatives, and live feedback are explicit', ()
 });
 
 test('changed standalone assets use an account-specific cache revision', () => {
-    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.3'/);
+    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.4'/);
 
     for (const asset of [
         'assets/css/style.css',
@@ -248,6 +252,17 @@ test('OTP steps keep verification primary and resend secondary to the task', () 
             `${id} alternate password method should come after resend`,
         );
     }
+});
+
+test('password recovery resend remains in the recovery workflow', () => {
+    assert.match(
+        formMarkup('forgotPassword'),
+        /authenticate\(\{forget: '1', force_otp: '1'\}, 'forgotPassword'\)/,
+    );
+    assert.match(
+        themePartial,
+        /authenticate\(\{forget\s*:\s*'1', force_otp\s*:\s*'1'\}, 'forgotPassword'\)/,
+    );
 });
 
 test('OTP guidance follows the configured code length without hard-coding four digits', () => {

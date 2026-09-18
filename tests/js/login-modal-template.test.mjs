@@ -35,14 +35,21 @@ test('checkout authentication is a labelled modal with explicit close behavior',
     assert.doesNotMatch(template, /<div[^>]*pinova-on:click=/i);
 });
 
-test('modal busy state is announced and makes its content inert', () => {
+test('modal busy state is announced, keeps task content inert, and leaves close available', () => {
     assert.match(template, /pinova-bind:aria-busy="pageLoaderIsActive"/);
     assert.match(template, /class="pinova-auth-loader"[\s\S]*role="status"/);
     assert.match(template, /aria-live="polite"/);
     assert.match(
         template,
-        /class="pinova-auth-content"[^>]*pinova-bind:inert="pageLoaderIsActive"/,
+        /class="pinova-auth-main"[^>]*pinova-bind:inert="pageLoaderIsActive"/,
     );
+    assert.match(template, /class="pinova-auth-logo"[^\n]*pinova-bind:inert="pageLoaderIsActive"/);
+
+    const closeButton = template.match(
+        /<button(?=[^>]*class="pinova-auth-close-button")[^>]*>/,
+    );
+    assert.ok(closeButton);
+    assert.doesNotMatch(closeButton[0], /pinova-bind:disabled=/);
 });
 
 test('every modal step is a semantic form with native required fields and live errors', () => {
@@ -122,7 +129,7 @@ test('modal uses the shared branded account stylesheet with a cache revision', (
         wooLoader,
         /wp_enqueue_script\(\s*'pinova-login-modal'[\s\S]*\[\s*'pinova-global'\s*\]/,
     );
-    assert.match(wooLoader, /PINOVA_VERSION\s*\.\s*'\.3'/);
+    assert.match(wooLoader, /PINOVA_VERSION\s*\.\s*'\.4'/);
 });
 
 test('modal is rendered outside the checkout form and replaceable fragments', () => {

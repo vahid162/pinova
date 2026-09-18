@@ -66,7 +66,7 @@ class OTP extends Model {
 
 		$types = Arr::wrap( $types );
 
-		return in_array( $this->type, $types );
+		return in_array( $this->type, $types, true );
 	}
 
 	public function isVerified(): bool {

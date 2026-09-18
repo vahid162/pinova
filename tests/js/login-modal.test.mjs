@@ -103,6 +103,7 @@ function harness(
         clearInterval(id) {
             clearedIntervals.push(id);
         },
+        AbortController,
         console: { error() {}, log() {} },
         document,
         location,
@@ -220,6 +221,50 @@ test('closing clears secrets, restores the page, and returns focus to the opener
     assert.equal(pageContent.inert, false);
     assert.equal(pageContent.getAttribute('aria-hidden'), null);
     assert.equal(returnedFocus, true);
+});
+
+test('closing while busy aborts the request, ignores a late response, and restores checkout', async () => {
+    let resolveRequest;
+    let requestSignal;
+    const pendingResponse = new Promise(resolve => {
+        resolveRequest = resolve;
+    });
+    const { pageContent, state } = harness((url, options) => {
+        requestSignal = options.signal;
+        return pendingResponse;
+    });
+    let returnedFocus = false;
+    const opener = {
+        focus() {
+            returnedFocus = true;
+        },
+    };
+
+    state.openModal('', opener);
+    state.forms.authenticate.inputs.identifier.value = 'buyer@example.test';
+    const request = state.authenticate();
+
+    assert.equal(state.pageLoaderIsActive, true);
+    assert.equal(requestSignal.aborted, false);
+
+    state.closeModal();
+
+    assert.equal(state.modalIsOpen, false);
+    assert.equal(state.pageLoaderIsActive, false);
+    assert.equal(requestSignal.aborted, true);
+    assert.equal(pageContent.inert, false);
+    assert.equal(returnedFocus, true);
+
+    resolveRequest({
+        success: true,
+        message: null,
+        data: { login_method: 'password', ttl: 120 },
+    });
+    await request;
+
+    assert.equal(state.modalIsOpen, false);
+    assert.equal(state.stepName, 'authenticate');
+    assert.equal(state.status.message, '');
 });
 
 test('modal OTP input normalizes digits and autosubmits each complete code exactly once', () => {

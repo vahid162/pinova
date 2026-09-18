@@ -861,6 +861,7 @@ body.pinova-account-page input:focus-visible {
   position: absolute;
   inset-inline-end: 0;
   top: 50%;
+  z-index: 21;
   display: inline-flex;
   align-items: center;
   justify-content: center;

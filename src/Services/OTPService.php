@@ -70,9 +70,11 @@ class OTPService {
 	}
 
 	/**
+	 * @param string[] $expected_types
+	 *
 	 * @throws Exception
 	 */
-	public static function verify( string $jwt, string $code ): \WP_User {
+	public static function verify( string $jwt, string $code, array $expected_types ): \WP_User {
 
 		try {
 			$payload = JWT::decode( $jwt );
@@ -86,6 +88,18 @@ class OTPService {
 			$otp = OTP::query()->findOrFail( absint( $payload['otp_id'] ?? 0 ) );
 		} catch ( \Throwable $e ) {
 			Logger::instance()->notice( 'otp.verify_failed', [ 'reason' => 'record_not_found', 'exception' => $e ] );
+			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
+		}
+
+		if ( ! $otp->hasType( $expected_types ) ) {
+			Logger::instance()->notice(
+				'otp.verify_failed',
+				[
+					'user_id'  => $otp->user_id,
+					'otp_type' => $otp->type,
+					'reason'   => 'purpose_mismatch',
+				]
+			);
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 

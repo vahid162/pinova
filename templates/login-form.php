@@ -13,7 +13,7 @@ $site_name            = get_bloginfo( 'name' );
 $home_url             = home_url( '/' );
 $privacy_url          = get_privacy_policy_url();
 $logo_url             = Pinova::get_option( 'design.logo', admin_url( 'images/wordpress-logo.svg' ) );
-$account_asset_version = PINOVA_VERSION . '.3';
+$account_asset_version = PINOVA_VERSION . '.4';
 
 ?>
 <!DOCTYPE html>
@@ -210,7 +210,7 @@ $account_asset_version = PINOVA_VERSION . '.3';
                         <p class="pinova-auth-resend-status" pinova-show="!time.btnResendIsActive">
                             ارسال دوبارهٔ کد تا <bdi pinova-text="time.textTime"></bdi> دیگر
                         </p>
-                        <button class="pinova-auth-resend-button" pinova-cloak pinova-show="time.btnResendIsActive" pinova-on:click="authenticate({forget: '1', force_otp: '1'})" type="button">ارسال دوبارهٔ کد</button>
+                        <button class="pinova-auth-resend-button" pinova-cloak pinova-show="time.btnResendIsActive" pinova-on:click="authenticate({forget: '1', force_otp: '1'}, 'forgotPassword')" type="button">ارسال دوبارهٔ کد</button>
                     </div>
                     <div class="pinova-auth-actions"><button pinova-on:click="changeStep('loginByPassword')" type="button">ورود با رمز عبور</button></div>
                 </form>

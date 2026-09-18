@@ -287,3 +287,46 @@ test('aborts a request after its bounded timeout', async () => {
         { name: 'AbortError' }
     );
 });
+
+test('combines caller cancellation with the bounded request timeout', async () => {
+    const callerController = new AbortController();
+    let fetchSignal;
+    const { request } = harness(async (url, options) => new Promise((resolve, reject) => {
+        fetchSignal = options.signal;
+        options.signal.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+        });
+    }));
+
+    const pending = request('pinova/user/authenticate', {
+        signal: callerController.signal,
+        timeout: 1000,
+    });
+    callerController.abort();
+
+    await assert.rejects(() => pending, { name: 'AbortError' });
+    assert.notEqual(fetchSignal, callerController.signal);
+    assert.equal(fetchSignal.aborted, true);
+});
+
+test('keeps the bounded timeout when the caller supplies a signal', async () => {
+    const callerController = new AbortController();
+    const { request } = harness(async (url, options) => new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+        });
+    }));
+
+    await assert.rejects(
+        () => request('pinova/user/authenticate', {
+            signal: callerController.signal,
+            timeout: 5,
+        }),
+        { name: 'AbortError' },
+    );
+    assert.equal(callerController.signal.aborted, false);
+});

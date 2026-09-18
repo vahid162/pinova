@@ -129,7 +129,7 @@ test('modal uses the shared branded account stylesheet with a cache revision', (
         wooLoader,
         /wp_enqueue_script\(\s*'pinova-login-modal'[\s\S]*\[\s*'pinova-global'\s*\]/,
     );
-    assert.match(wooLoader, /PINOVA_VERSION\s*\.\s*'\.4'/);
+    assert.match(wooLoader, /PINOVA_VERSION\s*\.\s*'\.5'/);
 });
 
 test('modal is rendered outside the checkout form and replaceable fragments', () => {
@@ -148,4 +148,48 @@ test('placeholder policy links are absent from the modal', () => {
     assert.doesNotMatch(template, /href=["']#["']/i);
     assert.doesNotMatch(template, />\s*شرایط\s*</);
     assert.doesNotMatch(template, />\s*قوانین\s*</);
+});
+
+
+test('modal close control is a direct card child outside header and inert task content', () => {
+    assert.match(
+        template,
+        /<div class="pinova-auth-card">\s*<button\s+pinova-on:click="closeModal\(\)"\s+class="pinova-auth-close-button"\s+type="button"\s+aria-label="بستن پنجرهٔ ورود"/,
+    );
+    assert.equal((template.match(/class="pinova-auth-close-button"/g) || []).length, 1);
+    const header = template.match(/<header class="pinova-auth-header">[\s\S]*?<\/header>/);
+    assert.ok(header);
+    assert.doesNotMatch(header[0], /pinova-auth-close-button/);
+    assert.match(header[0], /class="pinova-auth-icon-button"/);
+    assert.match(header[0], /class="pinova-auth-logo"/);
+
+    const close = template.match(/<button\s+pinova-on:click="closeModal\(\)"[\s\S]*?<\/button>/);
+    assert.ok(close);
+    assert.doesNotMatch(close[0], /pinova-(?:show|bind:(?:inert|disabled))=/);
+    assert.match(close[0], /assets\/images\/icons\/close\.svg/);
+});
+
+test('modal control CSS scopes positioning and anchors close to the safe card corner', () => {
+    const close = accountCss.match(/\.pinova-auth-modal \.pinova-auth-close-button \{([^}]+)\}/);
+    assert.ok(close);
+    for (const declaration of [
+        'position: absolute;',
+        'inset-inline-end: max(12px, env(safe-area-inset-left, 0px));',
+        'inset-inline-start: auto;',
+        'top: max(12px, env(safe-area-inset-top, 0px));',
+        'bottom: auto;',
+        'width: 44px;',
+        'height: 44px;',
+        'margin: 0;',
+        'z-index: 21;',
+        'transform: none;',
+    ]) {
+        assert.ok(close[1].includes(declaration), declaration);
+    }
+    assert.doesNotMatch(close[1], /!important/);
+    assert.doesNotMatch(accountCss, /^\.pinova-auth-close-button\b/m);
+    assert.match(accountCss, /\.pinova-auth-modal \.pinova-auth-icon-button \{\s*position: absolute;\s*\}/);
+
+    // The standalone account page retains its existing shared back-control rule.
+    assert.match(accountCss, /^\.pinova-auth-icon-button \{[\s\S]*?inset-inline-start: 0;[\s\S]*?transform: translateY\(-50%\);/m);
 });

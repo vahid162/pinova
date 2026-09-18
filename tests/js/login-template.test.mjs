@@ -104,7 +104,7 @@ test('keyboard controls, image alternatives, and live feedback are explicit', ()
 });
 
 test('changed standalone assets use an account-specific cache revision', () => {
-    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.4'/);
+    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.5'/);
 
     for (const asset of [
         'assets/css/style.css',

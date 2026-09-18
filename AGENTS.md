@@ -31,6 +31,10 @@ Before substantive work:
 
 Verify all facts before acting and update this section whenever lineage, release, compatibility, blocker, or milestone changes.
 
+## Checkout-modal positioning follow-up
+
+The scoped control-layout work starts from `main` commit `1d39ec04d5f6293d4ea3511480980fbc8912938d`, also the target of published `v1.2.6-rc9`. The Release API was rechecked: RC9 is a non-draft pre-release with `immutable: true`; the RC8 publication notes above are historical, not the current publication pointer. Do not infer a complete installed-file audit or fresh asset/attestation verification from this source check. The follow-up moves only the close control to the card corner, scopes modal close/back positioning against generic theme CSS, and advances the shared UI asset revision to `.5`. Preserve authentication JavaScript, logo/form markup, standalone layout rules, plugin version, and all published tags. The current authorization ends at a reviewable branch/PR with test evidence; merge, release, installation, and production changes remain separate gates.
+
 ## Next expected milestones
 
 1. Treat `v1.2.4-rc1` as superseded; do not install, retag, or overwrite it.

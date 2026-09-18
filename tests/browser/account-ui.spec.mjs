@@ -542,6 +542,7 @@ test('checkout modal remains dismissible while an authentication request is pend
     });
 
     await openCheckout(page);
+    await installThemeButtonPosition(page, 'after-account');
     const opener = page.locator('.showlogin').first();
     const modalViewport = page.locator('.pinova-auth-modal__viewport');
     const modalMain = page.locator('#pinovaLoginModal .pinova-auth-main');
@@ -751,3 +752,126 @@ test('six-slot OTP layout has no horizontal overflow across Stage 1 widths', asy
     expect(focusTreatment.outlineWidth).toBeGreaterThanOrEqual(2);
     expect(focusTreatment.boxShadow).toBe('none');
 });
+
+
+async function installThemeButtonPosition(page, placement) {
+    await page.evaluate(placement => {
+        // Reproduce the observed Woodmart rule without copying or requiring the theme.
+        const style = document.createElement('style');
+        style.id = 'pinova-test-theme-position';
+        style.textContent = ':is(.btn, .button, button, [type="submit"], [type="button"]) { position: relative; }';
+        const account = document.querySelector('#pinova-account-css');
+        if (!account) {
+            throw new Error('The real checkout account stylesheet is missing');
+        }
+        if (placement === 'before-account') {
+            account.before(style);
+        } else {
+            document.head.append(style);
+        }
+        const probe = document.createElement('button');
+        probe.id = 'pinova-test-outside-button';
+        probe.type = 'button';
+        probe.hidden = true;
+        document.body.append(probe);
+    }, placement);
+}
+
+for (const placement of ['before-account', 'after-account']) {
+    test(`checkout corner controls resist theme CSS ${placement} in every modal step`, async ({ page }) => {
+        test.setTimeout(90_000);
+        await openCheckout(page);
+        await installThemeButtonPosition(page, placement);
+        const opener = page.locator('.showlogin').first();
+        const modal = page.locator('#pinovaLoginModal');
+        const close = modal.locator('.pinova-auth-close-button');
+        await opener.click();
+        await expect(modal.locator('.pinova-auth-modal__viewport')).toBeVisible();
+        await page.evaluate(() => document.fonts.ready);
+        const logoSource = await modal.locator('.pinova-auth-logo img').getAttribute('src');
+
+        const sizes = [
+            [320, 568], [360, 800], [390, 844], [412, 915], [420, 800],
+            [421, 800], [768, 900], [1440, 1000], [844, 390], [390, 480],
+        ];
+        const steps = ['authenticate', 'signIn', 'loginByPassword', 'loginByOtp', 'forgotPassword', 'changePassword'];
+        for (const [width, height] of sizes) {
+            await page.setViewportSize({ width, height });
+            for (const step of steps) {
+                // Select presentation states only. No authentication request is sent.
+                await modal.evaluate((element, step) => element._x_dataStack[0].changeStep(step), step);
+                await expect(page.locator(`#pinova-modal-${step}`)).toBeVisible();
+                await modal.evaluate(async element => {
+                    element.querySelector('.pinova-auth-modal__dialog').scrollTop = 0;
+                    element.querySelector('.pinova-auth-modal__viewport').scrollTop = 0;
+                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                });
+                const geometry = await modal.evaluate(element => {
+                    const close = element.querySelector('.pinova-auth-close-button');
+                    const back = element.querySelector('.pinova-auth-icon-button');
+                    const card = element.querySelector('.pinova-auth-card');
+                    const header = element.querySelector('.pinova-auth-header');
+                    const logo = element.querySelector('.pinova-auth-logo');
+                    const c = close.getBoundingClientRect();
+                    const b = back.getBoundingClientRect();
+                    const k = card.getBoundingClientRect();
+                    const h = header.getBoundingClientRect();
+                    const l = logo.getBoundingClientRect();
+                    const overlaps = (a, b) => a.width > 0 && b.width > 0
+                        && a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+                    const hit = document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2);
+                    return {
+                        closePosition: getComputedStyle(close).position,
+                        backPosition: getComputedStyle(back).position,
+                        anchoredToCard: close.parentElement === card && close.offsetParent === card,
+                        insideHeader: header.contains(close),
+                        left: c.left - k.left,
+                        top: c.top - k.top,
+                        width: c.width,
+                        height: c.height,
+                        closeOverLogo: overlaps(c, l),
+                        backOverLogo: overlaps(b, l),
+                        controlsOverlap: overlaps(c, b),
+                        closeHit: hit === close || close.contains(hit),
+                        logoOffset: Math.abs((l.left + l.width / 2) - (h.left + h.width / 2)),
+                        overflow: element.querySelector('.pinova-auth-modal__viewport').scrollWidth > innerWidth + 1,
+                        outsidePosition: getComputedStyle(document.querySelector('#pinova-test-outside-button')).position,
+                    };
+                });
+                const label = `${placement} ${width}x${height} ${step}`;
+                expect(geometry.closePosition, label).toBe('absolute');
+                expect(geometry.backPosition, label).toBe('absolute');
+                expect(geometry.anchoredToCard, label).toBe(true);
+                expect(geometry.insideHeader, label).toBe(false);
+                expect(geometry.left, label).toBeCloseTo(12, 0);
+                expect(geometry.top, label).toBeCloseTo(12, 0);
+                expect(geometry.width, label).toBe(44);
+                expect(geometry.height, label).toBe(44);
+                expect(geometry.closeOverLogo, label).toBe(false);
+                expect(geometry.backOverLogo, label).toBe(false);
+                expect(geometry.controlsOverlap, label).toBe(false);
+                expect(geometry.closeHit, label).toBe(true);
+                expect(geometry.logoOffset, label).toBeLessThanOrEqual(1);
+                expect(geometry.overflow, label).toBe(false);
+                expect(geometry.outsidePosition, label).toBe('relative');
+                await expect(modal.locator('.pinova-auth-logo img')).toHaveAttribute('src', logoSource);
+            }
+        }
+
+        // Moving close before the header must preserve both directions of the focus trap.
+        const lastSubmit = page.locator('#pinova-modal-changePassword button[type="submit"]');
+        await close.focus();
+        await page.keyboard.press('Shift+Tab');
+        await expect(lastSubmit).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(close).toBeFocused();
+        await page.keyboard.press('Escape');
+        await expect(modal.locator('.pinova-auth-modal__viewport')).toBeHidden();
+        await expect(opener).toBeFocused();
+        await opener.click();
+        await expect(page.locator('#pinova-modal-authenticate')).toBeVisible();
+        await close.click();
+        await expect(modal.locator('.pinova-auth-modal__viewport')).toBeHidden();
+        await expect(opener).toBeFocused();
+    });
+}

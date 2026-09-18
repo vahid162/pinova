@@ -6,6 +6,62 @@ const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const authenticateRoute = '**/pinova/user/authenticate*';
 const otpRoute = '**/pinova/user/login/otp*';
 
+function prepareCheckoutFixture() {
+    const fixtureScript = String.raw`
+update_option('woocommerce_enable_guest_checkout', 'yes');
+update_option('woocommerce_enable_checkout_login_reminder', 'yes');
+\Pinova\Pinova::set_option('general.woocommerce_checkout_registration_required', 'no');
+
+$product_id = wc_get_product_id_by_sku('pinova-browser-modal-product');
+if (!$product_id) {
+    $product = new \WC_Product_Simple();
+    $product->set_name('Pinova browser modal product');
+    $product->set_slug('pinova-browser-modal-product');
+    $product->set_sku('pinova-browser-modal-product');
+    $product->set_regular_price('10000');
+    $product->set_status('publish');
+    $product_id = $product->save();
+}
+
+$checkout = get_page_by_path('pinova-browser-checkout', OBJECT, 'page');
+$checkout_data = [
+    'ID' => $checkout ? $checkout->ID : 0,
+    'post_type' => 'page',
+    'post_status' => 'publish',
+    'post_name' => 'pinova-browser-checkout',
+    'post_title' => 'Pinova browser checkout',
+    'post_content' => '[woocommerce_checkout]',
+];
+$checkout_id = $checkout ? wp_update_post($checkout_data) : wp_insert_post($checkout_data);
+update_option('woocommerce_checkout_page_id', $checkout_id);
+
+$fixture = get_page_by_path('pinova-browser-fixture', OBJECT, 'page');
+$fixture_data = [
+    'ID' => $fixture ? $fixture->ID : 0,
+    'post_type' => 'page',
+    'post_status' => 'publish',
+    'post_name' => 'pinova-browser-fixture',
+    'post_title' => 'Pinova browser fixture',
+    'post_content' => sprintf(
+        '<a id="pinova-test-add-to-cart" href="%s">Add fixture product</a>',
+        esc_url(home_url('/?add-to-cart=' . $product_id))
+    ),
+];
+$fixture ? wp_update_post($fixture_data) : wp_insert_post($fixture_data);
+`;
+
+    execFileSync(
+        'npx',
+        ['wp-env', 'run', 'cli', 'wp', 'eval', fixtureScript],
+        {
+            cwd: repositoryRoot,
+            encoding: 'utf8',
+            env: process.env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        },
+    );
+}
+
 function setCodeLength(length) {
     expect([4, 5, 6]).toContain(length);
     execFileSync(
@@ -36,6 +92,35 @@ async function openLogin(page) {
     expect(response?.ok()).toBe(true);
     await expect(page.locator('#authenticate')).toBeVisible();
 }
+
+async function openCheckout(page) {
+    const fixtureResponse = await page.goto('/pinova-browser-fixture/', {
+        waitUntil: 'domcontentloaded',
+    });
+    expect(fixtureResponse?.ok()).toBe(true);
+
+    const addToCartUrl = await page.locator('#pinova-test-add-to-cart').getAttribute('href');
+    expect(addToCartUrl).toContain('add-to-cart=');
+
+    await page.goto(addToCartUrl, {
+        waitUntil: 'domcontentloaded',
+    });
+    const checkoutResponse = await page.goto('/pinova-browser-checkout/', {
+        waitUntil: 'domcontentloaded',
+    });
+    expect(checkoutResponse?.ok()).toBe(true);
+
+    await expect(page.locator('#billing_phone')).toBeVisible();
+    await expect(page.locator('#pinovaLoginModal')).toBeAttached();
+    await expect(page.locator('form.checkout #pinovaLoginModal')).toHaveCount(0);
+    await page.waitForFunction(() => Boolean(
+        document.querySelector('#pinovaLoginModal')?._x_dataStack?.[0],
+    ));
+}
+
+test.beforeAll(() => {
+    prepareCheckoutFixture();
+});
 
 async function mockOtpStart(page) {
     await page.route(authenticateRoute, async route => {
@@ -328,6 +413,143 @@ test('busy state makes content inert and locks submit, resend, and alternate act
     }
 
     await expect.poll(() => content.evaluate(element => element.inert)).toBe(false);
+});
+
+test('checkout errors stay inline and the explicit login action opens an accessible modal', async ({ page }) => {
+    setCodeLength(4);
+    await mockPasswordStart(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openCheckout(page);
+
+    const modalViewport = page.locator('.pinova-auth-modal__viewport');
+    const phone = page.locator('#billing_phone');
+    await page.evaluate(() => {
+        const billingPhone = document.querySelector('#billing_phone');
+        billingPhone.closest('.form-row').classList.add('woocommerce-invalid-required-field');
+        window.jQuery(document.body).trigger('checkout_error');
+    });
+
+    await expect(modalViewport).toBeHidden();
+    await expect(phone).toBeFocused();
+
+    const opener = page.locator('.showlogin').first();
+    await opener.click();
+    await expect(modalViewport).toBeVisible();
+    await expect(page.locator('#pinova-modal-authenticate [data-pinova-step-heading]')).toBeFocused();
+
+    const openState = await page.evaluate(async () => {
+        await document.fonts.load('16px "Yekan Bakh FaNum"');
+        await document.fonts.ready;
+        const modal = document.querySelector('#pinovaLoginModal');
+        const dialog = modal.querySelector('[role="dialog"]');
+        const logo = modal.querySelector('.pinova-auth-logo').getBoundingClientRect();
+        const header = modal.querySelector('.pinova-auth-header').getBoundingClientRect();
+        return {
+            labelledBy: dialog.getAttribute('aria-labelledby'),
+            modal: dialog.getAttribute('aria-modal'),
+            bodyOverflow: document.body.style.overflow,
+            inertBackgroundCount: [...document.querySelectorAll('[inert]')]
+                .filter(element => !modal.contains(element)).length,
+            font: getComputedStyle(modal.querySelector('#pinova-modal-identifier')).fontFamily,
+            logoOffset: Math.abs(
+                (logo.left + (logo.width / 2)) - (header.left + (header.width / 2)),
+            ),
+        };
+    });
+
+    expect(openState.labelledBy).toBe('pinova-checkout-dialog-title');
+    expect(openState.modal).toBe('true');
+    expect(openState.bodyOverflow).toBe('hidden');
+    expect(openState.inertBackgroundCount).toBeGreaterThan(0);
+    expect(openState.font).toContain('Yekan Bakh FaNum');
+    expect(openState.logoOffset).toBeLessThanOrEqual(1);
+
+    await page.locator('#pinova-modal-identifier').fill('buyer@example.test');
+    await page.locator('#pinova-modal-authenticate button[type="submit"]').click();
+    await expect(page.locator('#pinova-modal-loginByPassword')).toBeVisible();
+    await expect(page.locator('#pinova-modal-loginByPassword [data-pinova-step-heading]')).toBeFocused();
+
+    const passwordPresentation = await page.evaluate(() => {
+        const form = document.querySelector('#pinova-modal-loginByPassword');
+        const field = form.querySelector('.pinova-password-field').getBoundingClientRect();
+        const input = form.querySelector('#pinova-modal-password');
+        const toggle = form.querySelector('.pinova-password-toggle').getBoundingClientRect();
+        const actions = form.querySelector('.pinova-auth-actions--split');
+        const buttons = [...actions.querySelectorAll('button')];
+        return {
+            direction: getComputedStyle(input).direction,
+            textAlign: getComputedStyle(input).textAlign,
+            toggleRightGap: Math.abs(field.right - toggle.right - 3),
+            widths: buttons.map(button => button.getBoundingClientRect().width),
+            weights: buttons.map(button => getComputedStyle(button).fontWeight),
+            separator: getComputedStyle(actions, '::after').content,
+        };
+    });
+
+    expect(passwordPresentation.direction).toBe('ltr');
+    expect(passwordPresentation.textAlign).toBe('left');
+    expect(passwordPresentation.toggleRightGap).toBeLessThanOrEqual(1);
+    expect(Math.abs(passwordPresentation.widths[0] - passwordPresentation.widths[1])).toBeLessThanOrEqual(1);
+    expect(passwordPresentation.weights).toEqual(['400', '400']);
+    expect(passwordPresentation.separator).toBe('"|"');
+
+    await page.keyboard.press('Escape');
+    await expect(modalViewport).toBeHidden();
+    await expect(opener).toBeFocused();
+
+    const closedState = await page.evaluate(() => {
+        const modal = document.querySelector('#pinovaLoginModal');
+        const state = modal._x_dataStack[0];
+        return {
+            bodyOverflow: document.body.style.overflow,
+            inertBackgroundCount: [...document.querySelectorAll('[inert]')]
+                .filter(element => !modal.contains(element)).length,
+            step: state.stepName,
+            identifier: state.forms.authenticate.inputs.identifier.value,
+            password: state.forms.loginByPassword.inputs.password.value,
+        };
+    });
+
+    expect(closedState.bodyOverflow).toBe('');
+    expect(closedState.inertBackgroundCount).toBe(0);
+    expect(closedState.step).toBe('authenticate');
+    expect(closedState.identifier).toBe('');
+    expect(closedState.password).toBe('');
+});
+
+test('checkout modal fills the supported mobile viewport without horizontal overflow', async ({ page }) => {
+    setCodeLength(6);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openCheckout(page);
+    await page.locator('.showlogin').first().click();
+    await expect(page.locator('.pinova-auth-modal__viewport')).toBeVisible();
+
+    const geometry = await page.evaluate(() => {
+        const modal = document.querySelector('#pinovaLoginModal');
+        const viewport = modal.querySelector('.pinova-auth-modal__viewport');
+        const dialog = modal.querySelector('.pinova-auth-modal__dialog').getBoundingClientRect();
+        const card = modal.querySelector('.pinova-auth-card').getBoundingClientRect();
+        const header = modal.querySelector('.pinova-auth-header').getBoundingClientRect();
+        const logo = modal.querySelector('.pinova-auth-logo').getBoundingClientRect();
+        const main = modal.querySelector('.pinova-auth-main').getBoundingClientRect();
+        return {
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+            modalScrollWidth: viewport.scrollWidth,
+            dialog: { width: dialog.width, height: dialog.height },
+            cardHeight: card.height,
+            logoOffset: Math.abs(
+                (logo.left + (logo.width / 2)) - (header.left + (header.width / 2)),
+            ),
+            mainStartsAfterHeader: main.top >= header.bottom,
+        };
+    });
+
+    expect(geometry.modalScrollWidth).toBeLessThanOrEqual(geometry.viewport.width + 1);
+    expect(geometry.dialog.width).toBeCloseTo(geometry.viewport.width, 0);
+    expect(geometry.dialog.height).toBeGreaterThanOrEqual(geometry.viewport.height - 1);
+    expect(geometry.cardHeight).toBeGreaterThanOrEqual(geometry.viewport.height - 1);
+    expect(geometry.logoOffset).toBeLessThanOrEqual(1);
+    expect(geometry.mainStartsAfterHeader).toBe(true);
 });
 
 for (const codeLength of [4, 5, 6]) {

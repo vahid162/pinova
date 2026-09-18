@@ -13,7 +13,7 @@ $site_name            = get_bloginfo( 'name' );
 $home_url             = home_url( '/' );
 $privacy_url          = get_privacy_policy_url();
 $logo_url             = Pinova::get_option( 'design.logo', admin_url( 'images/wordpress-logo.svg' ) );
-$account_asset_version = PINOVA_VERSION . '.2';
+$account_asset_version = PINOVA_VERSION . '.3';
 
 ?>
 <!DOCTYPE html>

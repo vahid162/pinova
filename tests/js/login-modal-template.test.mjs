@@ -43,7 +43,7 @@ test('modal busy state is announced, keeps task content inert, and leaves close 
         template,
         /class="pinova-auth-main"[^>]*pinova-bind:inert="pageLoaderIsActive"/,
     );
-    assert.match(template, /class="pinova-auth-logo"[^>]*pinova-bind:inert="pageLoaderIsActive"/);
+    assert.match(template, /class="pinova-auth-logo"[^\n]*pinova-bind:inert="pageLoaderIsActive"/);
 
     const closeButton = template.match(
         /<button(?=[^>]*class="pinova-auth-close-button")[^>]*>/,

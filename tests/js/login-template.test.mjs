@@ -6,6 +6,10 @@ const template = await readFile(
     new URL('../../templates/login-form.php', import.meta.url),
     'utf8',
 );
+const themePartial = await readFile(
+    new URL('../../templates/login-partial.php', import.meta.url),
+    'utf8',
+);
 const accountCss = await readFile(
     new URL('../../assets/css/account.css', import.meta.url),
     'utf8',
@@ -254,6 +258,10 @@ test('password recovery resend remains in the recovery workflow', () => {
     assert.match(
         formMarkup('forgotPassword'),
         /authenticate\(\{forget: '1', force_otp: '1'\}, 'forgotPassword'\)/,
+    );
+    assert.match(
+        themePartial,
+        /authenticate\(\{forget\s*:\s*'1', force_otp\s*:\s*'1'\}, 'forgotPassword'\)/,
     );
 });
 

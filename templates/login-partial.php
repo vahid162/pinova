@@ -359,7 +359,7 @@ $nav_arrow_left = '<svg class="md:h-5 h-4 nav-arrow" width="20" height="21" view
 							</div>
                             <div class="mb-5">
                                 <button
-                                        pinova-on:click="authenticate({forget : '1', force_otp : '1'})"
+                                        pinova-on:click="authenticate({forget : '1', force_otp : '1'}, 'forgotPassword')"
                                         pinova-bind:disabled="!time.btnResendIsActive"
                                         class="flex w-full items-center justify-center border border-gray-300 rounded-[8px] text-gray-700 font-semibold hover:bg-gray-100 disabled:hover:bg-transparent py-2.5 px-4"
                                 >

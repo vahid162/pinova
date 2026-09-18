@@ -7,7 +7,7 @@
 - تاریخچهٔ نسخه‌ها: [CHANGELOG.md](CHANGELOG.md)
 - مجوز: GPLv3
 
-> **وضعیت انتشار:** [`v1.2.6-rc8`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc8) جدیدترین پیش‌انتشار immutable اصلاح‌شدهٔ خط ۱.۲.x و نامزد مرحلهٔ پذیرش جداگانه است. این نسخه از commit ادغام‌شدهٔ `9d7f70b` منتشر شده، Release آن `immutable: true` است، کنترل‌های CI و attestation موفق بوده‌اند و دو بازدانلود مستقل فایل [`pinova-1.2.6.zip`](https://github.com/vahid162/pinova/releases/download/v1.2.6-rc8/pinova-1.2.6.zip) مقدار SHA-256 یکسان `343d92e7e6919a045ba530cbe73910271bcc0dd7596a7d6a05f7ef6bf94c698d` را تأیید کرده‌اند. `v1.2.6-rc6` بدون تغییر baseline نصب‌شده باقی می‌ماند و RC1 تا RC7 بدون جابه‌جایی یا بازنویسی به‌عنوان سابقه حفظ می‌شوند. RC8 هنوز stable/latest یا نصب‌شده نیست؛ انتشار GitHub به‌تنهایی مجوز نصب روی staging یا production، تغییر تنظیمات، یا فعال‌سازی مسدودسازی مسیر بومی نیست.
+> **وضعیت انتشار:** [`v1.2.6-rc8`](https://github.com/vahid162/pinova/releases/tag/v1.2.6-rc8) جدیدترین پیش‌انتشار immutable منتشرشدهٔ خط ۱.۲.x است. این نسخه از commit ادغام‌شدهٔ `9d7f70b` منتشر شده، Release آن `immutable: true` است، کنترل‌های CI و attestation موفق بوده‌اند و دو بازدانلود مستقل فایل [`pinova-1.2.6.zip`](https://github.com/vahid162/pinova/releases/download/v1.2.6-rc8/pinova-1.2.6.zip) مقدار SHA-256 یکسان `343d92e7e6919a045ba530cbe73910271bcc0dd7596a7d6a05f7ef6bf94c698d` را تأیید کرده‌اند. طبق اعلام بهره‌بردار، RC8 اکنون baseline فعال production است و RC1 تا RC7 بدون جابه‌جایی یا بازنویسی به‌عنوان سابقه حفظ می‌شوند. اصلاح پنجرهٔ ورود checkout پس از RC8 در `main` هنوز منتشر نشده است؛ RC8 stable/latest نیست و انتشار GitHub به‌تنهایی مجوز نصب، تغییر تنظیمات، یا فعال‌سازی مسدودسازی مسیر بومی نیست.
 
 ## امکانات خط ۱.۲.x
 
@@ -18,6 +18,7 @@
 - ذخیرهٔ موبایل جدید در `pinova_mobile` بدون بازنویسی `wp_users.user_login`
 - توقف امن تطبیق موبایل وقتی یک مقدار به چند User ID برسد
 - یکپارچگی حساب و checkout ووکامرس، اعتبارسنجی موبایل روی دادهٔ پردازش‌شدهٔ خود ووکامرس و اعلام سازگاری HPOS
+- پنجرهٔ ورود checkout همسان با رابط حساب، با بازشدن فقط از اقدام صریح ورود یا تعارض مشخص حساب؛ خطاهای عادی checkout درون فرم باقی می‌مانند و فیلد موبایل نامعتبر را متمرکز می‌کنند
 - rate limit اتمیک و Blocked List نوع‌دار برای موبایل، ایمیل، نام کاربری و IP با مسدودی موقت/دائمی و trusted proxy صریح
 - خروجی Excel و VCF با capability، nonce، escaping و محدودیت ردیف
 - REST response استاندارد با envelope سازگار `{success,message,data}`

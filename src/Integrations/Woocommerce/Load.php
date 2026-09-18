@@ -35,9 +35,9 @@ class Load {
 		if ( self::registration_required() == 'yes_redirect' ) {
 			new Redirect();
 		} else {
-			// @todo open pinova modal on click .showlogin, refresh page after login (check back url)
 			add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_scripts' ] );
-			add_action( 'woocommerce_review_order_after_submit', [ $this, 'checkout_login_modal' ] );
+			// Render outside the checkout form and its replaceable AJAX fragments.
+			add_action( 'wp_footer', [ $this, 'checkout_login_modal' ] );
 			add_filter( 'woocommerce_kses_notice_allowed_tags', [ $this, 'notice_allowed_tags' ] );
 		}
 
@@ -70,16 +70,19 @@ class Load {
 			return;
 		}
 
+		$account_asset_version = PINOVA_VERSION . '.3';
+
 		wp_enqueue_style( 'pinova-page', PINOVA_URL . 'assets/css/style.css', [], PINOVA_VERSION );
+		wp_enqueue_style( 'pinova-account', PINOVA_URL . 'assets/css/account.css', [ 'pinova-page' ], $account_asset_version );
 		wp_enqueue_style( 'pinova-notyf', PINOVA_URL . 'assets/css/notyf.min.css', [], PINOVA_VERSION );
 
 		wp_enqueue_script( 'pinova-notyf', PINOVA_URL . 'assets/js/notyf.min.js', [], PINOVA_VERSION );
 		wp_enqueue_script( 'pinova-global', PINOVA_URL . 'assets/js/global.js', [ 'pinova-notyf' ], PINOVA_VERSION );
-		wp_enqueue_script( 'pinova-login-modal', PINOVA_URL . 'assets/js/pages/login-modal.js', [], PINOVA_VERSION );
+		wp_enqueue_script( 'pinova-login-modal', PINOVA_URL . 'assets/js/pages/login-modal.js', [ 'pinova-global' ], $account_asset_version );
 		wp_enqueue_script( 'pinova-woocommerce', PINOVA_URL . 'assets/js/woocommerce/checkout.js', [
 			'jquery',
 			'pinova-login-modal',
-		], PINOVA_VERSION, true );
+		], $account_asset_version, true );
 
 		wp_localize_script( 'pinova-global', 'pinova', [
 			'root'        => esc_url_raw( rest_url() ),
@@ -90,6 +93,10 @@ class Load {
 	}
 
 	public function checkout_login_modal() {
+		if ( ! is_checkout() || is_order_received_page() ) {
+			return;
+		}
+
 		include PINOVA_DIR . '/templates/login-modal.php';
 	}
 

@@ -31,6 +31,15 @@ $home_url  = home_url( '/' );
                 pinova-bind:aria-busy="pageLoaderIsActive"
             >
                 <div class="pinova-auth-card">
+                    <button
+                        pinova-on:click="closeModal()"
+                        class="pinova-auth-close-button"
+                        type="button"
+                        aria-label="بستن پنجرهٔ ورود"
+                    >
+                        <img src="<?php echo esc_url( PINOVA_URL . 'assets/images/icons/close.svg' ); ?>" alt="" aria-hidden="true">
+                    </button>
+
                     <div
                         pinova-cloak
                         pinova-show="pageLoaderIsActive"
@@ -62,15 +71,6 @@ $home_url  = home_url( '/' );
                             <a class="pinova-auth-logo" href="<?php echo esc_url( $home_url ); ?>" pinova-bind:inert="pageLoaderIsActive" aria-label="بازگشت به <?php echo esc_attr( $site_name ); ?>">
                                 <img pinova-bind:src="logo" alt="لوگوی <?php echo esc_attr( $site_name ); ?>">
                             </a>
-
-                            <button
-                                pinova-on:click="closeModal()"
-                                class="pinova-auth-close-button"
-                                type="button"
-                                aria-label="بستن پنجرهٔ ورود"
-                            >
-                                <img src="<?php echo esc_url( PINOVA_URL . 'assets/images/icons/close.svg' ); ?>" alt="" aria-hidden="true">
-                            </button>
                         </header>
 
                         <div class="pinova-auth-main" pinova-bind:inert="pageLoaderIsActive">

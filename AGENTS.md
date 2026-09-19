@@ -13,9 +13,11 @@ Before substantive work:
 5. Preserve unrelated changes and secrets. Do not force-push, move published tags, discard work, or clean shared Docker resources.
 6. Establish the compute boundary before running dependency installation, static analysis, packaging, or wp-env. A separate worktree/container is not resource isolation; if the checkout shares a host with production or another live tenant, keep resource-intensive quality work on GitHub Actions or a dedicated development host.
 
-## Active release gate after PR27 merge
+## Current RC10 release state
 
-As checked on 2026-09-19 for PR28 preparation, PR27 is merged as `04535ac308e85497f453305c2133facf244d4a54`. Its merged-main run `35426974523` exposed a pending-dismissal focus defect and is not release-green. The immediate gate is [PR28](https://github.com/vahid162/pinova/pull/28), followed by its exact reviewed merged-main CI, then a new unused immutable RC and independent asset verification. Do not repeat the completed PR27 documentation merge or use its prior green PR run as release approval. RC9 is unchanged and the newest published candidate at this checkpoint. See [the lifecycle evidence](.agents/reviews/modal-focus-lifecycle.md). Re-read PR28, main, CI, and Releases before advancing; this checkpoint does not claim the follow-up has merged or shipped. No production installation is authorized.
+As verified on 2026-09-19, [PR #28](https://github.com/vahid162/pinova/pull/28) merged the bounded modal-focus lifecycle correction as `f8edf82a5981935f1f38d604014cd9272af854ba`. Its exact-head PR Quality run `35428597771`, merged-main run `35432423954`, and exact `publish/v1.2.6-rc10` run `35433083071` each passed all 16 jobs. Publisher run `35433368070` built the package twice, published annotated tag `v1.2.6-rc10`, and passed Release plus both asset-attestation checks. Release `392004930` reports `draft:false`, `prerelease:true`, and native `immutable:true`; an independent redownload verified installable ZIP SHA-256 `989746e26ee4e01ce4e8427ac0d556dfa79c1ca651c72d50b2f29dbe04ee8909`, ZIP integrity, its single `pinova/` root, and expected package contents. See [the RC10 release record](.agents/reviews/v1.2.6-rc10-release.md).
+
+RC10 is the newest published candidate, not stable/latest and not a live-deployment assertion. RC1–RC9 remain unchanged history. The next boundary is separately authorized staging/physical-device acceptance and then, if approved, installation with backup and rollback controls while the native-login gate remains off. Publication did not install the plugin, change a site/database/option, or authorize gate activation.
 
 ## Historical snapshot before PR27 merge
 
@@ -39,7 +41,7 @@ Snapshot checked on 2026-09-19 before the documentation follow-up was merged. Ve
 
 Verify all facts before acting and update this section whenever lineage, release, compatibility, blocker, or milestone changes.
 
-## Checkout-modal positioning follow-up
+## Historical checkout-modal positioning follow-up
 
 PR #27 starts from RC9's `main` commit. It moves only the existing close control to the card corner, scopes modal close/back positioning against generic theme CSS, and advances the shared UI asset revision to `.5`. Authentication JavaScript, logo/form markup, standalone layout rules, and the plugin version are preserved. The subsequent test work waits for actual product-driven heading focus and verifies five isolated product faults without weakening assertions; CI cleanup is guarded to its own browser-run resources.
 
@@ -48,7 +50,7 @@ The operator has now authorized documentation synchronization, reviewed merge, a
 ## Next expected milestones
 
 1. Treat `v1.2.4-rc1` as superseded; do not install, retag, or overwrite it.
-2. Preserve RC1–RC9 and the completed PR27 merge as history. Resolve the focus-lifecycle release blocker through PR #28 with exact-head green CI and review; require its merged `main` run to pass before the next unused immutable RC. Then use the existing publisher and independent asset checks; never substitute an implementation-branch or local ZIP or GitHub automatic source archive.
+2. Preserve RC1–RC10 and the completed PR27/PR28 chain as immutable history. Use only the `pinova-1.2.6.zip` asset attached to `v1.2.6-rc10` for the next separately authorized acceptance step; never substitute an implementation branch, worktree-local ZIP, or GitHub automatic source archive.
 3. Keep the native-login gate off during the first staging pass. Verify the exact production security integrations and preserved core-action matrix before a fresh private administrator login may arm the gate; gate activation remains a later, separately authorized boundary.
 4. Treat structural CI and package verification as distinct from physical-device and staging acceptance. Complete Chrome Android and iOS Safari checks for the standalone page and checkout modal, including keyboard behavior, autofill, paste, live validation, dialog focus/closing, safe areas, enlarged text, and 4/5/6-digit OTP flows before production use of a follow-up candidate.
 5. Keep publication independent of an Administration-scoped secret and repository Ruleset. With the repository owner's native Release Immutability setting confirmed, publish only from an exact reviewed and green `main` commit and require post-publication Release API, attestations, and independent redownload checks to pass. Preserve any failed tag or Release unchanged and use a new RC after correcting the cause. Record publication evidence separately; do not predeclare success in a pre-publication snapshot.
@@ -67,6 +69,7 @@ The operator has now authorized documentation synchronization, reviewed merge, a
 - Targeted fault detection: `tools/check-modal-test-sensitivity.mjs` and `tests/js/modal-test-sensitivity.test.mjs`.
 - GitHub browser-job-only cleanup: `tools/cleanup-browser-env.sh` and `tests/js/browser-cleanup.test.mjs`; not a general desktop cleanup command.
 - PR27 evidence: `.agents/reviews/checkout-modal-controls-pr27.md`.
+- RC10 publication evidence: `.agents/reviews/v1.2.6-rc10-release.md`.
 - Reproducible package: `tools/build.sh`.
 - Release history: `CHANGELOG.md`, the `readme.txt` Changelog section, and `tools/check-changelog-sync.php`.
 - CI and pre-release publication: `.github/workflows/quality.yml`, `.github/workflows/publish-prerelease.yml`.

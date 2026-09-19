@@ -124,9 +124,11 @@ The build must also confirm that `vendor/composer/autoload_files.php` eagerly re
 
 A worktree-local ZIP is never the installation handoff for this project. A test version is ready for installation only when the GitHub branch, commits, pull request, required CI, merge commit, immutable Release, ZIP, and checksum are all present, and the published assets pass a fresh download verification. If authorization stops before GitHub publication, label the result as a local candidate rather than a completed version.
 
-## Active release gate after PR27 merge
+## Current RC10 release state
 
-PR27 merged as `04535ac308e85497f453305c2133facf244d4a54` after reviewed green PR CI. Its separate main run `35426974523` failed the pending-dismissal focus contract, so it cannot be a release source. [PR28](https://github.com/vahid162/pinova/pull/28) is the corrective gate: exact-head CI/review, reviewed merge, green merged-main CI, then the next unused immutable candidate and independent package checks. The historical snapshot below must not direct operators back to the already completed PR27 documentation merge. RC9 remains unchanged; no PR28 merge, release, or production installation is asserted by this checkpoint. Re-read live refs/runs/releases before each gate. See [focus lifecycle evidence](../../../reviews/modal-focus-lifecycle.md).
+[PR28](https://github.com/vahid162/pinova/pull/28) passed exact-head Quality and review, merged as `f8edf82a5981935f1f38d604014cd9272af854ba`, and passed its separate merged-main Quality run. The exact `publish/v1.2.6-rc10` branch then passed Quality and publisher run `35433368070` built twice, published the annotated tag, confirmed native Release immutability, verified Release and both asset attestations, and redownloaded its assets. A separate redownload verified the checksum, archive safety, exact source content, and expected RC9-to-RC10 package diff. [RC10 release evidence](../../../reviews/v1.2.6-rc10-release.md) contains the exact runs, IDs, digests, and remaining acceptance boundary.
+
+RC10 is the current immutable pre-release candidate; it is not stable/latest and does not identify the installed production version. Preserve RC1–RC10. Staging/physical-device acceptance, production installation, settings/database changes, and native-login gate activation remain separately authorized operations.
 
 ## Historical lineage snapshot before PR27 merge
 

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
+import { installModalTestMutation } from '../../tools/check-modal-test-sensitivity.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const authenticateRoute = '**/pinova/user/authenticate*';
@@ -780,13 +781,21 @@ async function installThemeButtonPosition(page, placement) {
 for (const placement of ['before-account', 'after-account']) {
     test(`checkout corner controls resist theme CSS ${placement} in every modal step`, async ({ page }) => {
         test.setTimeout(90_000);
+        const mutation = await installModalTestMutation(page);
         await openCheckout(page);
+        if (mutation.active) {
+            await expect.poll(() => mutation.applied, { message: 'The test must exercise the mutated asset' }).toBeGreaterThan(0);
+        }
         await installThemeButtonPosition(page, placement);
         const opener = page.locator('.showlogin').first();
         const modal = page.locator('#pinovaLoginModal');
         const close = modal.locator('.pinova-auth-close-button');
         await opener.click();
         await expect(modal.locator('.pinova-auth-modal__viewport')).toBeVisible();
+        await expect(
+            page.locator('#pinova-modal-authenticate [data-pinova-step-heading]'),
+            '[modal:heading-focus] opening must focus the step heading',
+        ).toBeFocused();
         await page.evaluate(() => document.fonts.ready);
         const logoSource = await modal.locator('.pinova-auth-logo img').getAttribute('src');
 
@@ -799,8 +808,17 @@ for (const placement of ['before-account', 'after-account']) {
             await page.setViewportSize({ width, height });
             for (const step of steps) {
                 // Select presentation states only. No authentication request is sent.
-                await modal.evaluate((element, step) => element._x_dataStack[0].changeStep(step), step);
+                await modal.evaluate((element, step) => {
+                    const state = element._x_dataStack[0];
+                    // Do not schedule another focus timer for the already settled opening step.
+                    if (state.stepName !== step) state.changeStep(step);
+                }, step);
                 await expect(page.locator(`#pinova-modal-${step}`)).toBeVisible();
+                // Visibility and animation frames do not establish completion of focus transfer.
+                await expect(
+                    page.locator(`#pinova-modal-${step} [data-pinova-step-heading]`),
+                    `[modal:heading-focus] ${placement} ${width}x${height} ${step}`,
+                ).toBeFocused();
                 await modal.evaluate(async element => {
                     element.querySelector('.pinova-auth-modal__dialog').scrollTop = 0;
                     element.querySelector('.pinova-auth-modal__viewport').scrollTop = 0;
@@ -839,8 +857,8 @@ for (const placement of ['before-account', 'after-account']) {
                     };
                 });
                 const label = `${placement} ${width}x${height} ${step}`;
-                expect(geometry.closePosition, label).toBe('absolute');
-                expect(geometry.backPosition, label).toBe('absolute');
+                expect(geometry.closePosition, `[modal:close-position] ${label}`).toBe('absolute');
+                expect(geometry.backPosition, `[modal:back-position] ${label}`).toBe('absolute');
                 expect(geometry.anchoredToCard, label).toBe(true);
                 expect(geometry.insideHeader, label).toBe(false);
                 expect(geometry.left, label).toBeCloseTo(12, 0);
@@ -861,15 +879,17 @@ for (const placement of ['before-account', 'after-account']) {
         // Moving close before the header must preserve both directions of the focus trap.
         const lastSubmit = page.locator('#pinova-modal-changePassword button[type="submit"]');
         await close.focus();
+        await expect(close, '[modal:focus-start] close must own focus before keyboard input').toBeFocused();
         await page.keyboard.press('Shift+Tab');
-        await expect(lastSubmit).toBeFocused();
+        await expect(lastSubmit, '[modal:reverse-trap] Shift+Tab must wrap to the last control').toBeFocused();
         await page.keyboard.press('Tab');
-        await expect(close).toBeFocused();
+        await expect(close, '[modal:forward-trap] Tab must wrap to the close control').toBeFocused();
         await page.keyboard.press('Escape');
         await expect(modal.locator('.pinova-auth-modal__viewport')).toBeHidden();
         await expect(opener).toBeFocused();
         await opener.click();
         await expect(page.locator('#pinova-modal-authenticate')).toBeVisible();
+        await expect(page.locator('#pinova-modal-authenticate [data-pinova-step-heading]')).toBeFocused();
         await close.click();
         await expect(modal.locator('.pinova-auth-modal__viewport')).toBeHidden();
         await expect(opener).toBeFocused();

@@ -77,20 +77,29 @@ jobs:
           curl --fail --retry 10 --retry-delay 2 --retry-connrefused "${PLAYWRIGHT_BASE_URL}/login" --output /dev/null
       - name: Run Stage 1 browser acceptance
         run: npm run test:browser
-      - name: Upload browser diagnostics on failure
-        if: failure()
+      - name: Verify modal tests detect real product faults
+        timeout-minutes: 8
+        run: node tools/check-modal-test-sensitivity.mjs
+      - name: Destroy and verify the disposable browser environment
+        if: always()
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p test-results
+          bash tools/cleanup-browser-env.sh 2>&1 | tee test-results/browser-cleanup.log
+      - name: Upload browser acceptance and sensitivity evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: account-ui-browser-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             playwright-report/browser
             test-results/browser
+            test-results/modal-sensitivity
+            test-results/browser-cleanup.log
           if-no-files-found: ignore
           retention-days: 7
-      - name: Destroy the disposable browser environment
-        if: always()
-        continue-on-error: true
-        run: npx wp-env destroy --force
 
   php:
     runs-on: ubuntu-latest

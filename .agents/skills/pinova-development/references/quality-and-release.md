@@ -44,7 +44,21 @@ npm run test:browser
 npm run env:stop
 ```
 
-The `Account UI / Stage 1 Chromium` CI job owns this lifecycle for pull requests and release branches, including a unique Compose project/home, the web- and development-CLI-container `pdo_mysql` prerequisite, failure diagnostics, and unconditional environment teardown. Keep the Playwright base URL on `localhost`, matching wp-env's generated WordPress URLs, so module scripts and fonts stay same-origin. Use `wp-env destroy --force` for non-interactive teardown. Do not start it on the shared production host.
+The `Account UI / Stage 1 Chromium` CI job owns this lifecycle for pull requests and release branches, including a unique Compose project/home, the web- and development-CLI-container `pdo_mysql` prerequisite, failure diagnostics, and unconditional environment teardown. Keep the Playwright base URL on `localhost`, matching wp-env's generated WordPress URLs, so module scripts and fonts stay same-origin. The pinned wp-env 10.35.0 has no `destroy --force` option; use the run-guarded `bash tools/cleanup-browser-env.sh` in the disposable GitHub browser job. Do not start it on the shared production host.
+
+### Modal test reliability and sensitivity
+
+Wait for the actual step heading to own focus after opening and each state transition. Do not replace that contract with a fixed sleep, extra retries, test-side heading focus, or a disabled product assertion. Avoid scheduling a duplicate transition for the already settled initial step. Animation-frame waits are only for layout. Both theme stylesheet orders retain every geometry, focus-trap, Escape, close-click, and focus-restoration assertion.
+
+After the normal browser suite, run `node tools/check-modal-test-sensitivity.mjs` against the same disposable loopback WordPress site. It runs three healthy repetitions without retries, then five independent response-only mutations: missing heading focus, broken reverse trap, broken forward trap, relative close position, and relative back position. Each mutated response must reach the exact intended failing product assertion in the same corner-control test. Runner/setup errors, missing tests, unrelated failures, whole-test timeouts, skips, retries, and surviving mutations are rejected. A final healthy run confirms isolation. No plugin file or server is changed by these mutations. This is targeted sensitivity evidence, not proof that every possible plugin defect is covered.
+
+The browser job retains normal acceptance reports and separate JSON reports under `test-results/modal-sensitivity`, including successful healthy controls and expected mutant assertion failures. The ordinary suite still fails normally for broken unmodified code; the sensitivity wrapper accepts a mutant failure only after its identity and assertion are verified. Unit tests exercise the report verifier with malformed, skipped, retried, unrelated, and infrastructure-failure reports.
+
+### Non-interactive browser CI cleanup
+
+wp-env 10.35.0's `destroy` always calls an interactive confirmation; `--force` was added in 10.39.0. See upstream `packages/env/lib/commands/destroy.js` and `lib/cli.js` at Gutenberg commit `17abf988aef8045a2783612660b1f5bf650dba87`. Do not upgrade development dependencies merely to silence this prompt.
+
+`tools/cleanup-browser-env.sh` requires GitHub CI plus an exact numeric run/attempt identity, the matching `pinova-browser-<run>-<attempt>` Compose project, and its exact `/tmp` work directory. It rejects symlinks and ambiguous configurations before using scoped `docker compose down --volumes --remove-orphans`; it neither prunes global resources nor removes shared images. It checks every Docker query's exit status and requires zero containers, volumes, and networks with that project's label before removing its own work directory. Missing configuration is not success while resources remain. Cleanup runs with `always()` and a bounded step timeout, without `continue-on-error`; the log and browser evidence are uploaded afterward even on failure. The cleanup unit tests use a fake Docker executable in isolated temporary directories and never act on an actual Docker daemon.
 
 Run integration tests only in an isolated WordPress environment:
 

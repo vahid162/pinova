@@ -9,6 +9,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
     pageLoaderIsActive: false,
     codeLength: pinova.code_length,
     returnFocusElement: null,
+    focusSequence: 0,
     requestSequence: 0,
     activeRequestId: 0,
     activeRequestAbort: null,
@@ -625,7 +626,13 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
     },
 
     focusStepHeading(stepName) {
+        const focusRequest = ++this.focusSequence;
         setTimeout(() => {
+            // A closed, reopened, or superseded step must not receive stale focus.
+            if (focusRequest !== this.focusSequence || !this.modalIsOpen || this.stepName !== stepName) {
+                return;
+            }
+
             const step = document.getElementById(`pinova-modal-${stepName}`);
             const heading = step && step.querySelector('[data-pinova-step-heading]');
             if (heading) {
@@ -873,6 +880,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
         }
 
         const returnFocusElement = this.returnFocusElement;
+        const focusRequest = ++this.focusSequence;
         this.cancelRequest();
         this.modalIsOpen = false;
         this.resetModalState();
@@ -880,7 +888,11 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
         this.returnFocusElement = null;
 
         if (returnFocusElement && typeof returnFocusElement.focus === 'function') {
-            setTimeout(() => returnFocusElement.focus({ preventScroll: true }), 0);
+            setTimeout(() => {
+                if (focusRequest === this.focusSequence && !this.modalIsOpen) {
+                    returnFocusElement.focus({ preventScroll: true });
+                }
+            }, 0);
         }
     },
 

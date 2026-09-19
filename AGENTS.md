@@ -13,7 +13,11 @@ Before substantive work:
 5. Preserve unrelated changes and secrets. Do not force-push, move published tags, discard work, or clean shared Docker resources.
 6. Establish the compute boundary before running dependency installation, static analysis, packaging, or wp-env. A separate worktree/container is not resource isolation; if the checkout shares a host with production or another live tenant, keep resource-intensive quality work on GitHub Actions or a dedicated development host.
 
-## Current project snapshot
+## Active release gate after PR27 merge
+
+As checked on 2026-09-19 for PR28 preparation, PR27 is merged as `04535ac308e85497f453305c2133facf244d4a54`. Its merged-main run `35426974523` exposed a pending-dismissal focus defect and is not release-green. The immediate gate is [PR28](https://github.com/vahid162/pinova/pull/28), followed by its exact reviewed merged-main CI, then a new unused immutable RC and independent asset verification. Do not repeat the completed PR27 documentation merge or use its prior green PR run as release approval. RC9 is unchanged and the newest published candidate at this checkpoint. See [the lifecycle evidence](.agents/reviews/modal-focus-lifecycle.md). Re-read PR28, main, CI, and Releases before advancing; this checkpoint does not claim the follow-up has merged or shipped. No production installation is authorized.
+
+## Historical snapshot before PR27 merge
 
 Snapshot checked on 2026-09-19 before the documentation follow-up was merged. Verify current refs and releases before acting; this snapshot is not a live deployment record.
 
@@ -44,7 +48,7 @@ The operator has now authorized documentation synchronization, reviewed merge, a
 ## Next expected milestones
 
 1. Treat `v1.2.4-rc1` as superseded; do not install, retag, or overwrite it.
-2. Preserve RC1–RC9 as history. Complete the documentation follow-up in PR #27, require exact-head green CI and review, merge the reviewed head, and require the merged `main` run to pass. Then use the next unused immutable RC through the existing publisher; never substitute an implementation-branch or local ZIP or GitHub automatic source archive.
+2. Preserve RC1–RC9 and the completed PR27 merge as history. Resolve the focus-lifecycle release blocker through PR #28 with exact-head green CI and review; require its merged `main` run to pass before the next unused immutable RC. Then use the existing publisher and independent asset checks; never substitute an implementation-branch or local ZIP or GitHub automatic source archive.
 3. Keep the native-login gate off during the first staging pass. Verify the exact production security integrations and preserved core-action matrix before a fresh private administrator login may arm the gate; gate activation remains a later, separately authorized boundary.
 4. Treat structural CI and package verification as distinct from physical-device and staging acceptance. Complete Chrome Android and iOS Safari checks for the standalone page and checkout modal, including keyboard behavior, autofill, paste, live validation, dialog focus/closing, safe areas, enlarged text, and 4/5/6-digit OTP flows before production use of a follow-up candidate.
 5. Keep publication independent of an Administration-scoped secret and repository Ruleset. With the repository owner's native Release Immutability setting confirmed, publish only from an exact reviewed and green `main` commit and require post-publication Release API, attestations, and independent redownload checks to pass. Preserve any failed tag or Release unchanged and use a new RC after correcting the cause. Record publication evidence separately; do not predeclare success in a pre-publication snapshot.

@@ -95,8 +95,13 @@ export function checkSensitivityReport(report, exitCode, mutation, repeats = 1) 
         const errors = result.errors || [];
         if (mutation) {
             assert.equal(errors.length, 1, 'Only the intended assertion may fail');
-            assert.ok(errors[0].message.includes(mutation.marker), 'Failure did not reach the intended contract');
-            assert.match(errors[0].message, /expect\(/, 'A setup exception is not a product assertion');
+            // Formatted errors include adjacent source lines. A marker in a code
+            // snippet must not make an unrelated assertion look like the intended fault.
+            const message = result.error?.message;
+            assert.equal(typeof message, 'string', 'The raw assertion error is missing');
+            const headline = message.split(/\r?\n/, 1)[0].replace(/^Error: /, '');
+            assert.ok(headline === mutation.marker || headline.startsWith(`${mutation.marker} `), 'Failure did not reach the intended contract');
+            assert.match(message, /expect\(/, 'A setup exception is not a product assertion');
         } else {
             assert.deepEqual(errors, []);
         }

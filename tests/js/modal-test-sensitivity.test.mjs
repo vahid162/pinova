@@ -11,9 +11,11 @@ function reportFor(mutation, repeats = 1) {
             title: 'checkout corner controls resist theme CSS after-account in every modal step',
             tests: Array.from({ length: repeats }, () => ({
                 expectedStatus: 'passed',
-                results: [{ retry: 0, status: failed ? 'failed' : 'passed', errors: failed ? [{
-                    message: `Error: ${mutation.marker}\n\nexpect(locator).toBeFocused() failed`,
-                }] : [] }],
+                results: [{
+                    retry: 0, status: failed ? 'failed' : 'passed',
+                    error: failed ? { message: `${mutation.marker}\n\nexpect(locator).toBeFocused() failed` } : undefined,
+                    errors: failed ? [{ message: `Error: ${mutation.marker}\n\nexpect(locator).toBeFocused() failed` }] : [],
+                }],
             })),
         }] }],
     };
@@ -49,7 +51,7 @@ test('a mutant must fail the intended product assertion, not infrastructure or a
     assert.throws(() => checkSensitivityReport(reportFor(null), 0, mutation));
     for (const message of ['browser launch failed', 'Error: [modal:reverse-trap]\nexpect(locator) failed', `${mutation.marker} setup error`]) {
         const report = reportFor(mutation);
-        firstResult(report).errors[0].message = message;
+        firstResult(report).error.message = message;
         assert.throws(() => checkSensitivityReport(report, 1, mutation));
     }
     const timeout = reportFor(mutation);
@@ -64,4 +66,15 @@ test('mutation runs cannot target a public or production origin', () => {
     for (const origin of ['https://example.com', 'http://localhost.example.com', 'file:///tmp/test']) {
         assert.throws(() => requireLocalTestOrigin(origin));
     }
+});
+
+
+test('a marker in an adjacent source snippet cannot certify a different failure', () => {
+    const mutation = modalMutations[0];
+    const report = reportFor(mutation);
+    firstResult(report).error.message = '[modal:other-contract] unexpected failure\n\nexpect(locator) failed';
+    firstResult(report).errors[0].message += `\nSource snippet: expect(heading, '${mutation.marker}').toBeFocused()`;
+    assert.throws(() => checkSensitivityReport(report, 1, mutation));
+    delete firstResult(report).error;
+    assert.throws(() => checkSensitivityReport(report, 1, mutation));
 });

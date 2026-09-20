@@ -11,6 +11,8 @@ const logoutPassword = 'Pinova-browser-logout-2026!';
 
 function prepareCheckoutFixture() {
     const fixtureScript = String.raw`
+\Pinova\Install::create_tables();
+
 update_option('woocommerce_enable_guest_checkout', 'yes');
 update_option('woocommerce_enable_checkout_login_reminder', 'yes');
 \Pinova\Pinova::set_option('general.woocommerce_checkout_registration_required', 'no');

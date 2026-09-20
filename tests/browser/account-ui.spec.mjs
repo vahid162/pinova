@@ -15,6 +15,8 @@ function prepareCheckoutFixture() {
 
 update_option('woocommerce_enable_guest_checkout', 'yes');
 update_option('woocommerce_enable_checkout_login_reminder', 'yes');
+update_option('woocommerce_coming_soon', 'no');
+update_option('woocommerce_store_pages_only', 'no');
 \Pinova\Pinova::set_option('general.woocommerce_checkout_registration_required', 'no');
 
 $logout_user_id = username_exists('${logoutUsername}');
@@ -150,9 +152,9 @@ test('the canonical logout route redirects once and a stale nonce returns 403', 
     await page.locator('#loginByPassword button[type="submit"]').click();
     await expect.poll(() => new URL(page.url()).pathname).not.toMatch(/^\/login\/?$/);
 
-    const profileResponse = await page.goto('/wp-admin/profile.php', { waitUntil: 'domcontentloaded' });
-    expect(profileResponse?.ok()).toBe(true);
-    const logoutHref = await page.locator('#wp-admin-bar-logout a').getAttribute('href');
+    const accountResponse = await page.goto('/my-account/', { waitUntil: 'domcontentloaded' });
+    expect(accountResponse?.ok()).toBe(true);
+    const logoutHref = await page.locator('a[href*="/logout/"]').first().getAttribute('href');
     expect(logoutHref).toBeTruthy();
     expect(new URL(logoutHref).pathname).toBe('/logout/');
 

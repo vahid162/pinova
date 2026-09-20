@@ -25,7 +25,7 @@ class Redirect {
 			$checkout_url = str_replace( 'http:', 'https:', $checkout_url );
 		}
 
-		Helper::redirect_to( Pinova::get_login_url( $checkout_url ) );
+		Helper::redirect_to( Pinova::get_login_url( $checkout_url ), 'checkout_login' );
 	}
 
 	public function wc_payment_return_url( string $return_url, $order ): string {

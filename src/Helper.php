@@ -2,17 +2,45 @@
 
 namespace Pinova;
 
+use Pinova\Logging\Logger;
+
 defined( 'ABSPATH' ) || exit;
 
 class Helper {
 
 	/**
-	 * @param string $url
+	 * @param string $url       Redirect destination.
+	 * @param string $operation Bounded operation code for failure diagnostics.
 	 *
 	 * @return no-return
 	 */
-	public static function redirect_to( string $url ) {
-		wp_safe_redirect( $url );
+	public static function redirect_to( string $url, string $operation = 'redirect' ) {
+		$url = wp_validate_redirect( $url, site_url() );
+
+		if ( wp_safe_redirect( $url ) ) {
+			exit;
+		}
+
+		Logger::instance()->warning(
+			'auth.redirect_failed',
+			[
+				'operation'   => $operation,
+				'reason'      => 'safe_redirect_rejected',
+				'status'      => headers_sent() ? 'headers_sent' : 'headers_available',
+				'http_status' => 503,
+			]
+		);
+
+		wp_die(
+			__( 'انتقال خودکار انجام نشد. برای ادامه از پیوند امن زیر استفاده کنید.', 'pinova' ),
+			__( 'انتقال انجام نشد', 'pinova' ),
+			[
+				'response'  => 503,
+				'link_url'  => $url,
+				'link_text' => __( 'ادامه', 'pinova' ),
+			]
+		);
+
 		exit;
 	}
 

@@ -61,6 +61,7 @@ Adding a context key requires all of:
 | `auth.request_failed` | error | Unexpected authentication request failure |
 | `auth.password_failed` | notice | Native pipeline rejected password or role policy |
 | `auth.password_succeeded` | info | Password login completed |
+| `auth.redirect_failed` | warning | A validated authentication/logout redirect was rejected before a Location response could be emitted |
 | `auth.session_created` | info | Pinova created an authenticated session |
 | `auth.session_destroyed` | info | Pinova logout completed |
 | `identity.resolved` | debug | Identifier resolution result during a diagnostic window |
@@ -88,6 +89,8 @@ The `security.block_added` and `security.block_removed` contexts may contain the
 The two `admin.sms_test_*` events are bounded, capability-protected audit actions. They bypass the configured minimum level so a deliberate test always leaves a privacy-safe result, including when the site stores only `error` events. This exception must not be generalized to request-driven authentication, OTP, or channel events.
 
 Native-login arming and gate-state events are bounded control-plane records. Their context may contain the authorized administrator User ID plus short `status`, `reason`, or `operation` codes. Never include the private slug, route URL, slug HMAC, transient arm contents, authentication material, or a reversible derivative of the route. Do not emit an event for canonical-login probes; only a successful eligible private login and an actual activation/invalidation transition are catalogued.
+
+`auth.redirect_failed` is emitted only when WordPress rejects a validated safe redirect. Its context is limited to the bounded operation, reason and header-state codes plus the intended HTTP fallback status. Never include the destination/return URL, query string, nonce, cookie, identifier, token, source file/line, exception message, or trace.
 
 ## Operational workflow
 

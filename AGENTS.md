@@ -50,9 +50,9 @@ The operator has now authorized documentation synchronization, reviewed merge, a
 ## Next expected milestones
 
 1. Treat `v1.2.4-rc1` as superseded; do not install, retag, or overwrite it.
-2. Preserve RC1–RC10 and the completed PR27/PR28 chain as immutable history. Use only the `pinova-1.2.6.zip` asset attached to `v1.2.6-rc10` for the next separately authorized acceptance step; never substitute an implementation branch, worktree-local ZIP, or GitHub automatic source archive.
+2. Preserve RC1–RC10 and the completed PR27/PR28 chain as immutable history. RC10 remains the published baseline, but its reported logout blank-response and purpose-ambiguous OTP-email behavior require a new reviewed RC11 rather than an edit to RC10. Never substitute an implementation branch, worktree-local ZIP, or GitHub automatic source archive for the eventual release asset.
 3. Keep the native-login gate off during the first staging pass. Verify the exact production security integrations and preserved core-action matrix before a fresh private administrator login may arm the gate; gate activation remains a later, separately authorized boundary.
-4. Treat structural CI and package verification as distinct from physical-device and staging acceptance. Complete Chrome Android and iOS Safari checks for the standalone page and checkout modal, including keyboard behavior, autofill, paste, live validation, dialog focus/closing, safe areas, enlarged text, and 4/5/6-digit OTP flows before production use of a follow-up candidate.
+4. Treat structural CI and package verification as distinct from physical-device and staging acceptance. RC11 acceptance must include canonical `/logout/` redirect behavior, stale/invalid nonce 403 handling, the controlled redirect-failure fallback, and distinguishable login/registration/recovery email copy. Complete Chrome Android and iOS Safari checks for the standalone page and checkout modal, including keyboard behavior, autofill, paste, live validation, dialog focus/closing, safe areas, enlarged text, and 4/5/6-digit OTP flows before production use of a follow-up candidate.
 5. Keep publication independent of an Administration-scoped secret and repository Ruleset. With the repository owner's native Release Immutability setting confirmed, publish only from an exact reviewed and green `main` commit and require post-publication Release API, attestations, and independent redownload checks to pass. Preserve any failed tag or Release unchanged and use a new RC after correcting the cause. Record publication evidence separately; do not predeclare success in a pre-publication snapshot.
 6. Stop before installation. A production plugin replacement, the initial 48-hour gate-off canary, later gate activation with two break-glass methods, and the second 48-hour canary each require the plan's separate authorization and rollback controls.
 7. Rebuild 1.3 from corrected `main` only after the corrected 1.2.6 baseline completes its separately authorized staging and production canaries. Semantically port reviewed identity concepts; do not merge the obsolete branch wholesale or reuse `v1.3.0-rc1`.
@@ -70,6 +70,7 @@ The operator has now authorized documentation synchronization, reviewed merge, a
 - GitHub browser-job-only cleanup: `tools/cleanup-browser-env.sh` and `tests/js/browser-cleanup.test.mjs`; not a general desktop cleanup command.
 - PR27 evidence: `.agents/reviews/checkout-modal-controls-pr27.md`.
 - RC10 publication evidence: `.agents/reviews/v1.2.6-rc10-release.md`.
+- RC11 correction decision: `.agents/reviews/v1.2.6-rc11-correction-review.md`.
 - Reproducible package: `tools/build.sh`.
 - Release history: `CHANGELOG.md`, the `readme.txt` Changelog section, and `tools/check-changelog-sync.php`.
 - CI and pre-release publication: `.github/workflows/quality.yml`, `.github/workflows/publish-prerelease.yml`.

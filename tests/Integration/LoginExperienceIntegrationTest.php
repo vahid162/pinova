@@ -68,7 +68,7 @@ final class LoginExperienceIntegrationTest extends \WP_UnitTestCase {
 
 			self::assertSame( 'public.example', wp_parse_url( $login_url, PHP_URL_HOST ) );
 			self::assertSame( '/login', wp_parse_url( $login_url, PHP_URL_PATH ) );
-			self::assertSame( '/logout', wp_parse_url( $logout_url, PHP_URL_PATH ) );
+			self::assertSame( '/logout/', wp_parse_url( $logout_url, PHP_URL_PATH ) );
 			self::assertStringNotContainsString( '/wordpress/', $login_url );
 			self::assertStringNotContainsString( '/wordpress/', $logout_url );
 		} finally {

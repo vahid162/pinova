@@ -3,7 +3,7 @@
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<title>کد تایید</title>
+	<title>{{email_title}}</title>
 </head>
 <body dir="rtl" style="font-family:'IRANSans','Vazir','Noto Sans Arabic','Geeza Pro',Tahoma,Arial,sans-serif;;direction:rtl;margin:0;padding:0;background-color:#f3f4f6;">
 
@@ -27,7 +27,7 @@
 							</p>
 
 							<p style="margin:0 0 20px 0;font-size:15px;line-height:22px;">
-								برای ورود به حساب کاربری خود در {{site_name}} نیاز به تأیید هویت دارید. کد یک‌بارمصرف شما به شرح زیر است:
+								{{purpose_intro}}
 							</p>
 
 							<!-- code block -->
@@ -42,7 +42,7 @@
 							</table>
 
 							<p style="margin:0 0 18px 0;font-size:14px;">
-								این کد تا {{expires_in_minutes}} دقیقه آینده معتبر خواهد بود. لطفاً آن را در صفحه‌ی ورود وارد کنید.
+								این کد تا {{expires_in_minutes}} دقیقه آینده معتبر خواهد بود. {{purpose_instruction}}
 							</p>
 
 							<p style="margin:0 0 18px 0;font-size:14px;">
@@ -52,7 +52,7 @@
 							</p>
 
 							<p style="margin:10px 20px;padding-top: 25px;font-size:12px;line-height:20px;border-top: 1px solid #EAECF0; color: #667085">
-								این ایمیل برای ورود به حساب کاربری شما در سایت {{site_name}} ارسال شده است. اگر این درخواست توسط شما انجام نشده، لطفاً ایمیل را نادیده بگیرید.
+								{{purpose_footer}}
 							</p>
 							<p style="margin:10px 20px;font-size:12px;line-height:20px;color: #667085">
 								به خاطر داشته باشید کد یکبار مصرف محرمانه است؛ آن را با هیچ‌کس به اشتراک نگذارید. {{site_name}} هرگز این کد را از شما درخواست نخواهد کرد.

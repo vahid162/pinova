@@ -92,7 +92,7 @@ class Pinova {
 			self::prepare_force_reauthentication();
 
 			if ( get_current_user_id() ) {
-				Helper::redirect_to( Helper::get_login_back_url() );
+				Helper::redirect_to( Helper::get_login_back_url(), 'login' );
 			}
 
 			$wp_query->is_404 = false;
@@ -111,14 +111,34 @@ class Pinova {
 	 * @return no-return
 	 */
 	public static function logout() {
+		$nonce = isset( $_GET['_pinova_nonce'] ) && is_string( $_GET['_pinova_nonce'] )
+			? sanitize_text_field( wp_unslash( $_GET['_pinova_nonce'] ) )
+			: '';
 
-		if ( ! wp_verify_nonce( $_GET['_pinova_nonce'] ?? '', 'logout' ) ) {
-			wp_die( __( 'توکن امنیتی شما معتبر نمی‌باشد.', 'pinova' ) );
+		if ( ! wp_verify_nonce( $nonce, 'logout' ) ) {
+			wp_die(
+				__( 'توکن امنیتی شما معتبر نمی‌باشد.', 'pinova' ),
+				__( 'درخواست خروج نامعتبر است', 'pinova' ),
+				[
+					'response'  => 403,
+					'link_url'  => site_url(),
+					'link_text' => __( 'بازگشت به سایت', 'pinova' ),
+				]
+			);
+
+			exit;
 		}
 
 		UserService::logout();
 
-		Helper::redirect_to( Helper::get_logout_back_url( $_GET['redirect_to'] ?? null ) );
+		$back_url = null;
+		if ( isset( $_GET['back_url'] ) && is_string( $_GET['back_url'] ) ) {
+			$back_url = sanitize_url( wp_unslash( $_GET['back_url'] ) );
+		} elseif ( isset( $_GET['redirect_to'] ) && is_string( $_GET['redirect_to'] ) ) {
+			$back_url = sanitize_url( wp_unslash( $_GET['redirect_to'] ) );
+		}
+
+		Helper::redirect_to( Helper::get_logout_back_url( $back_url ), 'logout' );
 	}
 
 	public function logout_url( $url, $back_url ): string {
@@ -194,7 +214,7 @@ class Pinova {
 	}
 
 	public static function get_logout_url( ?string $back_url = null ): string {
-		$url = home_url( '/logout' );
+		$url = home_url( '/logout/' );
 
 		if ( $back_url ) {
 			$url = add_query_arg( 'back_url', urlencode( $back_url ), $url );

@@ -6,12 +6,28 @@ import { installModalTestMutation } from '../../tools/check-modal-test-sensitivi
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const authenticateRoute = '**/pinova/user/authenticate*';
 const otpRoute = '**/pinova/user/login/otp*';
+const logoutUsername = 'pinova_logout_browser';
+const logoutPassword = 'Pinova-browser-logout-2026!';
 
 function prepareCheckoutFixture() {
     const fixtureScript = String.raw`
 update_option('woocommerce_enable_guest_checkout', 'yes');
 update_option('woocommerce_enable_checkout_login_reminder', 'yes');
 \Pinova\Pinova::set_option('general.woocommerce_checkout_registration_required', 'no');
+
+$logout_user_id = username_exists('${logoutUsername}');
+if (!$logout_user_id) {
+    $logout_user_id = wp_insert_user([
+        'user_login' => '${logoutUsername}',
+        'user_pass' => '${logoutPassword}',
+        'user_email' => 'pinova-logout-browser@example.test',
+        'role' => 'subscriber',
+    ]);
+} else {
+    wp_set_password('${logoutPassword}', $logout_user_id);
+    $logout_user = get_user_by('id', $logout_user_id);
+    $logout_user->set_role('subscriber');
+}
 
 $product_id = wc_get_product_id_by_sku('pinova-browser-modal-product');
 if (!$product_id) {
@@ -121,6 +137,30 @@ async function openCheckout(page) {
 
 test.beforeAll(() => {
     prepareCheckoutFixture();
+});
+
+test('the canonical logout route redirects once and a stale nonce returns 403', async ({ page }) => {
+    await openLogin(page);
+    await page.locator('#pinova-identifier').fill(logoutUsername);
+    await page.locator('#authenticate button[type="submit"]').click();
+    await expect(page.locator('#loginByPassword')).toBeVisible();
+    await page.locator('#pinova-password').fill(logoutPassword);
+    await page.locator('#loginByPassword button[type="submit"]').click();
+    await expect.poll(() => new URL(page.url()).pathname).not.toMatch(/^\/login\/?$/);
+
+    const profileResponse = await page.goto('/wp-admin/profile.php', { waitUntil: 'domcontentloaded' });
+    expect(profileResponse?.ok()).toBe(true);
+    const logoutHref = await page.locator('#wp-admin-bar-logout a').getAttribute('href');
+    expect(logoutHref).toBeTruthy();
+    expect(new URL(logoutHref).pathname).toBe('/logout/');
+
+    const logoutResponse = await page.request.get(logoutHref, { maxRedirects: 0 });
+    expect(logoutResponse.status()).toBe(302);
+    expect(logoutResponse.headers().location).toBeTruthy();
+
+    const staleResponse = await page.request.get(logoutHref, { maxRedirects: 0 });
+    expect(staleResponse.status()).toBe(403);
+    expect(await staleResponse.text()).toContain('توکن امنیتی شما معتبر نمی‌باشد');
 });
 
 async function mockOtpStart(page) {

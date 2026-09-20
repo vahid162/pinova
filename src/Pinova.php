@@ -125,8 +125,6 @@ class Pinova {
 					'link_text' => __( 'بازگشت به سایت', 'pinova' ),
 				]
 			);
-
-			exit;
 		}
 
 		UserService::logout();

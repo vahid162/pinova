@@ -40,8 +40,6 @@ class Helper {
 				'link_text' => __( 'ادامه', 'pinova' ),
 			]
 		);
-
-		exit;
 	}
 
 	/**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pinova\Tests\Integration;
 
+use Pinova\Helper;
 use Pinova\Install;
 use Pinova\Logging\LogRepository;
 use Pinova\Pinova;
@@ -67,6 +68,19 @@ final class LogoutIntegrationTest extends WP_UnitTestCase {
 
 		self::assertSame( '/logout/', wp_parse_url( $url, PHP_URL_PATH ) );
 		self::assertNotEmpty( wp_parse_url( $url, PHP_URL_QUERY ) );
+	}
+
+	public function test_empty_return_targets_use_explicit_safe_fallbacks(): void {
+		$_GET['back_url'] = '';
+
+		self::assertSame( site_url(), Helper::get_login_back_url() );
+		self::assertSame( site_url(), Helper::get_logout_back_url() );
+
+		$administrator_id = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $administrator_id );
+
+		self::assertSame( admin_url(), Helper::get_login_back_url() );
+		self::assertSame( site_url(), Helper::get_logout_back_url() );
 	}
 
 	public function test_invalid_logout_nonce_returns_a_controlled_403_without_destroying_the_session(): void {

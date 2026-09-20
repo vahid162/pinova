@@ -73,10 +73,12 @@ class Helper {
 		}
 
 		$fallback = current_user_can( 'manage_options' ) ? admin_url() : site_url();
-		$back_url = wp_validate_redirect( (string) $back_url, $fallback );
+		$back_url = trim( (string) $back_url );
+		$back_url = '' === $back_url ? $fallback : wp_validate_redirect( $back_url, $fallback );
 		$back_url = apply_filters( 'pinova/login_back_url', $back_url );
+		$back_url = trim( (string) $back_url );
 
-		return wp_validate_redirect( (string) $back_url, $fallback );
+		return '' === $back_url ? $fallback : wp_validate_redirect( $back_url, $fallback );
 	}
 
 	public static function get_logout_back_url( ?string $back_url = null ): string {
@@ -86,10 +88,12 @@ class Helper {
 		}
 
 		$fallback = site_url();
-		$back_url = wp_validate_redirect( (string) $back_url, $fallback );
+		$back_url = trim( (string) $back_url );
+		$back_url = '' === $back_url ? $fallback : wp_validate_redirect( $back_url, $fallback );
 		$back_url = apply_filters( 'pinova/logout_back_url', $back_url );
+		$back_url = trim( (string) $back_url );
 
-		return wp_validate_redirect( (string) $back_url, $fallback );
+		return '' === $back_url ? $fallback : wp_validate_redirect( $back_url, $fallback );
 	}
 
 }

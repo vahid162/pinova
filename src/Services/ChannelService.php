@@ -28,7 +28,7 @@ class ChannelService {
 			if ( in_array( $channel, [ 'sms', 'bale', 'call', 'email' ], true ) ) {
 
 				try {
-					$success = self::send_channel( $channel, $identifier, $code );
+					$success = self::send_channel( $channel, $identifier, $code, $otp->type );
 				} catch ( \Throwable $e ) {
 					Logger::instance()->warning(
 						'otp.channel_send_failed',
@@ -61,7 +61,7 @@ class ChannelService {
 	}
 
 	/** @throws \Throwable */
-	private static function send_channel( string $channel, Identifier $identifier, int $code ): bool {
+	private static function send_channel( string $channel, Identifier $identifier, int $code, string $otp_type ): bool {
 		switch ( $channel ) {
 			case 'sms':
 				return self::send_sms( $identifier, $code );
@@ -70,7 +70,7 @@ class ChannelService {
 			case 'call':
 				return self::send_call( $identifier, $code );
 			case 'email':
-				return self::send_email( $identifier, $code );
+				return self::send_email( $identifier, $code, $otp_type );
 			default:
 				return false;
 		}
@@ -115,13 +115,13 @@ class ChannelService {
 	/**
 	 * @throws Exception
 	 */
-	public static function send_email( Identifier $identifier, int $code ): bool {
+	public static function send_email( Identifier $identifier, int $code, string $otp_type = OTP::TYPE_LOGIN ): bool {
 
 		if ( ! $identifier->is_email() ) {
 			throw new Exception( 'ایمیل صرفا به آدرس ایمیل ارسال می‌شود.' );
 		}
 
-		return Email::send_code( $identifier->get_value(), $code );
+		return Email::send_code_for_purpose( $identifier->get_value(), $code, $otp_type );
 	}
 
 	public static function get_channels( Identifier $identifier ): array {

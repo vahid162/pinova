@@ -150,12 +150,37 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 0, get_current_user_id() );
 	}
 
-	private function create_otp( int $user_id, string $identifier, string $type ): OTP {
+	public function test_concurrent_login_and_recovery_codes_remain_independently_valid_for_their_own_flows(): void {
+		$user_id = self::factory()->user->create(
+			[
+				'user_email' => 'concurrent-purpose@example.test',
+				'role'       => 'subscriber',
+			]
+		);
+		$login_otp    = $this->create_otp( $user_id, 'concurrent-purpose@example.test', OTP::TYPE_LOGIN, '1357' );
+		$recovery_otp = $this->create_otp( $user_id, 'concurrent-purpose@example.test', OTP::TYPE_FORGET, '2468' );
+
+		$recovery_response = $this->verify( 'forgot', $recovery_otp, '2468' );
+
+		self::assertSame( 200, $recovery_response->get_status() );
+		self::assertTrue( $recovery_response->get_data()['success'] );
+		self::assertNotNull( $recovery_otp->fresh()->verified_at );
+		self::assertNull( $login_otp->fresh()->verified_at );
+
+		$login_response = $this->verify( 'login', $login_otp, '1357' );
+
+		self::assertSame( 200, $login_response->get_status() );
+		self::assertTrue( $login_response->get_data()['success'] );
+		self::assertNotNull( $login_otp->fresh()->verified_at );
+		self::assertSame( $user_id, get_current_user_id() );
+	}
+
+	private function create_otp( int $user_id, string $identifier, string $type, string $code = '1234' ): OTP {
 		return OTP::query()->create(
 			[
 				'user_id'    => $user_id > 0 ? $user_id : null,
 				'identifier' => $identifier,
-				'code'       => '1234',
+				'code'       => $code,
 				'type'       => $type,
 				'channels'   => [ 'email' => true ],
 			]

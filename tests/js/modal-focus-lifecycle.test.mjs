@@ -22,11 +22,15 @@ function harness() {
     const body = { children: [], style: { overflow: '' } };
     const root = { parentElement: body };
     body.children = [background, root];
+    const replacementOpener = { focus: () => focus.push('replacement-opener') };
     const document = {
         body, activeElement: null,
         getElementById(id) {
             if (id === 'pinovaLoginModal') return root;
             return { querySelector: () => ({ focus: () => focus.push(id) }) };
+        },
+        querySelector(selector) {
+            return selector === '.showlogin' ? replacementOpener : null;
         },
     };
     vm.runInNewContext(source, {
@@ -43,7 +47,11 @@ function harness() {
         clearInterval() {},
     });
     const state = factory();
-    const opener = { focus: () => focus.push('opener') };
+    const opener = {
+        isConnected: true,
+        matches: selector => selector === '.showlogin',
+        focus: () => focus.push('opener'),
+    };
     return {
         state, focus, tasks, opener, background,
         run(delay) {
@@ -82,6 +90,15 @@ test('a pending heading callback cannot steal restored focus after busy dismissa
     assert.equal(h.state.pageLoaderIsActive, false);
     assert.equal(request.signal.aborted, true);
     assert.equal(h.background.inert, false);
+});
+
+test('a replaced checkout fragment restores focus to the equivalent live opener', () => {
+    const h = harness();
+    h.state.openModal('', h.opener);
+    h.opener.isConnected = false;
+    h.state.closeModal();
+    h.run(0);
+    assert.deepEqual(h.focus, ['replacement-opener']);
 });
 
 test('a superseded step callback cannot focus an old heading', () => {

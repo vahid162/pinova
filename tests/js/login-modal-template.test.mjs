@@ -129,7 +129,7 @@ test('modal uses the shared branded account stylesheet with a cache revision', (
         wooLoader,
         /wp_enqueue_script\(\s*'pinova-login-modal'[\s\S]*\[\s*'pinova-global'\s*\]/,
     );
-    assert.match(wooLoader, /PINOVA_VERSION\s*\.\s*'\.5'/);
+    assert.match(wooLoader, /PINOVA_VERSION\s*\.\s*'\.6'/);
 });
 
 test('modal is rendered outside the checkout form and replaceable fragments', () => {

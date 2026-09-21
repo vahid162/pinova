@@ -16,8 +16,15 @@ class Helper {
 	 */
 	public static function redirect_to( string $url, string $operation = 'redirect' ) {
 		$url = wp_validate_redirect( $url, site_url() );
+		$headers_sent = headers_sent();
+		$redirected   = false;
 
-		if ( wp_safe_redirect( $url ) ) {
+		if ( ! $headers_sent ) {
+			$redirected   = wp_safe_redirect( $url );
+			$headers_sent = headers_sent();
+		}
+
+		if ( $redirected && ! $headers_sent ) {
 			exit;
 		}
 
@@ -25,8 +32,8 @@ class Helper {
 			'auth.redirect_failed',
 			[
 				'operation'   => $operation,
-				'reason'      => 'safe_redirect_rejected',
-				'status'      => headers_sent() ? 'headers_sent' : 'headers_available',
+				'reason'      => $headers_sent ? 'headers_sent' : 'safe_redirect_rejected',
+				'status'      => $headers_sent ? 'headers_sent' : 'headers_available',
 				'http_status' => 503,
 			]
 		);

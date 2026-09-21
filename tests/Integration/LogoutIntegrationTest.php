@@ -2,6 +2,27 @@
 
 declare(strict_types=1);
 
+namespace Pinova;
+
+/**
+ * Test seam for the redirect header-state race. Delegates to PHP unless a
+ * bounded sequence is set by this integration file.
+ *
+ * @param string|null $filename
+ * @param int|null    $line
+ */
+function headers_sent( &$filename = null, &$line = null ): bool {
+	$sequence = $GLOBALS['pinova_test_headers_sent_sequence'] ?? null;
+	if ( is_array( $sequence ) && [] !== $sequence ) {
+		$result = (bool) array_shift( $sequence );
+		$GLOBALS['pinova_test_headers_sent_sequence'] = $sequence;
+
+		return $result;
+	}
+
+	return \headers_sent( $filename, $line );
+}
+
 namespace Pinova\Tests\Integration;
 
 use Pinova\Helper;
@@ -56,6 +77,7 @@ final class LogoutIntegrationTest extends WP_UnitTestCase {
 
 	public function tear_down(): void {
 		$_GET = $this->original_get;
+		unset( $GLOBALS['pinova_test_headers_sent_sequence'] );
 		LogRepository::delete_all();
 		delete_option( 'pinova_logging' );
 		wp_set_current_user( 0 );
@@ -107,6 +129,7 @@ final class LogoutIntegrationTest extends WP_UnitTestCase {
 
 		$_GET['_pinova_nonce'] = wp_create_nonce( 'logout' );
 		$_GET['back_url']      = $target;
+		$GLOBALS['pinova_test_headers_sent_sequence'] = [ false, false ];
 
 		$reject_redirect = static function () {
 			return false;
@@ -121,6 +144,7 @@ final class LogoutIntegrationTest extends WP_UnitTestCase {
 			);
 		} finally {
 			remove_filter( 'wp_redirect', $reject_redirect, PHP_INT_MAX );
+			unset( $GLOBALS['pinova_test_headers_sent_sequence'] );
 		}
 
 		self::assertSame( 503, $exception->die_args['response'] ?? null );
@@ -144,6 +168,71 @@ final class LogoutIntegrationTest extends WP_UnitTestCase {
 		self::assertStringNotContainsString( 'private@example.test', $redirect['context'] ?? '' );
 		self::assertStringNotContainsString( 'secret-token', $redirect['context'] ?? '' );
 		self::assertStringNotContainsString( '_pinova_nonce', $redirect['context'] ?? '' );
+	}
+
+	/**
+	 * @dataProvider committed_header_sequences
+	 *
+	 * @param array<int, bool> $header_sequence
+	 */
+	public function test_committed_headers_use_the_controlled_fallback( array $header_sequence, int $expected_redirect_calls ): void {
+		$target = home_url( '/after-headers/?email=private@example.test&token=secret-token' );
+		$GLOBALS['pinova_test_headers_sent_sequence'] = $header_sequence;
+
+		$redirect_calls = 0;
+		$count_redirect = static function ( string $location ) use ( &$redirect_calls ): string {
+			++$redirect_calls;
+
+			return $location;
+		};
+		add_filter( 'wp_redirect', $count_redirect );
+
+		$ignore_test_harness_header_warning = static function ( int $severity, string $message ): bool {
+			return E_WARNING === $severity && str_starts_with( $message, 'Cannot modify header information' );
+		};
+		set_error_handler( $ignore_test_harness_header_warning );
+
+		try {
+			$exception = $this->capture_wp_die(
+				static function () use ( $target ): void {
+					Helper::redirect_to( $target, 'logout' );
+				}
+			);
+		} finally {
+			restore_error_handler();
+			remove_filter( 'wp_redirect', $count_redirect );
+			unset( $GLOBALS['pinova_test_headers_sent_sequence'] );
+		}
+
+		self::assertSame( $expected_redirect_calls, $redirect_calls );
+		self::assertSame( 503, $exception->die_args['response'] ?? null );
+		self::assertSame( $target, $exception->die_args['link_url'] ?? null );
+		self::assertNotSame( '', $exception->getMessage() );
+
+		$records  = LogRepository::paginate( 1, 10 )['rows'];
+		$redirect = null;
+		foreach ( $records as $record ) {
+			if ( 'auth.redirect_failed' === ( $record['event'] ?? '' ) ) {
+				$redirect = $record;
+				break;
+			}
+		}
+
+		self::assertIsArray( $redirect );
+		self::assertSame( 'warning', $redirect['level'] ?? null );
+		self::assertStringContainsString( '"operation":"logout"', $redirect['context'] ?? '' );
+		self::assertStringContainsString( '"reason":"headers_sent"', $redirect['context'] ?? '' );
+		self::assertStringContainsString( '"status":"headers_sent"', $redirect['context'] ?? '' );
+		self::assertStringNotContainsString( 'private@example.test', $redirect['context'] ?? '' );
+		self::assertStringNotContainsString( 'secret-token', $redirect['context'] ?? '' );
+	}
+
+	/** @return array<string, array{array<int, bool>, int}> */
+	public function committed_header_sequences(): array {
+		return [
+			'before redirect dispatch' => [ [ true ], 0 ],
+			'during redirect dispatch' => [ [ false, true ], 1 ],
+		];
 	}
 
 	/** @param callable():void $callback */

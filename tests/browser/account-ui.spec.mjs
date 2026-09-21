@@ -602,6 +602,10 @@ test('checkout modal remains dismissible while an authentication request is pend
         await expect.poll(() => modalMain.evaluate(element => element.inert)).toBe(true);
         await expect(closeButton).toBeVisible();
         await expect(closeButton).toBeEnabled();
+
+        // WooCommerce may replace the login-toggle fragment while the request is pending.
+        // Focus restoration must resolve the live replacement rather than the detached opener.
+        await opener.evaluate(element => element.replaceWith(element.cloneNode(true)));
         await closeButton.click();
 
         await expect(modalViewport).toBeHidden();

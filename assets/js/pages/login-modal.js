@@ -887,10 +887,27 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
         this.unlockPageInteraction();
         this.returnFocusElement = null;
 
-        if (returnFocusElement && typeof returnFocusElement.focus === 'function') {
+        if (returnFocusElement) {
             setTimeout(() => {
                 if (focusRequest === this.focusSequence && !this.modalIsOpen) {
-                    returnFocusElement.focus({ preventScroll: true });
+                    let focusTarget = returnFocusElement;
+
+                    // WooCommerce can replace checkout fragments while the dialog is open.
+                    // Resolve the equivalent live opener instead of focusing a detached node.
+                    if (focusTarget.isConnected === false && typeof focusTarget.matches === 'function') {
+                        let fallbackSelector = null;
+                        if (focusTarget.matches('.pinova-open_login__modal')) {
+                            fallbackSelector = '.pinova-open_login__modal';
+                        } else if (focusTarget.matches('.showlogin')) {
+                            fallbackSelector = '.showlogin';
+                        }
+
+                        focusTarget = fallbackSelector ? document.querySelector(fallbackSelector) : null;
+                    }
+
+                    if (focusTarget && typeof focusTarget.focus === 'function') {
+                        focusTarget.focus({ preventScroll: true });
+                    }
                 }
             }, 0);
         }

@@ -70,7 +70,7 @@ class Load {
 			return;
 		}
 
-		$account_asset_version = PINOVA_VERSION . '.5';
+		$account_asset_version = PINOVA_VERSION . '.6';
 
 		wp_enqueue_style( 'pinova-page', PINOVA_URL . 'assets/css/style.css', [], PINOVA_VERSION );
 		wp_enqueue_style( 'pinova-account', PINOVA_URL . 'assets/css/account.css', [ 'pinova-page' ], $account_asset_version );

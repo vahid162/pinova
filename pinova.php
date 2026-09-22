@@ -41,9 +41,22 @@ if ( null === \Illuminate\Database\Eloquent\Model::getConnectionResolver() ) {
 	new \Nabik_Net_Database();
 }
 
-new \Pinova\Install();
+register_activation_hook( PINOVA_FILE, [ \Pinova\Install::class, 'activate' ] );
+register_deactivation_hook( PINOVA_FILE, [ \Pinova\Install::class, 'deactivate' ] );
+
+if ( ! \Pinova\Install::migrate() ) {
+	add_action( 'admin_notices', [ \Pinova\Install::class, 'render_migration_notice' ] );
+
+	return;
+}
+
 new \Pinova\Notice();
-new \Pinova\Version();
+
+if ( ! ( new \Pinova\Version() )->migrate() ) {
+	add_action( 'admin_notices', [ \Pinova\Install::class, 'render_migration_notice' ] );
+
+	return;
+}
 
 \Pinova\Pinova::instance();
 
@@ -67,10 +80,6 @@ add_action( 'woodmart_after_body_open', function () {
 
 add_action( 'after_setup_theme', function () {
 	Pinova\Integrations\Flatsome\Load::instance();
-} );
-
-register_activation_hook( PINOVA_FILE, function () {
-	file_put_contents( PINOVA_DIR . '/.activated', '' );
 } );
 
 add_action( 'before_woocommerce_init', function () {

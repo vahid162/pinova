@@ -30,7 +30,6 @@ tar -C "${project_dir}" \
   --exclude='.github' \
   --exclude='.agents' \
   --exclude='.gitignore' \
-  --exclude='.activated' \
   --exclude='.build' \
   --exclude='.phpstan.cache' \
   --exclude='.phpunit.result.cache' \

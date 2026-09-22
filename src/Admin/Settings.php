@@ -330,6 +330,14 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'default' => '',
 					'sanitize_callback' => [ self::class, 'sanitize_proxy_cidrs' ],
 				],
+				[
+					'id'                => 'delete_data_on_uninstall',
+					'label'             => 'پاک‌سازی هنگام حذف افزونه',
+					'type'              => 'checkbox',
+					'default'           => get_option( \Pinova\Install::PURGE_OPTION, false ) ? '1' : '0',
+					'desc'              => 'در حالت پیش‌فرض داده‌های عملیاتی پس از حذف افزونه حفظ می‌شوند. با فعال‌کردن این گزینه، جدول‌ها، تنظیمات، داده‌های موقت و زمان‌بندی‌های پینوا هنگام Uninstall حذف می‌شوند؛ متای هویتی pinova_mobile حفظ خواهد شد.',
+					'sanitize_callback' => [ self::class, 'sanitize_delete_data_on_uninstall' ],
+				],
 				// @todo add firewall options here
 			],
 		];
@@ -446,6 +454,13 @@ class Settings extends \Nabik\Utils\V1\Settings {
 		$seconds = absint( $seconds );
 
 		return in_array( $seconds, [ 900, 3600, DAY_IN_SECONDS ], true ) ? time() + $seconds : 0;
+	}
+
+	public static function sanitize_delete_data_on_uninstall( $enabled ): int {
+		$enabled = empty( $enabled ) ? 0 : 1;
+		update_option( \Pinova\Install::PURGE_OPTION, $enabled, false );
+
+		return $enabled;
 	}
 
 	public function callback_diagnostic_window( array $args ): void {

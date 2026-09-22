@@ -39,7 +39,7 @@ class Version extends \Nabik\Utils\V1\Version {
 		try {
 			$gateway = SMSService::get_gateway_instance( $gateway );
 		} catch ( Exception $e ) {
-			wp_die( $e->getMessage() );
+			return;
 		}
 
 		foreach ( get_option( 'pinova_sms', [] ) as $key => $value ) {
@@ -55,11 +55,13 @@ class Version extends \Nabik\Utils\V1\Version {
 	public function update_108() {
 		global $wpdb;
 
-		Nabik_Net_Database::Schema()->table( 'pinova_blocks', function ( Blueprint $table ) {
-			$table->after( 'identifier', function ( Blueprint $table ) {
-				$table->foreignId( 'blocked_by' )->nullable();
+		if ( ! Nabik_Net_Database::Schema()->hasColumn( 'pinova_blocks', 'blocked_by' ) ) {
+			Nabik_Net_Database::Schema()->table( 'pinova_blocks', function ( Blueprint $table ) {
+				$table->after( 'identifier', function ( Blueprint $table ) {
+					$table->foreignId( 'blocked_by' )->nullable();
+				} );
 			} );
-		} );
+		}
 
 		$table = $wpdb->prefix . 'pinova_blocks';
 		$query = sprintf( 'ALTER TABLE `%s` MODIFY COLUMN `blocked_until` timestamp NULL;', $table );

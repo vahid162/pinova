@@ -264,7 +264,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertStringNotContainsString( 'identifier_fingerprint', $context );
 	}
 
-	public function test_export_retries_when_an_owned_read_fails(): void {
+	public function test_export_aborts_when_an_owned_read_fails(): void {
 		global $wpdb;
 
 		$email   = 'export-read-failure@example.test';
@@ -296,14 +296,17 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		add_filter( 'query', $fail_log_read );
 		try {
 			$log_failure = Privacy::export_personal_data( $email, 1 );
+			$later_page_failure = Privacy::export_personal_data( $email, 2 );
 		} finally {
 			remove_filter( 'query', $fail_log_read );
 		}
 
-		self::assertSame( [], $mobile_failure['data'] );
-		self::assertFalse( $mobile_failure['done'] );
-		self::assertSame( [], $log_failure['data'] );
-		self::assertFalse( $log_failure['done'] );
+		self::assertWPError( $mobile_failure );
+		self::assertSame( 'pinova_privacy_export_failed', $mobile_failure->get_error_code() );
+		self::assertWPError( $log_failure );
+		self::assertSame( 'pinova_privacy_export_failed', $log_failure->get_error_code() );
+		self::assertWPError( $later_page_failure );
+		self::assertSame( 'pinova_privacy_export_failed', $later_page_failure->get_error_code() );
 	}
 
 	public function test_eraser_retries_when_the_account_lookup_fails(): void {
@@ -342,8 +345,8 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 			remove_filter( 'query', $fail_user_read );
 		}
 
-		self::assertSame( [], $export['data'] );
-		self::assertFalse( $export['done'] );
+		self::assertWPError( $export );
+		self::assertSame( 'pinova_privacy_export_failed', $export->get_error_code() );
 		self::assertFalse( $result['items_removed'] );
 		self::assertTrue( $result['items_retained'] );
 		self::assertFalse( $result['done'] );

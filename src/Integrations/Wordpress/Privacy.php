@@ -7,6 +7,7 @@ use Pinova\Logging\LogRepository;
 use Pinova\Objects\Identifier;
 use Pinova\Objects\Mobile;
 use Pinova\Services\UserService;
+use WP_Error;
 use WP_User;
 
 final class Privacy {
@@ -49,15 +50,12 @@ final class Privacy {
 	 * Export only user-owned profile information and non-sensitive audit facts.
 	 * OTP records, credentials, tokens, fingerprints, and log context are excluded.
 	 *
-	 * @return array{data:array<int, array<string, mixed>>,done:bool}
+	 * @return array{data:array<int, array<string, mixed>>,done:bool}|WP_Error
 	 */
-	public static function export_personal_data( string $email_address, int $page = 1 ): array {
+	public static function export_personal_data( string $email_address, int $page = 1 ) {
 		$user_lookup = self::find_user_by_email( sanitize_email( $email_address ) );
 		if ( ! $user_lookup['success'] ) {
-			return [
-				'data' => [],
-				'done' => false,
-			];
+			return self::export_error();
 		}
 
 		$user = $user_lookup['user'];
@@ -75,20 +73,14 @@ final class Privacy {
 		if ( 1 === $page ) {
 			$mobile_lookup = UserService::get_persisted_mobile_result( $user->ID );
 			if ( ! $mobile_lookup['success'] ) {
-				return [
-					'data' => [],
-					'done' => false,
-				];
+				return self::export_error();
 			}
 			$mobile = $mobile_lookup['value'];
 		}
 
 		$log_result = LogRepository::export_for_user( $user->ID, $page, self::BATCH_SIZE );
 		if ( ! $log_result['success'] ) {
-			return [
-				'data' => [],
-				'done' => false,
-			];
+			return self::export_error();
 		}
 		$logs = $log_result['rows'];
 
@@ -132,6 +124,13 @@ final class Privacy {
 			'data' => $data,
 			'done' => count( $logs ) < self::BATCH_SIZE,
 		];
+	}
+
+	private static function export_error(): WP_Error {
+		return new WP_Error(
+			'pinova_privacy_export_failed',
+			__( 'خروجی داده‌های پینوا کامل نشد. لطفاً عملیات خروجی را دوباره آغاز کنید.', 'pinova' )
+		);
 	}
 
 	/**

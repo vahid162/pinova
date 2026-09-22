@@ -52,7 +52,6 @@ function pinova_parse_plugin_headers( string $contents, array &$errors ): array 
 
 	$headers    = [];
 	$duplicates = [];
-	$pattern    = '/^[ \t]*\*[ \t]*([^:\r\n]+):[ \t]*(.*?)[ \t]*$/m';
 	$canonicalNames = [
 		'Plugin Name',
 		'Plugin URI',
@@ -71,6 +70,7 @@ function pinova_parse_plugin_headers( string $contents, array &$errors ): array 
 		'WC requires at least',
 		'WC tested up to',
 	];
+	$pattern = '/^[ \t]*\*[ \t]*(' . implode( '|', array_map( static fn ( string $name ): string => preg_quote( $name, '/' ), $canonicalNames ) ) . '):[ \t]*(.*?)[ \t]*$/mi';
 
 	if ( preg_match_all( $pattern, $headerBlock, $matches, PREG_SET_ORDER ) ) {
 		foreach ( $matches as $match ) {
@@ -126,6 +126,7 @@ function pinova_parse_readme_headers( string $contents, array &$errors ): array 
 		'License',
 		'License URI',
 	];
+	$pattern = '/^(' . implode( '|', array_map( static fn ( string $name ): string => preg_quote( $name, '/' ), $canonicalNames ) ) . '):[ \t]*(.*?)[ \t]*$/i';
 
 	if ( false === $lines ) {
 		$errors[] = 'Unable to parse readme.txt headers.';
@@ -139,7 +140,7 @@ function pinova_parse_readme_headers( string $contents, array &$errors ): array 
 			break;
 		}
 
-		if ( preg_match( '/^([A-Za-z][A-Za-z ]+):\s*(.*?)\s*$/', $line, $match ) !== 1 ) {
+		if ( preg_match( $pattern, $line, $match ) !== 1 ) {
 			continue;
 		}
 
@@ -153,7 +154,7 @@ function pinova_parse_readme_headers( string $contents, array &$errors ): array 
 	}
 
 	foreach ( array_slice( $lines, $bodyOffset ?? count( $lines ) ) as $line ) {
-		if ( preg_match( '/^([A-Za-z][A-Za-z ]+):\s*(.*?)\s*$/', $line, $match ) === 1 ) {
+		if ( preg_match( $pattern, $line, $match ) === 1 ) {
 			$name = pinova_canonical_header_name( trim( $match[1] ), $canonicalNames );
 			if ( array_key_exists( $name, $headers ) ) {
 				$duplicates[ $name ] = true;

@@ -6,6 +6,8 @@
     <file>utils</file>
     <file>templates</file>
     <exclude-pattern>vendor/*</exclude-pattern>
+    <!-- The email template is static HTML despite its historical .php extension. -->
+    <exclude-pattern>templates/emails/*</exclude-pattern>
     <arg name="extensions" value="php"/>
     <arg value="sp"/>
     <rule ref="WordPress-Core">

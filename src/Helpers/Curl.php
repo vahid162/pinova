@@ -3,6 +3,8 @@
 namespace Pinova\Helpers;
 
 use Exception;
+use JsonException;
+use WP_Error;
 
 class Curl {
 
@@ -15,36 +17,133 @@ class Curl {
 	 * @throws Exception
 	 */
 	public static function post( string $url, $data = null, array $headers = [] ) {
-		$curl = curl_init( $url );
-
 		if ( empty( $headers ) ) {
 			$headers[] = 'Accept: application/json';
 		}
+		$request_headers = self::normalize_headers( $headers );
 
-		curl_setopt( $curl, CURLOPT_CUSTOMREQUEST, 'POST' );
-		curl_setopt( $curl, CURLOPT_POSTFIELDS, $data );
-		curl_setopt( $curl, CURLOPT_RETURNTRANSFER, true );
-		curl_setopt( $curl, CURLOPT_TIMEOUT, 8 );
-		curl_setopt( $curl, CURLOPT_HTTPHEADER, $headers );
+		$response = wp_remote_post(
+			$url,
+			[
+				'timeout'     => 8,
+				'redirection' => 0,
+				'headers'     => $request_headers,
+				'body'        => $data,
+				'data_format' => 'body',
+			]
+		);
 
-		$response  = curl_exec( $curl );
-		$error     = curl_error( $curl );
-		$http_code = curl_getinfo( $curl, CURLINFO_HTTP_CODE );
-
-		if ( $error ) {
-			throw new Exception( $error );
+		if ( $response instanceof WP_Error ) {
+			throw new Exception( 'ارتباط امن با سرویس‌دهنده برقرار نشد. لطفاً دوباره تلاش کنید.' );
 		}
 
-		if ( empty( $response ) ) {
-			throw new Exception( sprintf( 'کد %s: پاسخی از %s دریافت نشد.', $http_code, $url ) );
+		$http_code = (int) wp_remote_retrieve_response_code( $response );
+		$body      = (string) wp_remote_retrieve_body( $response );
+
+		if ( '' === trim( $body ) ) {
+			throw new Exception( sprintf( 'کد %d: پاسخی از سرویس‌دهنده دریافت نشد.', $http_code ) );
 		}
 
 		try {
-			return json_decode( $response, true, 512, JSON_THROW_ON_ERROR );
-		} catch ( Exception $exception ) {
-			throw new Exception( sprintf( 'کد %s: پاسخ دریافت شده معتبر نمی‌باشد.', $http_code ) );
+			$decoded = json_decode( $body, true, 512, JSON_THROW_ON_ERROR );
+
+			return self::redact_credentials( $decoded, self::credential_values( $data, $request_headers ) );
+		} catch ( JsonException $exception ) {
+			unset( $exception );
+			throw new Exception( sprintf( 'کد %d: پاسخ دریافت‌شده معتبر نیست.', $http_code ) );
 		}
 	}
 
+	/**
+	 * Convert the legacy cURL-style header list to WordPress HTTP API headers.
+	 *
+	 * @param string[] $headers
+	 * @return array<string, string>
+	 */
+	private static function normalize_headers( array $headers ): array {
+		$normalized = [];
 
+		foreach ( $headers as $header ) {
+			if ( ! is_string( $header ) || ! str_contains( $header, ':' ) ) {
+				continue;
+			}
+
+			[ $name, $value ] = array_map( 'trim', explode( ':', $header, 2 ) );
+			if ( '' !== $name ) {
+				$normalized[ $name ] = $value;
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * @param mixed                $data
+	 * @param array<string,string> $headers
+	 * @return string[]
+	 */
+	private static function credential_values( $data, array $headers ): array {
+		$credentials = [];
+
+		foreach ( $headers as $name => $value ) {
+			$name = strtolower( $name );
+			if ( ! str_contains( $name, 'authorization' ) && ! str_contains( $name, 'token' ) && ! str_contains( $name, 'key' ) ) {
+				continue;
+			}
+
+			$credentials[] = trim( $value );
+			$credentials[] = preg_replace( '/^(?:bearer|basic)\s+/i', '', trim( $value ) ) ?? '';
+		}
+
+		$payload = is_string( $data ) ? json_decode( $data, true ) : $data;
+		self::collect_payload_credentials( $payload, $credentials );
+
+		return array_values(
+			array_unique(
+				array_filter(
+					array_map( 'strval', $credentials ),
+					static fn( string $value ): bool => strlen( $value ) >= 4
+				)
+			)
+		);
+	}
+
+	/**
+	 * @param mixed    $value
+	 * @param string[] $credentials
+	 */
+	private static function collect_payload_credentials( $value, array &$credentials, string $key = '' ): void {
+		if ( is_array( $value ) ) {
+			foreach ( $value as $child_key => $child_value ) {
+				self::collect_payload_credentials( $child_value, $credentials, (string) $child_key );
+			}
+			return;
+		}
+
+		if ( ! is_scalar( $value ) || ! preg_match( '/(?:password|username|secret|api[_-]?key|token|authorization)/i', $key ) ) {
+			return;
+		}
+
+		$credentials[] = (string) $value;
+	}
+
+	/**
+	 * @param mixed    $value
+	 * @param string[] $credentials
+	 * @return mixed
+	 */
+	private static function redact_credentials( $value, array $credentials ) {
+		if ( is_array( $value ) ) {
+			foreach ( $value as $key => $child ) {
+				$value[ $key ] = self::redact_credentials( $child, $credentials );
+			}
+			return $value;
+		}
+
+		if ( ! is_string( $value ) ) {
+			return $value;
+		}
+
+		return str_replace( $credentials, '[redacted]', $value );
+	}
 }

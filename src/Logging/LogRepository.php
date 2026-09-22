@@ -37,6 +37,93 @@ final class LogRepository {
 	}
 
 	/**
+	 * Return the non-sensitive audit facts owned by one WordPress user.
+	 *
+	 * Context is deliberately excluded because it can contain keyed fingerprints.
+	 *
+	 * @return array<int, array{id:int,created_at:string,event:string,correlation_id:string}>
+	 */
+	public static function export_for_user( int $user_id, int $page = 1, int $per_page = 100 ): array {
+		global $wpdb;
+
+		if ( $user_id <= 0 || ! self::table_exists() ) {
+			return [];
+		}
+
+		$page     = max( 1, $page );
+		$per_page = max( 1, min( 100, $per_page ) );
+		$offset   = ( $page - 1 ) * $per_page;
+		$rows     = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT `id`, `created_at`, `event`, `correlation_id` FROM %i WHERE `user_id` = %d ORDER BY `id` ASC LIMIT %d OFFSET %d',
+				self::table_name(),
+				$user_id,
+				$per_page,
+				$offset
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows ) ? $rows : [];
+	}
+
+	/**
+	 * Remove the user link and keyed fingerprints while retaining event facts.
+	 *
+	 * @return array{processed:int,done:bool}
+	 */
+	public static function anonymize_user( int $user_id, int $limit = 100 ): array {
+		global $wpdb;
+
+		$limit = max( 1, min( 100, $limit ) );
+		if ( $user_id <= 0 || ! self::table_exists() ) {
+			return [
+				'processed' => 0,
+				'done'      => true,
+			];
+		}
+
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT `id`, `context` FROM %i WHERE `user_id` = %d ORDER BY `id` ASC LIMIT %d',
+				self::table_name(),
+				$user_id,
+				$limit
+			),
+			ARRAY_A
+		);
+		$rows = is_array( $rows ) ? $rows : [];
+
+		foreach ( $rows as $row ) {
+			$context = json_decode( (string) ( $row['context'] ?? '{}' ), true );
+			$context = is_array( $context ) ? $context : [];
+			unset(
+				$context['identifier_fingerprint'],
+				$context['ip_fingerprint'],
+				$context['subject_fingerprint'],
+				$context['user_id']
+			);
+
+			$encoded = wp_json_encode( $context );
+			$wpdb->update(
+				self::table_name(),
+				[
+					'user_id' => null,
+					'context' => is_string( $encoded ) ? $encoded : '{}',
+				],
+				[ 'id' => (int) $row['id'] ],
+				[ '%d', '%s' ],
+				[ '%d' ]
+			);
+		}
+
+		return [
+			'processed' => count( $rows ),
+			'done'      => count( $rows ) < $limit,
+		];
+	}
+
+	/**
 	 * @return array{rows:array<int, array<string, mixed>>, total:int}
 	 */
 	public static function paginate( int $page = 1, int $per_page = 50, string $level = '' ): array {

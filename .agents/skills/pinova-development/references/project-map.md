@@ -8,7 +8,7 @@ Read this reference when locating code, reviewing authentication or identifiers,
 - `src/API/`: REST controllers and response envelope.
 - `src/Services/`: OTP, users, validation, rate limiting, firewall, SMS, channels, and API orchestration.
 - `src/Objects/`: normalized request identifiers and mobile handling.
-- `src/Integrations/Wordpress/`: profiles, users list, export authorization, Excel, VCF, and the staged native-login gate.
+- `src/Integrations/Wordpress/`: profiles, users list, export authorization, Excel, VCF, WordPress privacy exporters/erasers, policy text, and the staged native-login gate.
 - `src/Integrations/Woocommerce/`: login/account/checkout and constrained customer creation.
 - `src/Helpers/IP.php`: client-address and trusted-proxy handling.
 - `src/Logging/`: PSR-3 logger, safe-context allowlist, database handler, retention repository, and fallback handling.
@@ -41,6 +41,8 @@ Resolution returns a User ID only when the candidate is unambiguous. Multiple le
 Schema changes must be additive and `dbDelta()` compatible. Never alter/drop columns or indexes in `wp_users` or other core tables.
 
 Lifecycle setup is database-coordinated through `pinova_db_schema_version`; runtime code never writes activation sentinels into the plugin directory. Activation and normal startup call the same idempotent migration coordinator before services boot. Initial table creation uses WordPress `dbDelta()` so activation does not depend on PDO/Eloquent being available before the host finishes provisioning PHP extensions. Only an installation with no Pinova tables, options, or version metadata is stamped at the current version; an existing installation whose version option is missing runs legacy migrations from the baseline. A failed migration leaves the version unchanged for retry and keeps Pinova runtime integrations unloaded so native WordPress access remains available. Network-wide activation is unsupported and must fail with an administrator-facing explanation.
+
+WordPress privacy export returns only the Pinova-owned mobile profile value and non-sensitive audit facts (event, UTC time, and correlation ID). It never exports OTP rows, credentials, tokens, keyed fingerprints, or arbitrary log context. Approved erasure removes physical `pinova_mobile` metadata and matching temporary OTP records, then batches through user-linked log rows to clear User ID and keyed fingerprints while retaining non-identifying event facts.
 
 Deactivation clears every hook returned by `Install::scheduled_hooks()`. Uninstall preserves data unless `pinova_delete_data_on_uninstall` is explicitly enabled. Opt-in purge removes Pinova tables, options, transients, and schedules while preserving account identity metadata such as `pinova_mobile`; a table-removal failure aborts before options are deleted so the administrator can retry safely.
 

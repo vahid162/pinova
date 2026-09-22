@@ -11,30 +11,113 @@ $composerJson = json_decode( (string) file_get_contents( $root . '/composer.json
 $errors       = [];
 
 /**
+ * @param list<string> $errors
  * @return array<string, string>
  */
-function pinova_parse_plugin_headers( string $contents ): array {
-	$headers = [];
+function pinova_parse_plugin_headers( string $contents, array &$errors ): array {
+	$tokens           = token_get_all( $contents );
+	$headerBlock      = null;
+	$headerTokenIndex = null;
 
-	if ( preg_match_all( '/^[ \t]*\*[ \t]*([^:\r\n]+):[ \t]*(.*?)[ \t]*$/m', $contents, $matches, PREG_SET_ORDER ) ) {
-		foreach ( $matches as $match ) {
-			$headers[ trim( $match[1] ) ] = trim( $match[2] );
+	foreach ( $tokens as $index => $token ) {
+		if ( is_array( $token ) && in_array( $token[0], [ T_OPEN_TAG, T_WHITESPACE ], true ) ) {
+			continue;
 		}
+
+		if ( is_array( $token ) && in_array( $token[0], [ T_DOC_COMMENT, T_COMMENT ], true ) && str_starts_with( ltrim( $token[1] ), '/*' ) ) {
+			$headerBlock      = $token[1];
+			$headerTokenIndex = $index;
+		}
+		break;
+	}
+
+	if ( null === $headerBlock || preg_match( '/^[ \t]*\*[ \t]*Plugin Name:[ \t]*\S.*$/m', $headerBlock ) !== 1 ) {
+		$errors[] = 'pinova.php must begin with one canonical plugin header block.';
+
+		return [];
+	}
+
+	$headers    = [];
+	$duplicates = [];
+	$pattern    = '/^[ \t]*\*[ \t]*([^:\r\n]+):[ \t]*(.*?)[ \t]*$/m';
+
+	if ( preg_match_all( $pattern, $headerBlock, $matches, PREG_SET_ORDER ) ) {
+		foreach ( $matches as $match ) {
+			$name = trim( $match[1] );
+			if ( array_key_exists( $name, $headers ) ) {
+				$duplicates[ $name ] = true;
+				continue;
+			}
+
+			$headers[ $name ] = trim( $match[2] );
+		}
+	}
+
+	foreach ( array_slice( $tokens, (int) $headerTokenIndex + 1 ) as $token ) {
+		if ( ! is_array( $token ) || ! in_array( $token[0], [ T_DOC_COMMENT, T_COMMENT ], true ) ) {
+			continue;
+		}
+
+		if ( preg_match_all( $pattern, $token[1], $matches, PREG_SET_ORDER ) ) {
+			foreach ( $matches as $match ) {
+				$name = trim( $match[1] );
+				if ( array_key_exists( $name, $headers ) ) {
+					$duplicates[ $name ] = true;
+				}
+			}
+		}
+	}
+
+	foreach ( array_keys( $duplicates ) as $name ) {
+		$errors[] = "Plugin header field {$name} must appear exactly once in the canonical header block.";
 	}
 
 	return $headers;
 }
 
 /**
+ * @param list<string> $errors
  * @return array<string, string>
  */
-function pinova_parse_readme_headers( string $contents ): array {
-	$headers = [];
+function pinova_parse_readme_headers( string $contents, array &$errors ): array {
+	$lines      = preg_split( '/\R/', $contents );
+	$headers    = [];
+	$duplicates = [];
+	$bodyOffset = null;
 
-	if ( preg_match_all( '/^([A-Za-z][A-Za-z ]+):\s*(.*?)\s*$/m', $contents, $matches, PREG_SET_ORDER ) ) {
-		foreach ( $matches as $match ) {
-			$headers[ trim( $match[1] ) ] = trim( $match[2] );
+	if ( false === $lines ) {
+		$errors[] = 'Unable to parse readme.txt headers.';
+
+		return [];
+	}
+
+	foreach ( array_slice( $lines, 1, null, true ) as $index => $line ) {
+		if ( '' === trim( $line ) ) {
+			$bodyOffset = $index + 1;
+			break;
 		}
+
+		if ( preg_match( '/^([A-Za-z][A-Za-z ]+):\s*(.*?)\s*$/', $line, $match ) !== 1 ) {
+			continue;
+		}
+
+		$name = trim( $match[1] );
+		if ( array_key_exists( $name, $headers ) ) {
+			$duplicates[ $name ] = true;
+			continue;
+		}
+
+		$headers[ $name ] = trim( $match[2] );
+	}
+
+	foreach ( array_slice( $lines, $bodyOffset ?? count( $lines ) ) as $line ) {
+		if ( preg_match( '/^([A-Za-z][A-Za-z ]+):\s*(.*?)\s*$/', $line, $match ) === 1 && array_key_exists( trim( $match[1] ), $headers ) ) {
+			$duplicates[ trim( $match[1] ) ] = true;
+		}
+	}
+
+	foreach ( array_keys( $duplicates ) as $name ) {
+		$errors[] = "readme.txt header field {$name} must appear exactly once in the leading header block.";
 	}
 
 	return $headers;
@@ -344,8 +427,8 @@ function pinova_php_class_declares_public_method( string $contents, string $clas
 	return false;
 }
 
-$pluginHeaders = pinova_parse_plugin_headers( $plugin );
-$readmeHeaders = pinova_parse_readme_headers( $readme );
+$pluginHeaders = pinova_parse_plugin_headers( $plugin, $errors );
+$readmeHeaders = pinova_parse_readme_headers( $readme, $errors );
 $required      = [
 	'plugin' => [ 'Plugin Name', 'Plugin URI', 'Version', 'Text Domain', 'License', 'Requires at least', 'Requires PHP' ],
 	'readme' => [ 'Contributors', 'Tags', 'Requires at least', 'Tested up to', 'Requires PHP', 'Stable tag', 'License', 'License URI' ],

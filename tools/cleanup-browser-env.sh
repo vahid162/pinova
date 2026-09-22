@@ -17,10 +17,23 @@ configs=("$WP_ENV_HOME"/*/docker-compose.yml)
 if (( ${#configs[@]} == 1 )); then
     config=${configs[0]}
     parent=$(dirname "$config")
-    [[ $(basename "$parent") =~ ^[[:xdigit:]]{32}$ ]] || fail 'unexpected wp-env directory'
+    parent_name=$(basename -- "$parent")
+    legacy_layout=false
+    [[ $parent_name =~ ^[[:xdigit:]]{32}$ ]] && legacy_layout=true
+
+    descriptive_layout=false
+    if [[ -n ${GITHUB_WORKSPACE:-} && $GITHUB_WORKSPACE == /* && -d $GITHUB_WORKSPACE && ! -L $GITHUB_WORKSPACE ]]; then
+        config_path="$GITHUB_WORKSPACE/.wp-env.json"
+        config_digest=$(printf '%s' "$config_path" | md5sum)
+        config_digest=${config_digest%% *}
+        expected_parent="wp-env-$(basename -- "$GITHUB_WORKSPACE")-${config_digest:0:8}"
+        [[ $parent_name == "$expected_parent" ]] && descriptive_layout=true
+    fi
+
+    [[ $legacy_layout == true || $descriptive_layout == true ]] || fail 'unexpected wp-env directory'
     [[ ! -L "$parent" && ! -L "$config" && -f "$config" ]] || fail 'unsafe Compose configuration'
-    # 10.35.0 has no destroy --force. Use the same run-scoped Compose project,
-    # without an interactive prompt, global prune, or removal of shared images.
+    # Use the same run-scoped Compose project without an interactive prompt,
+    # global prune, or removal of shared images.
     docker compose --project-name "$expected" --file "$config" down --volumes --remove-orphans
 fi
 

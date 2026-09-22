@@ -61,10 +61,101 @@ function pinova_next_significant_token_index( array $tokens, int $index ): ?int 
  * @return list<string>
  */
 function pinova_php_defined_string_constants( string $contents, string $constant ): array {
-	$tokens = token_get_all( $contents );
-	$values = [];
+	$tokens                    = token_get_all( $contents );
+	$values                    = [];
+	$braceDepth               = 0;
+	$parenthesisDepth         = 0;
+	$bracketDepth             = 0;
+	$nonBootstrapScopeDepths  = [];
+	$nonBootstrapScopePending = false;
+	$arrowFunctionDepths      = [];
 
 	foreach ( $tokens as $index => $token ) {
+		if ( is_string( $token ) && in_array( $token, [ ',', ';', ')', ']', '}' ], true ) ) {
+			while ( $arrowFunctionDepths ) {
+				$arrowDepth = end( $arrowFunctionDepths );
+				if ( $arrowDepth['parenthesis'] !== $parenthesisDepth ||
+					$arrowDepth['bracket'] !== $bracketDepth ||
+					$arrowDepth['brace'] !== $braceDepth ) {
+					break;
+				}
+
+				array_pop( $arrowFunctionDepths );
+			}
+		}
+
+		if ( is_array( $token ) && in_array( $token[0], [ T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES ], true ) ) {
+			$braceDepth++;
+			continue;
+		}
+
+		if ( '(' === $token ) {
+			$parenthesisDepth++;
+		} elseif ( ')' === $token ) {
+			$parenthesisDepth--;
+		} elseif ( '[' === $token ) {
+			$bracketDepth++;
+		} elseif ( ']' === $token ) {
+			$bracketDepth--;
+		}
+
+		if ( '{' === $token ) {
+			$braceDepth++;
+			if ( $nonBootstrapScopePending ) {
+				$nonBootstrapScopeDepths[]  = $braceDepth;
+				$nonBootstrapScopePending = false;
+			}
+			continue;
+		}
+
+		if ( '}' === $token ) {
+			if ( $nonBootstrapScopeDepths && end( $nonBootstrapScopeDepths ) === $braceDepth ) {
+				array_pop( $nonBootstrapScopeDepths );
+			}
+			$braceDepth--;
+			continue;
+		}
+
+		if ( ';' === $token ) {
+			$nonBootstrapScopePending = false;
+			continue;
+		}
+
+		if ( is_array( $token ) && T_FN === $token[0] ) {
+			$arrowFunctionDepths[] = [
+				'parenthesis' => $parenthesisDepth,
+				'bracket'     => $bracketDepth,
+				'brace'       => $braceDepth,
+			];
+			continue;
+		}
+
+		if ( is_array( $token ) && T_FUNCTION === $token[0] ) {
+			$nonBootstrapScopePending = true;
+			continue;
+		}
+
+		if ( is_array( $token ) && in_array( $token[0], [ T_CLASS, T_INTERFACE, T_TRAIT, T_ENUM ], true ) ) {
+			$previousIndex = $index - 1;
+			while ( $previousIndex >= 0 ) {
+				$previousToken = $tokens[ $previousIndex ];
+				if ( ! is_array( $previousToken ) || ! in_array( $previousToken[0], [ T_WHITESPACE, T_COMMENT, T_DOC_COMMENT ], true ) ) {
+					break;
+				}
+				$previousIndex--;
+			}
+
+			$previousToken = $previousIndex >= 0 ? $tokens[ $previousIndex ] : null;
+			if ( ! is_array( $previousToken ) || T_DOUBLE_COLON !== $previousToken[0] ) {
+				$nonBootstrapScopePending = true;
+			}
+			continue;
+		}
+
+		if ( $nonBootstrapScopeDepths || $arrowFunctionDepths ) {
+			continue;
+		}
+
 		if ( ! is_array( $token ) || T_STRING !== $token[0] || 0 !== strcasecmp( $token[1], 'define' ) ) {
 			continue;
 		}

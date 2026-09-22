@@ -1,6 +1,14 @@
 {
   "name": "pinova",
   "private": true,
+  "packageManager": "npm@11.19.0",
+  "engines": {
+    "node": ">=24.18.0",
+    "npm": ">=11.16.0"
+  },
+  "overrides": {
+    "express": "4.22.3"
+  },
   "scripts": {
     "env:configure": "node tools/configure-wp-env.mjs",
     "env:start": "wp-env start",
@@ -12,6 +20,6 @@
   },
   "devDependencies": {
     "@playwright/test": "1.61.0",
-    "@wordpress/env": "10.35.0"
+    "@wordpress/env": "11.15.0"
   }
 }

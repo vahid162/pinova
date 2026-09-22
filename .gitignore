@@ -17,10 +17,3 @@ Thumbs.db
 /playwright-report/
 /test-results/
 /vendor/
-/vendor/bin/
-/vendor/phpstan/
-/vendor/phpunit/
-/vendor/sebastian/
-/vendor/squizlabs/
-/vendor/wp-coding-standards/
-/vendor/szepeviktor/

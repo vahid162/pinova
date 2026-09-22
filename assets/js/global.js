@@ -30,7 +30,7 @@ window.addEventListener('load', function () {
         .notyf {
             z-index: 999999 !important;
         }
-        
+
         @media (min-width: 640px) {
             .notyf__wrapper {
                 min-width: 225px;

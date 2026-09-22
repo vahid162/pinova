@@ -25,7 +25,7 @@ class Load {
 		if ( ! is_array( $scripts ) ) {
 			return $scripts;
 		}
-		
+
 		$scripts[] = 'pinova/assets/js/global.js';
 		$scripts[] = 'pinova/assets/js/pages/login-form.js';
 		$scripts[] = 'login-form-js-extra';

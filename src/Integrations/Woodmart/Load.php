@@ -26,7 +26,7 @@ class Load {
 	public static function get_template(): string {
 		$custom_styles =
 			'<style>
-				.pinova-container .text-primary-500 { color: var(--e-global-color-accent)} 
+				.pinova-container .text-primary-500 { color: var(--e-global-color-accent)}
 				.pinova-container .loader { border-color: var(--e-global-color-accent)}
 			</style>';
 

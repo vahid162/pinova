@@ -34,7 +34,7 @@ class Load {
 		$custom_styles =
 			'<style>
                 #login-form-popup {padding: 10px;}
-				.pinova-container .text-primary-500 { color: var(--fs-color-primary) !important;} 
+				.pinova-container .text-primary-500 { color: var(--fs-color-primary) !important;}
 				.pinova-container .loader { border-color: var(--fs-color-primary) !important;}
 				.pinova-container .button { background-color: var(--fs-color-primary) !important; color: #fff !important;}
 			</style>';
@@ -64,7 +64,7 @@ class Load {
                    <div class="account-login-inner">
                    <h2 class="uppercase h3">ورود / عضویت</h2>
                     ' . self::get_template() . '
-                   </div>            
+                   </div>
         </div>
     ';
 

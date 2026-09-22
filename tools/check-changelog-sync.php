@@ -30,4 +30,4 @@ try {
 	exit(1);
 }
 
-printf("Changelog synchronization check passed (%d releases).\n", $count);
+printf("Changelog synchronization check passed (%d current release).\n", $count);

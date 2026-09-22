@@ -29,7 +29,9 @@ Do not copy a rule into provider-specific AI files. Those files may only direct 
 ```bash
 php tools/check-ai-governance.php
 php tools/check-changelog-sync.php
+php tools/check-plugin-metadata.php
 bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree
+npm run lint:js
 npm run test:js
 ```
 

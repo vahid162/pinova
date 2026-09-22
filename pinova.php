@@ -1,14 +1,15 @@
 <?php
 /**
  * Plugin Name: پینوا
- * Plugin URI: https://wordpress.org/plugins/pinova
+ * Plugin URI: https://github.com/vahid162/pinova
  * Description: ورود و عضویت با تلفن همراه و کد یکبار مصرف، با قابلیت ارسال کد تایید از طریق پیامک، ایمیل، پیام صوتی و پیام رسان بله
  * Version: 1.2.6
+ * Text Domain: pinova
  * Author: ووکامرس فارسی
  * Author URI: https://woosupport.ir
  *
  * License URI:  https://www.gnu.org/licenses/gpl-3.0.html
- * License:      GPLv3 or later
+ * License:      GPL-3.0-or-later
  *
  * Requires at least: 6.8
  * Requires PHP: 8.1
@@ -49,8 +50,6 @@ if ( ! \Pinova\Install::migrate() ) {
 
 	return;
 }
-
-new \Pinova\Notice();
 
 if ( ! ( new \Pinova\Version() )->migrate() ) {
 	add_action( 'admin_notices', [ \Pinova\Install::class, 'render_migration_notice' ] );

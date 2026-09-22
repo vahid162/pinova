@@ -51,7 +51,7 @@
     "build": "bash tools/build.sh",
     "lint": "php -l pinova.php && find src utils tests tools -name '*.php' -print0 | xargs -0 -n1 php -l",
     "phpcs": "phpcs --standard=phpcs.xml.dist",
-    "phpstan": "phpstan analyse --configuration=phpstan.neon.dist --no-progress --memory-limit=1536M",
+    "phpstan": "phpstan analyse --configuration=phpstan.neon.dist --no-progress --memory-limit=3G",
     "test": "phpunit --configuration=phpunit.xml.dist",
     "check": [
       "@lint",

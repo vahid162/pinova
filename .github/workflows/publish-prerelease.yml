@@ -50,7 +50,7 @@ jobs:
           fi
 
           version="${BASH_REMATCH[1]}"
-          plugin_version="$(php -r '$s=file_get_contents("pinova.php"); preg_match("/Version:\\s*([0-9.]+)/", $s, $m); echo $m[1] ?? "";')"
+          plugin_version="$(php -r "\$s=file_get_contents('pinova.php'); preg_match('/Version:\\s*([0-9.]+)/', \$s, \$m); echo \$m[1] ?? '';")"
           if [[ "${plugin_version}" != "${version}" ]]; then
             echo "Tag version ${version} does not match plugin version ${plugin_version}" >&2
             exit 1
@@ -238,7 +238,7 @@ jobs:
           cmp ".build/pinova-${version}.zip.sha256" "${verify_dir}/pinova-${version}.zip.sha256"
 
           verified=false
-          for attempt in 1 2 3 4 5; do
+          for _ in 1 2 3 4 5; do
             if gh release verify "${tag}" --repo "${GITHUB_REPOSITORY}" && \
                gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.zip" --repo "${GITHUB_REPOSITORY}" && \
                gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.zip.sha256" --repo "${GITHUB_REPOSITORY}"; then

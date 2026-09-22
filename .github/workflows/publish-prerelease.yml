@@ -6,27 +6,70 @@ on:
     types: [completed]
     branches:
       - 'publish/v*'
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact successful Quality-run commit to publish
+        required: true
+        type: string
+      quality_run_id:
+        description: Successful Quality workflow run that authorized publication
+        required: true
+        type: string
 
-permissions:
-  artifact-metadata: write
-  attestations: write
-  contents: write
-  id-token: write
+permissions: {}
 
 concurrency:
-  group: pinova-prerelease-${{ github.event.workflow_run.head_branch }}
+  group: pinova-prerelease-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  publish:
+  dispatch:
     if: >-
+      github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
     env:
       RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
       RELEASE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      QUALITY_RUN_ID: ${{ github.event.workflow_run.id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Dispatch the publisher on the exact release ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ||
+                ! "${QUALITY_RUN_ID}" =~ ^[0-9]+$ ||
+                ! "${RELEASE_BRANCH}" =~ ^publish/v[0-9]+\.[0-9]+\.[0-9]+-rc[1-9][0-9]*$ ]]; then
+            echo "Invalid release dispatch identity" >&2
+            exit 1
+          fi
+
+          gh workflow run publish-prerelease.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${RELEASE_BRANCH}" \
+            --field "release_sha=${RELEASE_SHA}" \
+            --field "quality_run_id=${QUALITY_RUN_ID}"
+
+  publish:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      RELEASE_BRANCH: ${{ github.ref_name }}
+      QUALITY_RUN_ID: ${{ inputs.quality_run_id }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -46,13 +89,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ || ! "${QUALITY_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "Invalid release SHA or Quality run identity" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF}" != "refs/heads/${RELEASE_BRANCH}" || "${GITHUB_SHA}" != "${RELEASE_SHA}" ]]; then
+            echo "Publisher context ${GITHUB_REF}@${GITHUB_SHA} is not the authorized release ${RELEASE_BRANCH}@${RELEASE_SHA}" >&2
+            exit 1
+          fi
+
           tag="${RELEASE_BRANCH#publish/}"
           if [[ "${tag}" == "${RELEASE_BRANCH}" || ! "${tag}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-rc([1-9][0-9]*)$ ]]; then
             echo "Release branch must match publish/vX.Y.Z-rcN" >&2
             exit 1
           fi
-
           version="${BASH_REMATCH[1]}"
+
+          quality_state="$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${QUALITY_RUN_ID}" \
+            --jq '[.name, .event, .status, .conclusion, .head_sha, .head_branch, .head_repository.full_name] | @tsv')"
+          IFS=$'\t' read -r quality_name quality_event quality_status quality_conclusion quality_sha quality_branch quality_repo <<< "${quality_state}"
+          if [[ "${quality_name}" != "Quality" ||
+                "${quality_event}" != "push" ||
+                "${quality_status}" != "completed" ||
+                "${quality_conclusion}" != "success" ||
+                "${quality_sha}" != "${RELEASE_SHA}" ||
+                "${quality_branch}" != "${RELEASE_BRANCH}" ||
+                "${quality_repo}" != "${GITHUB_REPOSITORY}" ]]; then
+            echo "Quality run ${QUALITY_RUN_ID} does not authorize ${RELEASE_BRANCH}@${RELEASE_SHA}" >&2
+            exit 1
+          fi
+
           plugin_version="$(php -r "\$s=file_get_contents('pinova.php'); preg_match('/Version:\\s*([0-9.]+)/', \$s, \$m); echo \$m[1] ?? '';")"
           if [[ "${plugin_version}" != "${version}" ]]; then
             echo "Tag version ${version} does not match plugin version ${plugin_version}" >&2
@@ -166,7 +234,7 @@ jobs:
             "" \
             "- Exact commit: \`${RELEASE_SHA}\`" \
             "- Required installation gate: Release API \`immutable: true\` and a successful publisher workflow" \
-            "- Publisher identity: \`pinova-prerelease-v3\`" \
+            "- Publisher identity: \`pinova-prerelease-v4\`" \
             "- Installable asset: \`pinova-${version}.zip\`" \
             "- SHA-256: \`${checksum}\`" \
             "- SBOM: \`pinova-${version}.spdx.json\` with a separate checksum and signed SBOM attestation" \
@@ -294,6 +362,8 @@ jobs:
                gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.spdx.json.sha256" --repo "${GITHUB_REPOSITORY}" && \
                gh attestation verify "${verify_dir}/pinova-${version}.zip" \
                  --repo "${GITHUB_REPOSITORY}" \
+                 --source-digest "${RELEASE_SHA}" \
+                 --source-ref "refs/heads/${RELEASE_BRANCH}" \
                  --predicate-type 'https://spdx.dev/Document/v2.3'; then
               verified=true
               break

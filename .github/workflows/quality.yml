@@ -50,7 +50,7 @@ jobs:
         with:
           args: -color
       - name: Lint shell scripts
-        run: shellcheck tools/*.sh
+        run: git ls-files -z -- '*.sh' | xargs -0 -r shellcheck
 
   plugin-check:
     name: WordPress Plugin Check

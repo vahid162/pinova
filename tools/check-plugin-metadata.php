@@ -87,6 +87,11 @@ if ( ! is_array( $composerJson ) || ( $composerJson['license'] ?? '' ) !== ( $pl
 	$errors[] = 'Composer and plugin License values differ.';
 }
 
+$expectedComposerPhp = '>=' . ( $pluginHeaders['Requires PHP'] ?? '' );
+if ( ! is_array( $composerJson ) || ( $composerJson['require']['php'] ?? '' ) !== $expectedComposerPhp ) {
+	$errors[] = "Composer PHP requirement must be {$expectedComposerPhp}.";
+}
+
 if ( strlen( $readme ) >= 10 * 1024 ) {
 	$errors[] = sprintf( 'readme.txt must stay below 10 KiB; found %d bytes.', strlen( $readme ) );
 }

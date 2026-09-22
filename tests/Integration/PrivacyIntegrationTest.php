@@ -103,6 +103,10 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( [], $profile_items );
 		self::assertStringNotContainsString( '09123334444', $json );
 		self::assertStringNotContainsString( '+989123334444', $json );
+
+		$erasure = Privacy::erase_personal_data( 'login-mobile@example.test', 1 );
+
+		self::assertFalse( $erasure['items_removed'] );
 	}
 
 	public function test_eraser_removes_mobile_and_otp_then_anonymizes_audit_row(): void {

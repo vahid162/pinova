@@ -126,14 +126,13 @@ final class Privacy {
 		}
 
 		$mobile           = UserService::get_persisted_mobile( $user->ID );
-		$had_mobile       = metadata_exists( 'user', $user->ID, 'pinova_mobile' );
 		$otp_rows_removed = self::delete_otp_records( $user->ID, [ $email_address, $mobile ?? '' ] );
-		delete_user_meta( $user->ID, 'pinova_mobile' );
+		$mobile_removed   = delete_user_meta( $user->ID, 'pinova_mobile' );
 
 		$logs = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE );
 
 		return [
-			'items_removed'  => $had_mobile || $otp_rows_removed > 0 || $logs['processed'] > 0,
+			'items_removed'  => $mobile_removed || $otp_rows_removed > 0 || $logs['processed'] > 0,
 			'items_retained' => false,
 			'messages'       => [],
 			'done'           => $logs['done'],

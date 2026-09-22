@@ -5,6 +5,7 @@ declare(strict_types=1);
 $root         = dirname( __DIR__ );
 $plugin       = (string) file_get_contents( $root . '/pinova.php' );
 $readme       = (string) file_get_contents( $root . '/readme.txt' );
+$changelog    = (string) file_get_contents( $root . '/CHANGELOG.md' );
 $composerJson = json_decode( (string) file_get_contents( $root . '/composer.json' ), true );
 $errors       = [];
 
@@ -77,6 +78,17 @@ foreach ( [ 'Requires at least', 'Requires PHP' ] as $header ) {
 
 if ( ( $pluginHeaders['Version'] ?? '' ) !== ( $readmeHeaders['Stable tag'] ?? '' ) ) {
 	$errors[] = 'Plugin Version and readme.txt Stable tag differ.';
+}
+
+$currentChangelogVersion = '';
+if ( preg_match( '/^##\s+(\d+\.\d+\.\d+)(?:\s+-\s+\S.*?)?\s*$/m', $changelog, $matches ) === 1 ) {
+	$currentChangelogVersion = $matches[1];
+}
+
+if ( '' === $currentChangelogVersion ) {
+	$errors[] = 'CHANGELOG.md does not start with a valid release heading.';
+} elseif ( ( $readmeHeaders['Stable tag'] ?? '' ) !== $currentChangelogVersion ) {
+	$errors[] = 'Stable tag and current CHANGELOG.md release differ.';
 }
 
 if ( ( $pluginHeaders['License'] ?? '' ) !== ( $readmeHeaders['License'] ?? '' ) ) {

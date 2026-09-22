@@ -210,13 +210,23 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 
 		$user_id       = self::factory()->user->create( [ 'user_email' => 'erase@example.test' ] );
 		$other_user_id = self::factory()->user->create( [ 'user_email' => 'other@example.test' ] );
+		$fingerprint   = Logger::instance()->fingerprint( 'erase@example.test', 'email' );
 		update_user_meta( $user_id, 'pinova_mobile', '09121111111' );
 		Logger::instance()->audit(
 			'warning',
 			'privacy.erase_test',
 			[
 				'user_id'                => $user_id,
-				'identifier_fingerprint' => Logger::instance()->fingerprint( 'erase@example.test', 'email' ),
+				'identifier_fingerprint' => $fingerprint,
+				'operation'              => 'privacy_erasure',
+			]
+		);
+		Logger::instance()->audit(
+			'warning',
+			'privacy.other_owner',
+			[
+				'user_id'                => $other_user_id,
+				'identifier_fingerprint' => $fingerprint,
 				'operation'              => 'privacy_erasure',
 			]
 		);
@@ -272,6 +282,14 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 			),
 			ARRAY_A
 		);
+		$other_log = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT `user_id`, `context` FROM %i WHERE `event` = %s',
+				$wpdb->prefix . 'pinova_logs',
+				'privacy.other_owner'
+			),
+			ARRAY_A
+		);
 
 		self::assertTrue( $result['items_removed'] );
 		self::assertTrue( $result['done'] );
@@ -323,5 +341,8 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertNull( $row['user_id'] );
 		self::assertStringContainsString( 'privacy_erasure', $row['context'] );
 		self::assertStringNotContainsString( 'fingerprint', $row['context'] );
+		self::assertIsArray( $other_log );
+		self::assertSame( (string) $other_user_id, (string) $other_log['user_id'] );
+		self::assertStringContainsString( $fingerprint, $other_log['context'] );
 	}
 }

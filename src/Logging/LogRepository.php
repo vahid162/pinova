@@ -106,9 +106,13 @@ final class LogRepository {
 		$fingerprints = array_values( array_unique( array_filter( array_map( 'strval', $fingerprints ) ) ) );
 		$where        = '`user_id` = %d';
 		$values       = [ self::table_name(), $user_id ];
+		$matches      = [];
 		foreach ( $fingerprints as $fingerprint ) {
-			$where    .= ' OR `context` LIKE %s';
-			$values[] = '%"' . $wpdb->esc_like( $fingerprint ) . '"%';
+			$matches[] = '`context` LIKE %s';
+			$values[]  = '%"' . $wpdb->esc_like( $fingerprint ) . '"%';
+		}
+		if ( $matches ) {
+			$where .= ' OR (`user_id` IS NULL AND (' . implode( ' OR ', $matches ) . '))';
 		}
 		$values[] = $limit;
 		$query    = "SELECT `id`, `context` FROM %i WHERE ({$where}) ORDER BY `id` ASC LIMIT %d";

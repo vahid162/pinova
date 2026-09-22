@@ -126,16 +126,17 @@ final class Privacy {
 		}
 
 		$mobile           = UserService::get_persisted_mobile( $user->ID );
-		$otp_rows_removed = self::delete_otp_records( $user->ID, [ $email_address, $mobile ?? '' ] );
-		$mobile_removed   = delete_user_meta( $user->ID, 'pinova_mobile' );
+		$otp_result       = self::delete_otp_records( $user->ID, [ $email_address, $mobile ?? '' ] );
+		$mobile_result    = self::delete_physical_mobile( $user->ID );
 
-		$logs = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE );
+		$logs    = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE );
+		$success = $otp_result['success'] && $mobile_result['success'] && $logs['success'];
 
 		return [
-			'items_removed'  => $mobile_removed || $otp_rows_removed > 0 || $logs['processed'] > 0,
-			'items_retained' => false,
-			'messages'       => [],
-			'done'           => $logs['done'],
+			'items_removed'  => $mobile_result['removed'] > 0 || $otp_result['removed'] > 0 || $logs['processed'] > 0,
+			'items_retained' => ! $success,
+			'messages'       => $success ? [] : [ __( 'بخشی از داده‌های پینوا حذف نشد. لطفاً عملیات پاک‌سازی را دوباره اجرا کنید.', 'pinova' ) ],
+			'done'           => $success && $logs['done'],
 		];
 	}
 
@@ -156,14 +157,63 @@ final class Privacy {
 	}
 
 	/**
-	 * @param string[] $identifiers
+	 * @return array{removed:int,success:bool}
 	 */
-	private static function delete_otp_records( int $user_id, array $identifiers ): int {
+	private static function delete_physical_mobile( int $user_id ): array {
 		global $wpdb;
 
-		$table = $wpdb->prefix . 'pinova_otp';
-		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) !== $table ) {
-			return 0;
+		$meta_id = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT `umeta_id` FROM %i WHERE `user_id` = %d AND `meta_key` = %s LIMIT 1',
+				$wpdb->usermeta,
+				$user_id,
+				'pinova_mobile'
+			)
+		);
+
+		if ( '' !== $wpdb->last_error ) {
+			return [
+				'removed' => 0,
+				'success' => false,
+			];
+		}
+
+		if ( null === $meta_id ) {
+			return [
+				'removed' => 0,
+				'success' => true,
+			];
+		}
+
+		$removed = delete_user_meta( $user_id, 'pinova_mobile' );
+
+		return [
+			'removed' => $removed ? 1 : 0,
+			'success' => $removed,
+		];
+	}
+
+	/**
+	 * @param string[] $identifiers
+	 * @return array{removed:int,success:bool}
+	 */
+	private static function delete_otp_records( int $user_id, array $identifiers ): array {
+		global $wpdb;
+
+		$table       = $wpdb->prefix . 'pinova_otp';
+		$table_found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+		if ( '' !== $wpdb->last_error ) {
+			return [
+				'removed' => 0,
+				'success' => false,
+			];
+		}
+
+		if ( $table_found !== $table ) {
+			return [
+				'removed' => 0,
+				'success' => true,
+			];
 		}
 
 		$identifiers = array_values(
@@ -183,6 +233,11 @@ final class Privacy {
 		}
 
 		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Query contains only fixed placeholders assembled above.
-		return max( 0, (int) $wpdb->query( $wpdb->prepare( $query, $values ) ) );
+		$removed = $wpdb->query( $wpdb->prepare( $query, $values ) );
+
+		return [
+			'removed' => false === $removed ? 0 : max( 0, (int) $removed ),
+			'success' => false !== $removed,
+		];
 	}
 }

@@ -109,6 +109,32 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertFalse( $erasure['items_removed'] );
 	}
 
+	public function test_eraser_reports_retained_data_when_a_physical_delete_fails(): void {
+		$user_id = self::factory()->user->create( [ 'user_email' => 'retry-erasure@example.test' ] );
+		update_user_meta( $user_id, 'pinova_mobile', '09125556666' );
+
+		$block_delete = static function ( $check, int $object_id, string $meta_key ) use ( $user_id ) {
+			if ( $user_id === $object_id && 'pinova_mobile' === $meta_key ) {
+				return false;
+			}
+
+			return $check;
+		};
+		add_filter( 'delete_user_metadata', $block_delete, 10, 3 );
+
+		try {
+			$result = Privacy::erase_personal_data( 'retry-erasure@example.test', 1 );
+		} finally {
+			remove_filter( 'delete_user_metadata', $block_delete, 10 );
+		}
+
+		self::assertFalse( $result['items_removed'] );
+		self::assertTrue( $result['items_retained'] );
+		self::assertFalse( $result['done'] );
+		self::assertNotSame( [], $result['messages'] );
+		self::assertSame( '+989125556666', UserService::get_persisted_mobile( $user_id ) );
+	}
+
 	public function test_eraser_removes_mobile_and_otp_then_anonymizes_audit_row(): void {
 		global $wpdb;
 

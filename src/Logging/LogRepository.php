@@ -70,16 +70,35 @@ final class LogRepository {
 	/**
 	 * Remove the user link and keyed fingerprints while retaining event facts.
 	 *
-	 * @return array{processed:int,done:bool}
+	 * @return array{processed:int,done:bool,success:bool}
 	 */
 	public static function anonymize_user( int $user_id, int $limit = 100 ): array {
 		global $wpdb;
 
 		$limit = max( 1, min( 100, $limit ) );
-		if ( $user_id <= 0 || ! self::table_exists() ) {
+		if ( $user_id <= 0 ) {
 			return [
 				'processed' => 0,
 				'done'      => true,
+				'success'   => true,
+			];
+		}
+
+		$table       = self::table_name();
+		$table_found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+		if ( '' !== $wpdb->last_error ) {
+			return [
+				'processed' => 0,
+				'done'      => false,
+				'success'   => false,
+			];
+		}
+
+		if ( $table_found !== $table ) {
+			return [
+				'processed' => 0,
+				'done'      => true,
+				'success'   => true,
 			];
 		}
 
@@ -92,8 +111,16 @@ final class LogRepository {
 			),
 			ARRAY_A
 		);
+		if ( '' !== $wpdb->last_error ) {
+			return [
+				'processed' => 0,
+				'done'      => false,
+				'success'   => false,
+			];
+		}
 		$rows = is_array( $rows ) ? $rows : [];
 
+		$processed = 0;
 		foreach ( $rows as $row ) {
 			$context = json_decode( (string) ( $row['context'] ?? '{}' ), true );
 			$context = is_array( $context ) ? $context : [];
@@ -105,7 +132,7 @@ final class LogRepository {
 			);
 
 			$encoded = wp_json_encode( $context );
-			$wpdb->update(
+			$updated = $wpdb->update(
 				self::table_name(),
 				[
 					'user_id' => null,
@@ -115,11 +142,22 @@ final class LogRepository {
 				[ '%d', '%s' ],
 				[ '%d' ]
 			);
+
+			if ( false === $updated ) {
+				return [
+					'processed' => $processed,
+					'done'      => false,
+					'success'   => false,
+				];
+			}
+
+			++$processed;
 		}
 
 		return [
-			'processed' => count( $rows ),
+			'processed' => $processed,
 			'done'      => count( $rows ) < $limit,
+			'success'   => true,
 		];
 	}
 

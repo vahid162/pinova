@@ -43,12 +43,28 @@ function pinova_parse_readme_headers( string $contents ): array {
 function pinova_php_class_declares_public_method( string $contents, string $class, string $method ): bool {
 	$tokens             = token_get_all( $contents );
 	$braceDepth         = 0;
+	$currentNamespace   = '';
 	$targetClassPending = false;
 	$targetClassDepth   = null;
 	$tokenCount         = count( $tokens );
 
 	for ( $index = 0; $index < $tokenCount; $index++ ) {
 		$token = $tokens[ $index ];
+
+		if ( null === $targetClassDepth && 0 === $braceDepth && is_array( $token ) && T_NAMESPACE === $token[0] ) {
+			$namespace = '';
+			for ( $namespaceIndex = $index + 1; $namespaceIndex < $tokenCount; $namespaceIndex++ ) {
+				$namespaceToken = $tokens[ $namespaceIndex ];
+				if ( is_string( $namespaceToken ) && in_array( $namespaceToken, [ ';', '{' ], true ) ) {
+					break;
+				}
+				if ( is_array( $namespaceToken ) && in_array( $namespaceToken[0], [ T_STRING, T_NAME_QUALIFIED, T_NS_SEPARATOR ], true ) ) {
+					$namespace .= $namespaceToken[1];
+				}
+			}
+			$currentNamespace = trim( $namespace, '\\' );
+			continue;
+		}
 
 		if ( null === $targetClassDepth && 0 === $braceDepth && is_array( $token ) && T_CLASS === $token[0] ) {
 			for ( $nameIndex = $index + 1; $nameIndex < $tokenCount; $nameIndex++ ) {
@@ -57,7 +73,10 @@ function pinova_php_class_declares_public_method( string $contents, string $clas
 					continue;
 				}
 
-				$targetClassPending = is_array( $nameToken ) && T_STRING === $nameToken[0] && $class === $nameToken[1];
+				$declaredClass      = is_array( $nameToken ) && T_STRING === $nameToken[0]
+					? ltrim( $currentNamespace . '\\' . $nameToken[1], '\\' )
+					: '';
+				$targetClassPending = $class === $declaredClass;
 				break;
 			}
 		}
@@ -226,7 +245,7 @@ if ( '' !== $runtimeVersion ) {
 }
 
 $migrationMethod = 'update_' . str_replace( '.', '', $runtimeVersion );
-if ( '' !== $runtimeVersion && ! pinova_php_class_declares_public_method( $versionClass, 'Version', $migrationMethod ) ) {
+if ( '' !== $runtimeVersion && ! pinova_php_class_declares_public_method( $versionClass, 'Pinova\\Version', $migrationMethod ) ) {
 	$errors[] = "src/Version.php must define {$migrationMethod}().";
 }
 

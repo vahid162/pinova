@@ -6,7 +6,7 @@ export TZ=UTC
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${project_dir}/.build"
 stage_dir="${build_dir}/pinova"
-version="$(php -r '$s=file_get_contents($argv[1]); preg_match("/Version:\\s*([0-9.]+)/", $s, $m); echo $m[1] ?? "dev";' "${project_dir}/pinova.php")"
+version="$(php -r "\$s=file_get_contents(\$argv[1]); preg_match('/Version:\\s*([0-9.]+)/', \$s, \$m); echo \$m[1] ?? 'dev';" "${project_dir}/pinova.php")"
 
 if [[ -n "${COMPOSER_PHAR:-}" ]]; then
   php_binary="${PHP_BINARY:-php}"

@@ -40,32 +40,82 @@ function pinova_parse_readme_headers( string $contents ): array {
 	return $headers;
 }
 
-function pinova_php_declares_method( string $contents, string $method ): bool {
-	$awaitingName = false;
+function pinova_php_class_declares_public_method( string $contents, string $class, string $method ): bool {
+	$tokens             = token_get_all( $contents );
+	$braceDepth         = 0;
+	$targetClassPending = false;
+	$targetClassDepth   = null;
+	$tokenCount         = count( $tokens );
 
-	foreach ( token_get_all( $contents ) as $token ) {
-		if ( is_array( $token ) && T_FUNCTION === $token[0] ) {
-			$awaitingName = true;
+	for ( $index = 0; $index < $tokenCount; $index++ ) {
+		$token = $tokens[ $index ];
+
+		if ( null === $targetClassDepth && 0 === $braceDepth && is_array( $token ) && T_CLASS === $token[0] ) {
+			for ( $nameIndex = $index + 1; $nameIndex < $tokenCount; $nameIndex++ ) {
+				$nameToken = $tokens[ $nameIndex ];
+				if ( is_array( $nameToken ) && in_array( $nameToken[0], [ T_WHITESPACE, T_COMMENT, T_DOC_COMMENT ], true ) ) {
+					continue;
+				}
+
+				$targetClassPending = is_array( $nameToken ) && T_STRING === $nameToken[0] && $class === $nameToken[1];
+				break;
+			}
+		}
+
+		if ( '{' === $token ) {
+			$braceDepth++;
+			if ( $targetClassPending ) {
+				$targetClassDepth   = $braceDepth;
+				$targetClassPending = false;
+			}
 			continue;
 		}
 
-		if ( ! $awaitingName ) {
+		if ( '}' === $token ) {
+			if ( $targetClassDepth === $braceDepth ) {
+				$targetClassDepth = null;
+			}
+			$braceDepth--;
 			continue;
 		}
 
-		if ( is_array( $token ) && in_array( $token[0], [ T_WHITESPACE, T_COMMENT, T_DOC_COMMENT ], true ) ) {
+		if ( null === $targetClassDepth || $targetClassDepth !== $braceDepth || ! is_array( $token ) || T_FUNCTION !== $token[0] ) {
 			continue;
 		}
 
-		if ( '&' === $token ) {
+		$declaredMethod = '';
+		for ( $nameIndex = $index + 1; $nameIndex < $tokenCount; $nameIndex++ ) {
+			$nameToken = $tokens[ $nameIndex ];
+			if ( is_array( $nameToken ) && in_array( $nameToken[0], [ T_WHITESPACE, T_COMMENT, T_DOC_COMMENT ], true ) ) {
+				continue;
+			}
+			if ( '&' === $nameToken || ( is_array( $nameToken ) && '&' === $nameToken[1] ) ) {
+				continue;
+			}
+			if ( is_array( $nameToken ) && T_STRING === $nameToken[0] ) {
+				$declaredMethod = $nameToken[1];
+			}
+			break;
+		}
+
+		if ( $method !== $declaredMethod ) {
 			continue;
 		}
 
-		if ( is_array( $token ) && T_STRING === $token[0] && $method === $token[1] ) {
-			return true;
+		for ( $visibilityIndex = $index - 1; $visibilityIndex >= 0; $visibilityIndex-- ) {
+			$visibilityToken = $tokens[ $visibilityIndex ];
+			if ( is_string( $visibilityToken ) && in_array( $visibilityToken, [ ';', '{', '}' ], true ) ) {
+				break;
+			}
+			if ( is_array( $visibilityToken ) && in_array( $visibilityToken[0], [ T_PRIVATE, T_PROTECTED ], true ) ) {
+				return false;
+			}
+			if ( is_array( $visibilityToken ) && T_PUBLIC === $visibilityToken[0] ) {
+				return true;
+			}
 		}
 
-		$awaitingName = false;
+		return true;
 	}
 
 	return false;
@@ -113,7 +163,7 @@ if ( ( $pluginHeaders['Version'] ?? '' ) !== ( $readmeHeaders['Stable tag'] ?? '
 }
 
 $runtimeVersion = '';
-if ( preg_match( '/define\(\s*[\'\"]PINOVA_VERSION[\'\"]\s*,\s*[\'\"](\d+\.\d+\.\d+)[\'\"]\s*\)/', $plugin, $matches ) === 1 ) {
+if ( preg_match( '/define\(\s*[\'\"]PINOVA_VERSION[\'\"]\s*,\s*[\'\"]((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))[\'\"]\s*\)/', $plugin, $matches ) === 1 ) {
 	$runtimeVersion = $matches[1];
 }
 
@@ -123,12 +173,15 @@ if ( '' === $runtimeVersion ) {
 	$errors[] = 'Plugin Version and PINOVA_VERSION differ.';
 }
 
-if ( '' !== $runtimeVersion && array_filter( array_map( 'intval', explode( '.', $runtimeVersion ) ), static fn ( int $part ): bool => $part >= 10 ) ) {
-	$errors[] = 'PINOVA_VERSION components must remain below 10 until the migration runner supports multi-digit components.';
+if ( '' !== $runtimeVersion ) {
+	[ , $minorVersion, $patchVersion ] = array_map( 'intval', explode( '.', $runtimeVersion ) );
+	if ( $minorVersion >= 10 || $patchVersion >= 10 ) {
+		$errors[] = 'PINOVA_VERSION minor and patch components must remain below 10 until the migration runner supports multi-digit components.';
+	}
 }
 
 $migrationMethod = 'update_' . str_replace( '.', '', $runtimeVersion );
-if ( '' !== $runtimeVersion && ! pinova_php_declares_method( $versionClass, $migrationMethod ) ) {
+if ( '' !== $runtimeVersion && ! pinova_php_class_declares_public_method( $versionClass, 'Version', $migrationMethod ) ) {
 	$errors[] = "src/Version.php must define {$migrationMethod}().";
 }
 

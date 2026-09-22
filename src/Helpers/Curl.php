@@ -98,7 +98,7 @@ class Curl {
 		$payload = is_string( $data ) ? json_decode( $data, true ) : $data;
 		self::collect_payload_credentials( $payload, $credentials );
 
-		return array_values(
+		$credentials = array_values(
 			array_unique(
 				array_filter(
 					array_map( 'strval', $credentials ),
@@ -106,6 +106,16 @@ class Curl {
 				)
 			)
 		);
+		usort(
+			$credentials,
+			static function ( string $left, string $right ): int {
+				$length_comparison = strlen( $right ) <=> strlen( $left );
+
+				return 0 !== $length_comparison ? $length_comparison : strcmp( $left, $right );
+			}
+		);
+
+		return $credentials;
 	}
 
 	/**

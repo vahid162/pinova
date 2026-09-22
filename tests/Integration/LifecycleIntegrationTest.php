@@ -111,7 +111,17 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 			self::assertFalse( get_option( 'pinova_test_owned_option', false ) );
 			self::assertFalse( get_option( Install::SCHEMA_OPTION, false ) );
 			self::assertFalse( wp_next_scheduled( 'pinova_logging_cleanup' ) );
-			self::assertSame( '09120000000', get_user_meta( $user_id, 'pinova_mobile', true ) );
+			self::assertSame(
+				'09120000000',
+				$wpdb->get_var(
+					$wpdb->prepare(
+						'SELECT `meta_value` FROM %i WHERE `user_id` = %d AND `meta_key` = %s LIMIT 1',
+						$wpdb->usermeta,
+						$user_id,
+						'pinova_mobile'
+					)
+				)
+			);
 		} finally {
 			wp_delete_user( $user_id );
 			delete_option( Install::PURGE_OPTION );

@@ -8,6 +8,10 @@ $errors = [];
 $durableFiles = [
     'AGENTS.md',
     'README.md',
+    'CONTRIBUTING.md',
+    'SECURITY.md',
+    'CODE_OF_CONDUCT.md',
+    '.github/repository-governance.md',
     '.agents/skills/pinova-development/SKILL.md',
     '.agents/skills/pinova-development/references/project-map.md',
     '.agents/skills/pinova-development/references/quality-and-release.md',
@@ -19,6 +23,12 @@ $adapterFiles = [
     'GEMINI.md',
     '.github/copilot-instructions.md',
     '.cursor/rules/00-agents-first.mdc',
+];
+
+$requiredRepositoryFiles = [
+    'LICENSE',
+    '.github/CODEOWNERS',
+    '.github/pull_request_template.md',
 ];
 
 $forbiddenPatterns = [
@@ -98,6 +108,12 @@ foreach ($adapterFiles as $relative) {
     $nonEmptyLines = array_filter(array_map('trim', preg_split('/\R/', $contents) ?: []));
     if (count($nonEmptyLines) > 8) {
         $errors[] = "AI adapter must remain a thin pointer without duplicated rules: {$relative}";
+    }
+}
+
+foreach ($requiredRepositoryFiles as $relative) {
+    if (!is_file($root . '/' . $relative)) {
+        $errors[] = "Missing repository policy file: {$relative}";
     }
 }
 

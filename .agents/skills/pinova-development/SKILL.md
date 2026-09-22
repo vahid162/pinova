@@ -20,6 +20,7 @@ Work from a repository checkout or disposable worktree, never from an installed 
 3. Classify the request as read-only review, diagnosis, implementation, migration, release, or production deployment. Permission for one class does not authorize another.
 4. Preserve unrelated changes. Never clean, reset, overwrite, migrate, publish, or deploy to simplify inspection.
 5. Establish the requested delivery boundary before reporting completion. For this project, a new version intended for installation or site testing is a GitHub-delivered release: local worktree changes and local ZIPs are intermediate evidence only.
+6. Route vulnerabilities through root `SECURITY.md`; never place exploit details, credentials, private routes, or production identifiers in public issues, pull requests, logs, or artifacts.
 
 ## Non-negotiable invariants
 

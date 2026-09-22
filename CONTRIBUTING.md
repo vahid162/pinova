@@ -40,3 +40,5 @@ Use the quality reference for the proportional PHP, integration, browser, HPOS, 
 Describe the requirement, implementation, tests, unresolved risk, and rollback implications. Explicitly classify impacts on runtime code, database schema, authentication, privacy, logging, dependencies, packaging, public documentation, and AI instructions.
 
 Published tags and releases are immutable. Fix a defect through a new reviewed commit and release rather than rewriting history.
+
+Repository administrators must keep GitHub metadata and branch/tag rules aligned with [`.github/repository-governance.md`](.github/repository-governance.md).

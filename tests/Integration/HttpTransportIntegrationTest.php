@@ -76,7 +76,7 @@ final class HttpTransportIntegrationTest extends WP_UnitTestCase {
 	public function test_provider_error_mapping_redacts_overlapping_credentials_longest_first(): void {
 		$filter = static fn() => [
 			'headers'  => [],
-			'body'     => '{"detail":"account provider-account-secret token provider-secret rejected","code":401}',
+			'body'     => '{"detail":"account provider-account-secret token provider-secret short xy rejected","code":401}',
 			'response' => [
 				'code'    => 401,
 				'message' => 'Unauthorized',
@@ -89,7 +89,7 @@ final class HttpTransportIntegrationTest extends WP_UnitTestCase {
 		try {
 			$response = Curl::post(
 				'https://provider.example/v1/send',
-				'{"username":"provider-account","password":"provider-account-secret","api_key":"provider-secret"}',
+				'{"username":"provider-account","password":"provider-account-secret","token":"provider-secret","api_key":"xy"}',
 				[ 'Authorization: Bearer provider-secret' ]
 			);
 		} finally {
@@ -97,7 +97,8 @@ final class HttpTransportIntegrationTest extends WP_UnitTestCase {
 		}
 
 		self::assertSame( 401, $response['code'] );
-		self::assertSame( 'account [redacted] token [redacted] rejected', $response['detail'] );
+		self::assertSame( 'account [redacted] token [redacted] short [redacted] rejected', $response['detail'] );
 		self::assertStringNotContainsString( '-secret', $response['detail'] );
+		self::assertStringNotContainsString( 'xy', $response['detail'] );
 	}
 }

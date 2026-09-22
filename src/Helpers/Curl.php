@@ -102,7 +102,7 @@ class Curl {
 			array_unique(
 				array_filter(
 					array_map( 'strval', $credentials ),
-					static fn( string $value ): bool => strlen( $value ) >= 4
+					static fn( string $value ): bool => '' !== $value
 				)
 			)
 		);

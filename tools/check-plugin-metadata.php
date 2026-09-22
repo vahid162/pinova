@@ -40,6 +40,37 @@ function pinova_parse_readme_headers( string $contents ): array {
 	return $headers;
 }
 
+function pinova_php_declares_method( string $contents, string $method ): bool {
+	$awaitingName = false;
+
+	foreach ( token_get_all( $contents ) as $token ) {
+		if ( is_array( $token ) && T_FUNCTION === $token[0] ) {
+			$awaitingName = true;
+			continue;
+		}
+
+		if ( ! $awaitingName ) {
+			continue;
+		}
+
+		if ( is_array( $token ) && in_array( $token[0], [ T_WHITESPACE, T_COMMENT, T_DOC_COMMENT ], true ) ) {
+			continue;
+		}
+
+		if ( '&' === $token ) {
+			continue;
+		}
+
+		if ( is_array( $token ) && T_STRING === $token[0] && $method === $token[1] ) {
+			return true;
+		}
+
+		$awaitingName = false;
+	}
+
+	return false;
+}
+
 $pluginHeaders = pinova_parse_plugin_headers( $plugin );
 $readmeHeaders = pinova_parse_readme_headers( $readme );
 $required      = [
@@ -92,8 +123,12 @@ if ( '' === $runtimeVersion ) {
 	$errors[] = 'Plugin Version and PINOVA_VERSION differ.';
 }
 
+if ( '' !== $runtimeVersion && array_filter( array_map( 'intval', explode( '.', $runtimeVersion ) ), static fn ( int $part ): bool => $part >= 10 ) ) {
+	$errors[] = 'PINOVA_VERSION components must remain below 10 until the migration runner supports multi-digit components.';
+}
+
 $migrationMethod = 'update_' . str_replace( '.', '', $runtimeVersion );
-if ( '' !== $runtimeVersion && preg_match( '/\bfunction\s+' . preg_quote( $migrationMethod, '/' ) . '\s*\(/', $versionClass ) !== 1 ) {
+if ( '' !== $runtimeVersion && ! pinova_php_declares_method( $versionClass, $migrationMethod ) ) {
 	$errors[] = "src/Version.php must define {$migrationMethod}().";
 }
 

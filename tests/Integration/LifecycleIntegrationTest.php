@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pinova\Tests\Integration;
 
 use Pinova\Install;
+use Pinova\Version;
 use WP_UnitTestCase;
 
 final class LifecycleIntegrationTest extends WP_UnitTestCase {
@@ -58,6 +59,15 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 
 		self::assertFileDoesNotExist( $sentinel );
 		$this->assert_tables_exist();
+	}
+
+	public function test_existing_installation_with_missing_version_metadata_runs_legacy_migrations(): void {
+		delete_option( 'pinova_version' );
+
+		self::assertTrue( Install::migrate() );
+		self::assertFalse( get_option( 'pinova_version', false ) );
+		self::assertTrue( ( new Version() )->migrate() );
+		self::assertSame( PINOVA_VERSION, get_option( 'pinova_version' ) );
 	}
 
 	public function test_deactivation_clears_pinova_schedules(): void {
@@ -125,7 +135,8 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 		} finally {
 			wp_delete_user( $user_id );
 			delete_option( Install::PURGE_OPTION );
-			Install::migrate();
+			self::assertTrue( Install::migrate() );
+			self::assertSame( PINOVA_VERSION, get_option( 'pinova_version' ) );
 			add_filter( 'query', [ $this, '_create_temporary_tables' ] );
 			add_filter( 'query', [ $this, '_drop_temporary_tables' ] );
 		}

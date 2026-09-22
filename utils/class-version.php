@@ -50,7 +50,6 @@ if ( ! class_exists( '\Nabik\Utils\V1\Version' ) ) {
 				return false;
 			}
 
-			$this->install();
 			$installed_version = (string) get_option( $this->version_key, $this->default_version );
 
 			if ( version_compare( $installed_version, $this->current_version, '>=' ) ) {

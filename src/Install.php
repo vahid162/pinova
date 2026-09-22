@@ -25,13 +25,15 @@ class Install extends \Nabik\Utils\V1\Install {
 	 * so an interrupted migration is retried on the next request.
 	 */
 	public static function migrate(): bool {
+		global $wpdb;
+
 		$installed = (int) get_option( self::SCHEMA_OPTION, 0 );
 
 		if ( $installed >= self::SCHEMA_VERSION ) {
 			return true;
 		}
+		$fresh_installation = self::is_fresh_installation();
 
-		global $wpdb;
 		$previous_suppression = method_exists( $wpdb, 'suppress_errors' )
 			? $wpdb->suppress_errors( true )
 			: false;
@@ -40,7 +42,11 @@ class Install extends \Nabik\Utils\V1\Install {
 			do_action( 'pinova_before_db_schema_migration', $installed, self::SCHEMA_VERSION );
 			self::create_tables();
 			do_action( 'pinova_after_db_schema_migration', $installed, self::SCHEMA_VERSION );
-			update_option( self::SCHEMA_OPTION, self::SCHEMA_VERSION, false );
+
+			if ( $fresh_installation ) {
+				self::update_option_verified( 'pinova_version', PINOVA_VERSION );
+			}
+			self::update_option_verified( self::SCHEMA_OPTION, self::SCHEMA_VERSION );
 
 			return true;
 		} catch ( Throwable $throwable ) {
@@ -111,8 +117,11 @@ class Install extends \Nabik\Utils\V1\Install {
 
 			foreach ( $site_ids as $site_id ) {
 				switch_to_blog( (int) $site_id );
-				self::purge_current_site_data();
-				restore_current_blog();
+				try {
+					self::purge_current_site_data();
+				} finally {
+					restore_current_blog();
+				}
 			}
 
 			return;
@@ -136,12 +145,12 @@ class Install extends \Nabik\Utils\V1\Install {
 
 		foreach ( self::table_names() as $table ) {
 			if ( ! preg_match( '/\A[A-Za-z0-9_]+\z/', $table ) ) {
-				return false;
+				throw new RuntimeException( 'Pinova generated an invalid database table name.' );
 			}
 
 			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- WordPress table names are internally generated and validated above.
 			if ( false === $wpdb->query( "DROP TABLE IF EXISTS `{$table}`" ) ) {
-				return false;
+				throw new RuntimeException( 'Pinova could not remove its operational database tables.' );
 			}
 		}
 
@@ -320,5 +329,41 @@ class Install extends \Nabik\Utils\V1\Install {
 		global $wpdb;
 
 		return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) === $table;
+	}
+
+	private static function is_fresh_installation(): bool {
+		global $wpdb;
+
+		foreach ( self::table_names() as $table ) {
+			if ( self::database_table_exists( $table ) ) {
+				return false;
+			}
+		}
+
+		$pattern = $wpdb->esc_like( 'pinova_' ) . '%';
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- One-time lifecycle discovery must inspect physical state.
+		$option  = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT `option_name` FROM %i WHERE `option_name` LIKE %s LIMIT 1',
+				$wpdb->options,
+				$pattern
+			)
+		);
+
+		return null === $option;
+	}
+
+	/** @param mixed $value */
+	private static function update_option_verified( string $option, $value ): void {
+		if ( update_option( $option, $value, false ) ) {
+			return;
+		}
+
+		$stored = get_option( $option, null );
+		if ( is_scalar( $stored ) && (string) $value === (string) $stored ) {
+			return;
+		}
+
+		throw new RuntimeException( 'Pinova migration state could not be persisted.' );
 	}
 }

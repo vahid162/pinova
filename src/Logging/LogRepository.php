@@ -76,8 +76,9 @@ final class LogRepository {
 	public static function anonymize_user( int $user_id, int $limit = 100, array $fingerprints = [] ): array {
 		global $wpdb;
 
-		$limit = max( 1, min( 100, $limit ) );
-		if ( $user_id <= 0 ) {
+		$limit        = max( 1, min( 100, $limit ) );
+		$fingerprints = array_values( array_unique( array_filter( array_map( 'strval', $fingerprints ) ) ) );
+		if ( $user_id <= 0 && ! $fingerprints ) {
 			return [
 				'processed' => 0,
 				'done'      => true,
@@ -103,19 +104,22 @@ final class LogRepository {
 			];
 		}
 
-		$fingerprints = array_values( array_unique( array_filter( array_map( 'strval', $fingerprints ) ) ) );
-		$where        = '`user_id` = %d';
-		$values       = [ self::table_name(), $user_id ];
-		$matches      = [];
+		$where   = [];
+		$values  = [ self::table_name() ];
+		$matches = [];
+		if ( $user_id > 0 ) {
+			$where[]  = '`user_id` = %d';
+			$values[] = $user_id;
+		}
 		foreach ( $fingerprints as $fingerprint ) {
 			$matches[] = '`context` LIKE %s';
 			$values[]  = '%"' . $wpdb->esc_like( $fingerprint ) . '"%';
 		}
 		if ( $matches ) {
-			$where .= ' OR (`user_id` IS NULL AND (' . implode( ' OR ', $matches ) . '))';
+			$where[] = '(`user_id` IS NULL AND (' . implode( ' OR ', $matches ) . '))';
 		}
 		$values[] = $limit;
-		$query    = "SELECT `id`, `context` FROM %i WHERE ({$where}) ORDER BY `id` ASC LIMIT %d";
+		$query    = 'SELECT `id`, `context` FROM %i WHERE (' . implode( ' OR ', $where ) . ') ORDER BY `id` ASC LIMIT %d';
 		$rows     = $wpdb->get_results(
 			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The dynamic fragment contains fixed placeholders only.
 			$wpdb->prepare( $query, $values ),

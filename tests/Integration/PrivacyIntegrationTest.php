@@ -264,6 +264,61 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertStringNotContainsString( 'identifier_fingerprint', $context );
 	}
 
+	public function test_eraser_removes_unowned_pre_account_email_records_without_a_user(): void {
+		global $wpdb;
+
+		$email       = 'orphaned-request@example.test';
+		$fingerprint = Logger::instance()->fingerprint( $email, 'email' );
+		Logger::instance()->audit(
+			'info',
+			'privacy.orphaned_pre_account',
+			[
+				'identifier_type'        => 'email',
+				'identifier_fingerprint' => $fingerprint,
+			]
+		);
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_otp',
+			[
+				'user_id'     => null,
+				'identifier'  => $email,
+				'code'        => '246810',
+				'ip_address'  => '127.0.0.1',
+				'attempts'    => 0,
+				'type'        => 'register',
+				'channels'    => '{}',
+				'expires_at'  => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ),
+				'verified_at' => null,
+			]
+		);
+
+		$result  = Privacy::erase_personal_data( $email, 1 );
+		$context = (string) $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT `context` FROM %i WHERE `event` = %s',
+				$wpdb->prefix . 'pinova_logs',
+				'privacy.orphaned_pre_account'
+			)
+		);
+
+		self::assertFalse( get_user_by( 'email', $email ) );
+		self::assertTrue( $result['items_removed'] );
+		self::assertTrue( $result['done'] );
+		self::assertFalse( $result['items_retained'] );
+		self::assertSame(
+			'0',
+			(string) $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT COUNT(*) FROM %i WHERE `identifier` = %s',
+					$wpdb->prefix . 'pinova_otp',
+					$email
+				)
+			)
+		);
+		self::assertStringNotContainsString( $fingerprint, $context );
+		self::assertStringNotContainsString( 'identifier_fingerprint', $context );
+	}
+
 	public function test_eraser_removes_mobile_and_otp_then_anonymizes_audit_row(): void {
 		global $wpdb;
 

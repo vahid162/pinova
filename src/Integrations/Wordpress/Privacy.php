@@ -117,15 +117,11 @@ final class Privacy {
 	 */
 	public static function erase_personal_data( string $email_address, int $page = 1 ): array {
 		unset( $page );
-		$user = get_user_by( 'email', sanitize_email( $email_address ) );
+		$email = sanitize_email( $email_address );
+		$user  = get_user_by( 'email', $email );
 
 		if ( ! $user instanceof WP_User ) {
-			return [
-				'items_removed'  => false,
-				'items_retained' => false,
-				'messages'       => [],
-				'done'           => true,
-			];
+			return self::erase_unowned_email_data( $email );
 		}
 
 		$mobile           = UserService::get_persisted_mobile( $user->ID );
@@ -146,6 +142,27 @@ final class Privacy {
 
 		return [
 			'items_removed'  => $mobile_result['removed'] > 0 || $otp_result['removed'] > 0 || $logs['processed'] > 0,
+			'items_retained' => ! $success,
+			'messages'       => $success ? [] : [ __( 'بخشی از داده‌های پینوا حذف نشد. لطفاً عملیات پاک‌سازی را دوباره اجرا کنید.', 'pinova' ) ],
+			'done'           => $success && $logs['done'],
+		];
+	}
+
+	/**
+	 * Remove pre-account records after WordPress has approved an erasure request
+	 * for an email address that does not currently belong to a WordPress user.
+	 *
+	 * @return array{items_removed:bool,items_retained:bool,messages:string[],done:bool}
+	 */
+	private static function erase_unowned_email_data( string $email_address ): array {
+		$identifiers  = self::email_variants( $email_address );
+		$otp_result   = self::delete_otp_records( 0, $identifiers );
+		$fingerprints = self::identifier_fingerprints( $identifiers );
+		$logs         = LogRepository::anonymize_user( 0, self::BATCH_SIZE, $fingerprints );
+		$success      = $otp_result['success'] && $logs['success'];
+
+		return [
+			'items_removed'  => $otp_result['removed'] > 0 || $logs['processed'] > 0,
 			'items_retained' => ! $success,
 			'messages'       => $success ? [] : [ __( 'بخشی از داده‌های پینوا حذف نشد. لطفاً عملیات پاک‌سازی را دوباره اجرا کنید.', 'pinova' ) ],
 			'done'           => $success && $logs['done'],
@@ -175,16 +192,7 @@ final class Privacy {
 	 * @return string[]
 	 */
 	private static function erasure_identifiers( WP_User $user, string $email_address, ?string $physical_mobile ): array {
-		$identifiers = [];
-		foreach ( [ $user->user_email, $email_address ] as $email ) {
-			$email = sanitize_email( $email );
-			if ( '' === $email ) {
-				continue;
-			}
-
-			$identifiers[] = $email;
-			$identifiers[] = strtolower( $email );
-		}
+		$identifiers = array_merge( self::email_variants( $user->user_email ), self::email_variants( $email_address ) );
 
 		if ( null !== $physical_mobile ) {
 			$identifiers[] = $physical_mobile;
@@ -198,6 +206,16 @@ final class Privacy {
 		}
 
 		return array_values( array_unique( array_filter( $identifiers ) ) );
+	}
+
+	/** @return string[] */
+	private static function email_variants( string $email_address ): array {
+		$email = sanitize_email( $email_address );
+		if ( '' === $email || ! is_email( $email ) ) {
+			return [];
+		}
+
+		return array_values( array_unique( [ $email, strtolower( $email ) ] ) );
 	}
 
 	/**
@@ -290,13 +308,25 @@ final class Privacy {
 				)
 			)
 		);
-		$query       = 'DELETE FROM %i WHERE `user_id` = %d';
-		$values      = [ $table, $user_id ];
+		$where       = [];
+		$values      = [ $table ];
+		if ( $user_id > 0 ) {
+			$where[]  = '`user_id` = %d';
+			$values[] = $user_id;
+		}
 
 		if ( $identifiers ) {
-			$query   .= ' OR (`user_id` IS NULL AND `identifier` IN (' . implode( ',', array_fill( 0, count( $identifiers ), '%s' ) ) . '))';
-			$values   = array_merge( $values, $identifiers );
+			$where[] = '(`user_id` IS NULL AND `identifier` IN (' . implode( ',', array_fill( 0, count( $identifiers ), '%s' ) ) . '))';
+			$values  = array_merge( $values, $identifiers );
 		}
+
+		if ( ! $where ) {
+			return [
+				'removed' => 0,
+				'success' => true,
+			];
+		}
+		$query = 'DELETE FROM %i WHERE ' . implode( ' OR ', $where );
 
 		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Query contains only fixed placeholders assembled above.
 		$removed = $wpdb->query( $wpdb->prepare( $query, $values ) );

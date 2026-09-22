@@ -70,9 +70,10 @@ final class LogRepository {
 	/**
 	 * Remove the user link and keyed fingerprints while retaining event facts.
 	 *
+	 * @param string[] $fingerprints
 	 * @return array{processed:int,done:bool,success:bool}
 	 */
-	public static function anonymize_user( int $user_id, int $limit = 100 ): array {
+	public static function anonymize_user( int $user_id, int $limit = 100, array $fingerprints = [] ): array {
 		global $wpdb;
 
 		$limit = max( 1, min( 100, $limit ) );
@@ -102,13 +103,18 @@ final class LogRepository {
 			];
 		}
 
-		$rows = $wpdb->get_results(
-			$wpdb->prepare(
-				'SELECT `id`, `context` FROM %i WHERE `user_id` = %d ORDER BY `id` ASC LIMIT %d',
-				self::table_name(),
-				$user_id,
-				$limit
-			),
+		$fingerprints = array_values( array_unique( array_filter( array_map( 'strval', $fingerprints ) ) ) );
+		$where        = '`user_id` = %d';
+		$values       = [ self::table_name(), $user_id ];
+		foreach ( $fingerprints as $fingerprint ) {
+			$where    .= ' OR `context` LIKE %s';
+			$values[] = '%"' . $wpdb->esc_like( $fingerprint ) . '"%';
+		}
+		$values[] = $limit;
+		$query    = "SELECT `id`, `context` FROM %i WHERE ({$where}) ORDER BY `id` ASC LIMIT %d";
+		$rows     = $wpdb->get_results(
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The dynamic fragment contains fixed placeholders only.
+			$wpdb->prepare( $query, $values ),
 			ARRAY_A
 		);
 		if ( self::database_error_present() ) {

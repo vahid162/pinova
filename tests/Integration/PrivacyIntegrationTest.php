@@ -135,6 +135,76 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( '+989125556666', UserService::get_persisted_mobile( $user_id ) );
 	}
 
+	public function test_eraser_cleans_pre_account_records_for_a_pinova_created_mobile_login(): void {
+		global $wpdb;
+
+		$user_id = self::factory()->user->create(
+			[
+				'user_email' => 'registered-by-pinova@example.test',
+				'user_login' => '09127778888',
+				'meta_input' => [ 'created_by' => 'pinova' ],
+			]
+		);
+		$wpdb->delete(
+			$wpdb->usermeta,
+			[
+				'user_id'  => $user_id,
+				'meta_key' => 'pinova_mobile',
+			],
+			[ '%d', '%s' ]
+		);
+		clean_user_cache( $user_id );
+
+		$fingerprint = Logger::instance()->fingerprint( '+989127778888', 'mobile' );
+		Logger::instance()->audit(
+			'info',
+			'privacy.pre_account',
+			[
+				'identifier_type'        => 'mobile',
+				'identifier_fingerprint' => $fingerprint,
+			]
+		);
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_otp',
+			[
+				'user_id'     => null,
+				'identifier'  => '+989127778888',
+				'code'        => '555666',
+				'ip_address'  => '127.0.0.1',
+				'attempts'    => 0,
+				'type'        => 'register',
+				'channels'    => '{}',
+				'expires_at'  => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ),
+				'verified_at' => null,
+			]
+		);
+
+		$result = Privacy::erase_personal_data( 'registered-by-pinova@example.test', 1 );
+		$context = (string) $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT `context` FROM %i WHERE `event` = %s',
+				$wpdb->prefix . 'pinova_logs',
+				'privacy.pre_account'
+			)
+		);
+
+		self::assertTrue( $result['items_removed'] );
+		self::assertFalse( $result['items_retained'] );
+		self::assertTrue( $result['done'] );
+		self::assertSame(
+			'0',
+			(string) $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT COUNT(*) FROM %i WHERE `identifier` = %s',
+					$wpdb->prefix . 'pinova_otp',
+					'+989127778888'
+				)
+			)
+		);
+		self::assertStringNotContainsString( $fingerprint, $context );
+		self::assertStringNotContainsString( 'identifier_fingerprint', $context );
+	}
+
 	public function test_eraser_removes_mobile_and_otp_then_anonymizes_audit_row(): void {
 		global $wpdb;
 

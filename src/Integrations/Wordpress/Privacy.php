@@ -2,7 +2,10 @@
 
 namespace Pinova\Integrations\Wordpress;
 
+use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
+use Pinova\Objects\Identifier;
+use Pinova\Objects\Mobile;
 use Pinova\Services\UserService;
 use WP_User;
 
@@ -126,11 +129,13 @@ final class Privacy {
 		}
 
 		$mobile           = UserService::get_persisted_mobile( $user->ID );
-		$otp_result       = self::delete_otp_records( $user->ID, [ $email_address, $mobile ?? '' ] );
+		$identifiers      = self::erasure_identifiers( $user, $email_address, $mobile );
+		$otp_result       = self::delete_otp_records( $user->ID, $identifiers );
 		$mobile_result    = self::delete_physical_mobile( $user->ID );
 
-		$logs    = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE );
-		$success = $otp_result['success'] && $mobile_result['success'] && $logs['success'];
+		$fingerprints = self::identifier_fingerprints( $identifiers );
+		$logs         = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE, $fingerprints );
+		$success      = $otp_result['success'] && $mobile_result['success'] && $logs['success'];
 
 		return [
 			'items_removed'  => $mobile_result['removed'] > 0 || $otp_result['removed'] > 0 || $logs['processed'] > 0,
@@ -154,6 +159,51 @@ final class Privacy {
 			. '</p>';
 
 		wp_add_privacy_policy_content( 'Pinova', wp_kses_post( $content ) );
+	}
+
+	/**
+	 * Include a Pinova-created mobile login for erasure ownership only. It is
+	 * not exported as Pinova profile metadata unless a physical meta row exists.
+	 *
+	 * @return string[]
+	 */
+	private static function erasure_identifiers( WP_User $user, string $email_address, ?string $physical_mobile ): array {
+		$identifiers = [ $email_address ];
+
+		if ( null !== $physical_mobile ) {
+			$identifiers[] = $physical_mobile;
+		}
+
+		if ( 'pinova' === get_user_meta( $user->ID, 'created_by', true ) ) {
+			$registration_mobile = new Mobile( $user->user_login );
+			if ( $registration_mobile->is_valid() ) {
+				$identifiers[] = $registration_mobile->get_formatted();
+			}
+		}
+
+		return array_values( array_unique( array_filter( $identifiers ) ) );
+	}
+
+	/**
+	 * @param string[] $identifiers
+	 * @return string[]
+	 */
+	private static function identifier_fingerprints( array $identifiers ): array {
+		$fingerprints = [];
+
+		foreach ( $identifiers as $value ) {
+			$identifier = new Identifier( $value );
+			if ( ! $identifier->is_valid() ) {
+				continue;
+			}
+
+			$fingerprint = Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() );
+			if ( '' !== $fingerprint ) {
+				$fingerprints[] = $fingerprint;
+			}
+		}
+
+		return array_values( array_unique( $fingerprints ) );
 	}
 
 	/**

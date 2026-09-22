@@ -43,27 +43,27 @@ collect_changed_files() {
 
 mapfile -t changed_files < <(collect_changed_files "${1:-}")
 
-plugin_changed=0
+instruction_contract_changed=0
 skill_changed=0
 
 for path in "${changed_files[@]}"; do
 	[[ "${path}" == "${skill_path}" ]] && skill_changed=1
 
 	case "${path}" in
-		pinova.php|readme.txt|src/*|utils/*|templates/*|assets/*|vendor/*|docs/*|composer.json|composer.lock|package.json|package-lock.json|.wp-env.json|phpunit*.xml.dist|phpstan.neon.dist|phpcs.xml.dist|tests/*|tools/*|.github/workflows/*|.agents/skills/pinova-development/references/*|.agents/skills/pinova-development/scripts/*)
-			plugin_changed=1
+		AGENTS.md|CONTRIBUTING.md|CLAUDE.md|GEMINI.md|.github/copilot-instructions.md|.cursor/rules/*|.agents/skills/pinova-development/references/*|.agents/skills/pinova-development/scripts/*|tools/check-ai-governance.php)
+			instruction_contract_changed=1
 			;;
 	esac
 done
 
-if (( plugin_changed == 1 && skill_changed == 0 )); then
-	printf 'ERROR: Pinova-affecting files changed without reviewing %s.\n' "${skill_path}" >&2
-	printf 'Update the skill meaningfully in the same change set.\n' >&2
+if (( instruction_contract_changed == 1 && skill_changed == 0 )); then
+	printf 'ERROR: an instruction contract or development procedure changed without reviewing %s.\n' "${skill_path}" >&2
+	printf 'Update the skill meaningfully or move non-contract evidence to .agents/reviews/.\n' >&2
 	exit 1
 fi
 
-if (( plugin_changed == 1 )); then
-	printf 'Pinova skill synchronization check passed.\n'
+if (( instruction_contract_changed == 1 )); then
+	printf 'Pinova instruction-contract synchronization check passed.\n'
 else
-	printf 'No Pinova-affecting files detected; skill synchronization not required.\n'
+	printf 'No instruction-contract changes detected; a skill edit is not required.\n'
 fi

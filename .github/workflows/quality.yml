@@ -21,6 +21,8 @@ jobs:
           coverage: none
       - name: Verify synchronized release history
         run: php tools/check-changelog-sync.php
+      - name: Verify AI and durable-document governance
+        run: php tools/check-ai-governance.php
       - name: Require Pinova skill synchronization
         env:
           PINOVA_SKILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}

@@ -1,109 +1,84 @@
 # Pinova repository instructions
 
-These instructions apply to the whole repository. User instructions take precedence. Repository guidance does not authorize production, database, GitHub, release, or account mutations the user did not request.
+These instructions apply to the entire repository. User instructions take precedence. Repository guidance never grants permission to mutate production, databases, GitHub settings, releases, accounts, or preserved development environments.
 
-## Starting point
+## Mandatory first read
 
-Before substantive work:
+Every human or AI contributor must read this root `AGENTS.md` completely before reading a provider-specific instruction file, a repository skill, or task-specific documentation. Provider adapters may point here, but must not duplicate these rules.
 
-1. Read `.agents/skills/pinova-development/SKILL.md` completely and follow its reference routing.
-2. Inspect `git status --short --branch`, branch, recent commits, tags, and relevant GitHub checks/releases. Verify the snapshot below.
-3. Read Persian `README.md` for the public overview and `readme.txt` for WordPress.org metadata.
-4. Classify the task as review, diagnosis, implementation, migration, packaging/release, or production deployment and stay within that authority.
-5. Preserve unrelated changes and secrets. Do not force-push, move published tags, discard work, or clean shared Docker resources.
-6. Establish the compute boundary before running dependency installation, static analysis, packaging, or wp-env. A separate worktree/container is not resource isolation; if the checkout shares a host with production or another live tenant, keep resource-intensive quality work on GitHub Actions or a dedicated development host.
+After this file, read `.agents/skills/pinova-development/SKILL.md` and only the references it routes to for the task. If another instruction conflicts with this file, stop and resolve the conflict before changing the repository.
 
-## Current RC12 release state
+## Start every task
 
-As verified on 2026-09-21, [PR #32](https://github.com/vahid162/pinova/pull/32) corrected RC11's committed-header redirect path and detached WooCommerce modal opener. Exact final head `3f55b0f37b61040e2f2036b67626fbf851d4aed7` passed automated review with no findings and Quality run `35645270711` with 16/16 jobs. Merge `8374fa1d570faeb38ea112bbd4afd8c05cf7eb86`, merged-main run `35646738789`, and exact `publish/v1.2.6-rc12` run `35647540513` also passed all 16 jobs. Publisher run `35648259216` built twice and published annotated tag `v1.2.6-rc12`. Release `393255786` reports `draft:false`, `prerelease:true`, and native `immutable:true`; publisher release/asset verification and independent redownload checks passed. Installable ZIP SHA-256 is `e5d56322b2842ad93f9d33762bb5999eff143b738784408b5979459ee15be651`. See [the RC12 release record](.agents/reviews/v1.2.6-rc12-release.md).
+1. Classify the request as review, diagnosis, implementation, migration, packaging/release, or production deployment. Authority for one class does not imply authority for another.
+2. Inspect the clean/dirty state, active branch, worktrees, remotes, and exact base ref. Preserve unrelated changes and every worktree or environment owned by another task.
+3. For implementation, branch from the intended remote ref in a dedicated worktree. Never develop in an installed plugin directory.
+4. Establish the compute boundary before dependency installation, static analysis, packaging, containers, or browser tests. A separate path or container does not isolate CPU, RAM, swap, I/O, or Docker.
+5. Read the public `README.md` and WordPress `readme.txt` when behavior, installation, compatibility, privacy, or packaging is involved.
 
-RC11 must not be installed and remains immutable history. RC12 supersedes it with deterministic regressions for both defects and is ready only for separately authorized staging/canary acceptance. Publication did not install the plugin, change a site/database/option, complete physical-device or production acceptance, or authorize native-login gate activation.
+## Durable documentation boundaries
 
-## Historical snapshot before PR27 merge
+- `AGENTS.md` contains durable repository-wide rules and source routing only.
+- `README.md` contains stable public product, installation, and contribution information only.
+- `.agents/skills/pinova-development/` contains durable specialist contracts and procedures.
+- `CONTRIBUTING.md`, `SECURITY.md`, and repository templates contain durable collaboration policies.
+- `CHANGELOG.md` and the WordPress changelog contain released behavior.
+- `.agents/reviews/` contains dated and immutable audit, pull-request, CI, release, staging, and deployment evidence.
 
-Snapshot checked on 2026-09-19 before the documentation follow-up was merged. Verify current refs and releases before acting; this snapshot is not a live deployment record.
+Do not put the current release candidate, branch, commit SHA, pull-request number, workflow/run ID, checksum, date-based snapshot, installed-site state, active milestone, or next-release status in `AGENTS.md`, `README.md`, the skill entrypoint, or stable references. Discover live state from Git, GitHub, and the authorized environment. Store nonsensitive historical evidence under `.agents/reviews/`.
 
-- Repository: `https://github.com/vahid162/pinova`
-- `main` at `1d39ec04d5f6293d4ea3511480980fbc8912938d` includes the 1.2.3 security line, reproducible-release hardening, structured logging, the 1.2.5 fresh-request database-bootstrap hotfix, the reviewed 1.2.6 account/Blocked List corrections merged by PR #8 at `270ace9`, native-immutable publisher hardening introduced by PR #9 at `cccf1c3`, the WooCommerce checkout-lifecycle correction, the account-brand/native-login and redirect round-trip work merged by PR #15 at `0b89485`, the focused OTP hierarchy follow-up merged by PR #17 at `b65370b`, the single-card account-interface correction merged by PR #19 at `c327c715`, RC6 release evidence merged by PR #20, the account-accessibility/native-login activation correction merged by PR #21 at `539f49c`, the final login layout/copy correction merged by PR #23 at `9d7f70b`, the checkout-modal/trigger correction merged by PR #25 at `6425c82`, and PR #26's OTP-purpose, recovery-resend, and busy-modal-dismissal correction. PR #25 and #26 changes shipped in RC9; they are not unreleased work.
-- Existing 1.2.3 pre-releases remain immutable. `v1.2.4-rc1` contains the Composer bootstrap regression and is superseded by `v1.2.5-rc1`; no RC is stable/latest.
-- Latest published candidate at this snapshot: `v1.2.6-rc9`, target `1d39ec04d5f6293d4ea3511480980fbc8912938d`, Release `391638137`, `draft: false`, `prerelease: true`, `immutable: true`. The Release API reports ZIP digest `4c34353127cfed47cc0dfd42f042debe67727279370afbfe34e756e6f176ed5d`; this metadata check is not a fresh independent asset/attestation audit. Preserve RC9 unchanged. The installed production version was not determined in this documentation task.
-- PR #27 (`fix/checkout-modal-corner-controls`) contains the unpublished modal-control fix and focus-test/CI-cleanup hardening. Verified code head `1423de55639ec3a50bfb50119e0a44ecc7926d6a` passed all 16 jobs in exact-head `pull_request` Quality run `35424813233`. A subsequent documentation commit requires its own CI and review. See [.agents/reviews/checkout-modal-controls-pr27.md](.agents/reviews/checkout-modal-controls-pr27.md) for scoped evidence and remaining gates.
-- Historical release evidence: `v1.2.6-rc1` is published and checksum-verified but reports `immutable: false` because it predates repository-level native Release Immutability. RC2–RC8 are retained unchanged. RC8 annotated tag object `1c77883` targets merged commit `9d7f70b`; Release `390600592` reported `immutable: true`, its exact-head PR, merged `main`, publish-branch, publisher, reproducibility, and release/asset-attestation gates passed, and two independent redownloads verified ZIP SHA-256 `343d92e7e6919a045ba530cbe73910271bcc0dd7596a7d6a05f7ef6bf94c698d`. An earlier operator report identified RC8 as the then-active production baseline. That historical report does not establish today's installed version. RC8 did not contain the later checkout-modal correction; neither publication nor installation authorized native-login gate activation.
-- The RC1 1.2.3 asset predates later PHP 8.1 dependency, CI matrix, PHP 8.5, and reproducible-build changes. Do not relabel or overwrite it.
-- `v1.2.3-rc3` is the current verified, installable 1.2.3 pre-release. It pins Composer 2.10.3, UTC, and staged permissions; keep all prior RC tags immutable.
-- The quality matrix covers PHP 8.1–8.5, WordPress 6.8/latest/7.1, WooCommerce fixed/latest/11.1.0, and HPOS on/off where configured.
-- Release history is mirrored between root `CHANGELOG.md` and the WordPress.org `readme.txt` Changelog section. CI compares release order and every entry; update both in the same change set.
-- Structured persistent logging shipped in the 1.2.4 line. In 1.2.5, the bounded administrator SMS test is an audit event that bypasses the minimum threshold, while the viewer reports table availability and the effective minimum level.
-- `utils/class-database.php` is both classmapped and eagerly loaded through Composer `autoload.files`. Removing it from `vendor/composer/autoload_files.php` breaks fresh REST requests before authentication, OTP, SMS, block, and logging operations can run.
-- Task-specific historical worktrees, toolchains, and wp-env projects are retained on the development host. Discover their current paths, ports, container state, and volumes with read-only commands before acting; do not publish host-local coordinates in this public repository.
-- An earlier RC2 wp-env project and worktree are separately preserved. Never use, stop, update, or remove their containers, volumes, database, or ports for 1.2.4 work. Identify ownership from the project labels and task handoff rather than assuming a directory name.
-- The separate 1.3 development branch is `security/v1.2.3-v1.3.0`. Its identity schema/migration/merge features are not shipped by main 1.2.3.
+## Non-negotiable product invariants
 
-Verify all facts before acting and update this section whenever lineage, release, compatibility, blocker, or milestone changes.
+- WordPress User ID is the account anchor. OTP login, profile edits, fallback resolution, and migrations must not rewrite `wp_users.user_login`.
+- Public authentication and recovery responses must not reveal account existence, password availability, or native-only role policy.
+- Password authentication must use the native WordPress pipeline so security plugins, 2FA, passkeys, and standard hooks remain effective.
+- OTP verification is purpose-bound. Login/registration and password-recovery records must not cross flows.
+- Ambiguous legacy identity resolution fails closed. Multi-account merge requires its own audited migration workflow.
+- Core WordPress tables are never altered destructively. Plugin schema changes are additive, idempotent, retryable, and rollback-tolerant.
+- Logs never contain raw identifiers, OTPs, passwords, reset keys, tokens, nonces, cookies, provider payloads, exception messages, file paths, or traces. Context is deny-by-default and attacker-controlled events are bounded.
+- A logging failure must never interrupt authentication, OTP, REST, export, or another user request.
+- Redirects are validated, empty destinations receive an explicit same-site fallback, and failed redirects return a controlled nonblank response.
+- Role allowlists are revalidated after filters; administrative or commerce-management capabilities cannot be admitted to public authentication policy accidentally.
+- Spreadsheet formatting is restricted to populated ranges. Permanent blocks use a null expiry and must survive expired-row cleanup.
+- Only `REMOTE_ADDR` is trusted by default. Proxy headers require an explicitly configured trusted CIDR.
 
-## Historical checkout-modal positioning follow-up
-
-PR #27 starts from RC9's `main` commit. It moves only the existing close control to the card corner, scopes modal close/back positioning against generic theme CSS, and advances the shared UI asset revision to `.5`. Authentication JavaScript, logo/form markup, standalone layout rules, and the plugin version are preserved. The subsequent test work waits for actual product-driven heading focus and verifies five isolated product faults without weakening assertions; CI cleanup is guarded to its own browser-run resources.
-
-The operator has now authorized documentation synchronization, reviewed merge, and publication of a new installable candidate after all required gates pass. This supersedes the earlier stop-at-PR boundary, not the production boundary. Select the next unused RC at publication. Never merge into, move, or overwrite the published RC9 tag or assets. A green PR run is not a merged-main check, release attestation, installation, or staging acceptance.
-
-## Next expected milestones
-
-1. Treat `v1.2.4-rc1` as superseded; do not install, retag, or overwrite it.
-2. Preserve RC1–RC12 and the completed PR27/PR28/PR30/PR32 chain as immutable history. RC11 is superseded before installation; RC12 is the corrected pre-release. Never substitute an implementation branch, worktree-local ZIP, or GitHub automatic source archive for the RC12 Release asset.
-3. Keep the native-login gate off during the first staging pass. Verify the exact production security integrations and preserved core-action matrix before a fresh private administrator login may arm the gate; gate activation remains a later, separately authorized boundary.
-4. Treat structural CI and package verification as distinct from physical-device and staging acceptance. RC12 acceptance must include canonical `/logout/` redirect behavior, stale/invalid nonce 403 handling, controlled fallback both when the redirect is rejected and when headers were already sent, distinguishable login/registration/recovery email copy, and focus restoration to a live replacement opener after WooCommerce fragment refresh. Complete Chrome Android and iOS Safari checks for the standalone page and checkout modal, including keyboard behavior, autofill, paste, live validation, dialog focus/closing, safe areas, enlarged text, and 4/5/6-digit OTP flows before production use of RC12.
-5. Keep publication independent of an Administration-scoped secret and repository Ruleset. With the repository owner's native Release Immutability setting confirmed, publish only from an exact reviewed and green `main` commit and require post-publication Release API, attestations, and independent redownload checks to pass. Preserve any failed tag or Release unchanged and use a new RC after correcting the cause. Record publication evidence separately; do not predeclare success in a pre-publication snapshot.
-6. Stop before installation. A production plugin replacement, the initial 48-hour gate-off canary, later gate activation with two break-glass methods, and the second 48-hour canary each require the plan's separate authorization and rollback controls.
-7. Rebuild 1.3 from corrected `main` only after the corrected 1.2.6 baseline completes its separately authorized staging and production canaries. Semantically port reviewed identity concepts; do not merge the obsolete branch wholesale or reuse `v1.3.0-rc1`.
+Detailed authentication, UI, WooCommerce, native-login, logging, and release contracts live in the Pinova skill and its routed references.
 
 ## Source routing
 
-- Bootstrap/upgrades: `pinova.php`, `src/Install.php`, `src/Version.php`, `utils/`.
-- REST/authentication: `src/API/`, `src/Services/`, `src/Objects/`.
-- Structured logging: `src/Logging/`, `src/Admin/Logs.php`, and `.agents/skills/pinova-development/references/logging.md`.
-- WordPress profiles/exports: `src/Integrations/Wordpress/`.
-- WooCommerce: `src/Integrations/Woocommerce/`.
-- Login UI: `templates/`, `assets/`.
-- Tests: `tests/`; real browser acceptance: `tests/browser/account-ui.spec.mjs`.
-- Targeted fault detection: `tools/check-modal-test-sensitivity.mjs` and `tests/js/modal-test-sensitivity.test.mjs`.
-- GitHub browser-job-only cleanup: `tools/cleanup-browser-env.sh` and `tests/js/browser-cleanup.test.mjs`; not a general desktop cleanup command.
-- PR27 evidence: `.agents/reviews/checkout-modal-controls-pr27.md`.
-- RC10 publication evidence: `.agents/reviews/v1.2.6-rc10-release.md`.
-- RC11 correction decision: `.agents/reviews/v1.2.6-rc11-correction-review.md`.
-- RC11 publication and supersession evidence: `.agents/reviews/v1.2.6-rc11-release.md`.
-- RC12 correction decision: `.agents/reviews/v1.2.6-rc12-correction-review.md`.
-- RC12 publication evidence: `.agents/reviews/v1.2.6-rc12-release.md`.
-- Reproducible package: `tools/build.sh`.
-- Release history: `CHANGELOG.md`, the `readme.txt` Changelog section, and `tools/check-changelog-sync.php`.
-- CI and pre-release publication: `.github/workflows/quality.yml`, `.github/workflows/publish-prerelease.yml`.
-- Agent guidance: `.agents/skills/pinova-development/`.
+- Bootstrap and upgrades: `pinova.php`, `src/Install.php`, `src/Version.php`, `utils/`
+- REST and authentication: `src/API/`, `src/Services/`, `src/Objects/`
+- Structured logging: `src/Logging/`, `src/Admin/Logs.php`
+- WordPress integrations and privacy: `src/Integrations/Wordpress/`
+- WooCommerce: `src/Integrations/Woocommerce/`
+- User interface: `templates/`, `assets/`
+- Automated coverage: `tests/`
+- Build and repository checks: `tools/`, `.github/workflows/`
+- Historical evidence: `.agents/reviews/`
 
-## Required workflow for changes
+## Change workflow
 
-1. Reproduce the issue or establish the requirement from source/tests.
+1. Establish the requirement from source, tests, logs, or an isolated reproduction.
 2. Add or update a regression test when practical.
-3. Implement the smallest coherent fix while preserving the Skill invariants.
-4. Run targeted tests, then proportional unit, integration, HPOS, static, coding-standard, dependency, and packaging checks.
-5. Meaningfully update `.agents/skills/pinova-development/SKILL.md` in the same change set for every plugin-affecting change.
-6. Update references, this snapshot, `README.md`, `CHANGELOG.md`, and the `readme.txt` Changelog section where behavior or operations changed.
-7. Run `php tools/check-changelog-sync.php`, then `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree`, and validate the Skill before handoff. The Skill gate checks changed paths, not the semantic truth of documentation; review status claims and relative links separately.
-8. Report exact files/refs/checks, remaining risk, production impact, and next safe step.
+3. Implement the smallest coherent change while preserving the product invariants.
+4. Run lightweight targeted checks locally. Run resource-intensive matrices and release builds only on GitHub Actions or an isolated development host.
+5. Update the skill or a reference only when the change alters an instruction contract, invariant, command, interface, or development/release procedure. Ordinary code changes do not require a ceremonial skill edit.
+6. Update public documentation when user-visible behavior, requirements, installation, privacy, or operations change. Update changelogs only for released behavior or an explicitly prepared release.
+7. Run `php tools/check-ai-governance.php`, `php tools/check-changelog-sync.php`, and `bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree` before handoff.
+8. Report exact refs, files, checks, residual risks, external effects, and the next outstanding gate.
 
-## Production boundary
+## Production and external-state boundary
 
-Treat `<production-wordpress-root>/wp-content/plugins/pinova` as read-only unless the user explicitly requests the exact production action with appropriate backup, rollback, and maintenance controls. Resolve the real production root from the authorized host at execution time; never hard-code or publish it here.
+Treat every installed Pinova directory and its database as read-only unless the user explicitly authorizes the exact operation and its target. Before an installation, migration, purge, settings change, or gate activation, identify the target, create a verified backup, define rollback, and use maintenance controls appropriate to the risk.
 
-Never use the production database for development or automated tests. Never run identity apply/merge/rollback, plugin replacement, web-server edits, or database writes merely because code development, testing, packaging, or GitHub publication was authorized.
+Never run automated development tests against production. Never stop, update, prune, or reuse another task's containers, volumes, databases, ports, or worktrees.
 
-Treat existing worktrees, wp-env projects, containers, volumes, and test databases as preserved operational assets. Do not reuse, stop, update, delete, prune, or clean an environment created by another task unless the user explicitly authorizes that exact action. Create a uniquely named disposable environment for new integration work and report whether it was retained or removed.
-
-Never run the full integration matrix, unrestricted PHPStan/Composer work, or release builds on a host that also serves production. Filesystem, worktree, and Docker separation do not prevent CPU, RAM, swap, I/O, or OOM interference. Use the repository's GitHub Actions matrix or a resource-isolated development host; when host ownership is uncertain, stop after lightweight source checks and verify it before continuing.
+GitHub publication is not installation authorization. A release candidate remains a prerelease until its required staging and canary gates pass. Published tags and releases are immutable history: never move, overwrite, or delete them to correct a defect.
 
 ## Definition of done
 
-- Code/documentation: the requested change is evidenced, exact-head checks and review pass or failures are accurately classified, guidance is synchronized, and the diff contains only intended changes. This does not mean a release exists.
-- Installable package: additionally require a reviewed merged-main commit and green CI, the successful publisher, a new immutable pre-release, verified release/asset attestations, and independently redownloaded ZIP/checksum. Report exact refs and hashes; a pre-release is not stable or production acceptance.
-- Installation: additionally require explicit target/backup/rollback authorization and the agreed staging, device, and post-installation checks. A ready package never grants permission to replace production files or activate the native-login gate.
+- Code/documentation: the intended diff is focused, tests and policy checks pass, and failures or untested boundaries are stated accurately.
+- Installable package: additionally requires reviewed GitHub history, green exact-head and merged-main checks, a reproducible release ZIP, immutable release metadata, attestations, and independent redownload verification.
+- Installation: additionally requires an authorized target, verified backup and rollback, staging acceptance, post-install checks, and the agreed observation window.
 
-Every handoff states the achieved boundary, unchanged external/production state, and the next outstanding gate.
+Every handoff states the achieved boundary, unchanged external or production state, and the next gate.

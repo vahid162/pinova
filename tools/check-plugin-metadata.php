@@ -102,6 +102,9 @@ function pinova_php_class_declares_public_method( string $contents, string $clas
 			continue;
 		}
 
+		$isPublic   = false;
+		$isStatic   = false;
+		$isAbstract = false;
 		for ( $visibilityIndex = $index - 1; $visibilityIndex >= 0; $visibilityIndex-- ) {
 			$visibilityToken = $tokens[ $visibilityIndex ];
 			if ( is_string( $visibilityToken ) && in_array( $visibilityToken, [ ';', '{', '}' ], true ) ) {
@@ -111,11 +114,53 @@ function pinova_php_class_declares_public_method( string $contents, string $clas
 				return false;
 			}
 			if ( is_array( $visibilityToken ) && T_PUBLIC === $visibilityToken[0] ) {
-				return true;
+				$isPublic = true;
+			}
+			if ( is_array( $visibilityToken ) && T_STATIC === $visibilityToken[0] ) {
+				$isStatic = true;
+			}
+			if ( is_array( $visibilityToken ) && T_ABSTRACT === $visibilityToken[0] ) {
+				$isAbstract = true;
 			}
 		}
 
-		return true;
+		if ( ! $isPublic || $isStatic || $isAbstract ) {
+			return false;
+		}
+
+		$parametersOpen  = false;
+		$parametersClose = null;
+		for ( $signatureIndex = $nameIndex + 1; $signatureIndex < $tokenCount; $signatureIndex++ ) {
+			$signatureToken = $tokens[ $signatureIndex ];
+			if ( is_array( $signatureToken ) && in_array( $signatureToken[0], [ T_WHITESPACE, T_COMMENT, T_DOC_COMMENT ], true ) ) {
+				continue;
+			}
+			if ( ! $parametersOpen && '(' === $signatureToken ) {
+				$parametersOpen = true;
+				continue;
+			}
+			if ( $parametersOpen && ')' === $signatureToken ) {
+				$parametersClose = $signatureIndex;
+				break;
+			}
+			return false;
+		}
+
+		if ( null === $parametersClose ) {
+			return false;
+		}
+
+		for ( $bodyIndex = $parametersClose + 1; $bodyIndex < $tokenCount; $bodyIndex++ ) {
+			$bodyToken = $tokens[ $bodyIndex ];
+			if ( '{' === $bodyToken ) {
+				return true;
+			}
+			if ( ';' === $bodyToken ) {
+				return false;
+			}
+		}
+
+		return false;
 	}
 
 	return false;

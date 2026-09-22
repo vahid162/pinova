@@ -135,6 +135,34 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( '+989125556666', UserService::get_persisted_mobile( $user_id ) );
 	}
 
+	public function test_eraser_keeps_mobile_until_all_log_batches_finish(): void {
+		$user_id = self::factory()->user->create( [ 'user_email' => 'batched-erasure@example.test' ] );
+		update_user_meta( $user_id, 'pinova_mobile', '09126667777' );
+
+		for ( $index = 0; $index <= 100; ++$index ) {
+			Logger::instance()->audit(
+				'warning',
+				'privacy.batched_erasure',
+				[
+					'user_id'   => $user_id,
+					'operation' => 'privacy_erasure',
+				]
+			);
+		}
+
+		$first = Privacy::erase_personal_data( 'batched-erasure@example.test', 1 );
+
+		self::assertFalse( $first['done'] );
+		self::assertFalse( $first['items_retained'] );
+		self::assertSame( '+989126667777', UserService::get_persisted_mobile( $user_id ) );
+
+		$second = Privacy::erase_personal_data( 'batched-erasure@example.test', 2 );
+
+		self::assertTrue( $second['done'] );
+		self::assertFalse( $second['items_retained'] );
+		self::assertNull( UserService::get_persisted_mobile( $user_id ) );
+	}
+
 	public function test_eraser_cleans_pre_account_records_for_a_pinova_created_mobile_login(): void {
 		global $wpdb;
 

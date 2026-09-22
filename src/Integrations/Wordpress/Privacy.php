@@ -131,11 +131,18 @@ final class Privacy {
 		$mobile           = UserService::get_persisted_mobile( $user->ID );
 		$identifiers      = self::erasure_identifiers( $user, $email_address, $mobile );
 		$otp_result       = self::delete_otp_records( $user->ID, $identifiers );
-		$mobile_result    = self::delete_physical_mobile( $user->ID );
+		$fingerprints     = self::identifier_fingerprints( $identifiers );
+		$logs             = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE, $fingerprints );
+		$mobile_result    = [
+			'removed' => 0,
+			'success' => true,
+		];
 
-		$fingerprints = self::identifier_fingerprints( $identifiers );
-		$logs         = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE, $fingerprints );
-		$success      = $otp_result['success'] && $mobile_result['success'] && $logs['success'];
+		if ( $otp_result['success'] && $logs['success'] && $logs['done'] ) {
+			$mobile_result = self::delete_physical_mobile( $user->ID );
+		}
+
+		$success = $otp_result['success'] && $mobile_result['success'] && $logs['success'];
 
 		return [
 			'items_removed'  => $mobile_result['removed'] > 0 || $otp_result['removed'] > 0 || $logs['processed'] > 0,

@@ -94,15 +94,31 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 		wp_schedule_single_event( time() + HOUR_IN_SECONDS, 'pinova_logging_cleanup' );
 		self::assertTrue( (bool) get_option( Install::PURGE_OPTION, false ) );
 
-		Install::uninstall();
+		/*
+		 * WP_UnitTestCase rewrites persistent CREATE/DROP statements to temporary
+		 * tables. Suspend those test-only filters so this assertion exercises the
+		 * real uninstall behavior, then rebuild the disposable schema in finally.
+		 */
+		remove_filter( 'query', [ $this, '_create_temporary_tables' ] );
+		remove_filter( 'query', [ $this, '_drop_temporary_tables' ] );
 
-		foreach ( $this->table_names() as $table ) {
-			self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) );
+		try {
+			Install::uninstall();
+
+			foreach ( $this->table_names() as $table ) {
+				self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) );
+			}
+			self::assertFalse( get_option( 'pinova_test_owned_option', false ) );
+			self::assertFalse( get_option( Install::SCHEMA_OPTION, false ) );
+			self::assertFalse( wp_next_scheduled( 'pinova_logging_cleanup' ) );
+			self::assertSame( '09120000000', get_user_meta( $user_id, 'pinova_mobile', true ) );
+		} finally {
+			wp_delete_user( $user_id );
+			delete_option( Install::PURGE_OPTION );
+			Install::migrate();
+			add_filter( 'query', [ $this, '_create_temporary_tables' ] );
+			add_filter( 'query', [ $this, '_drop_temporary_tables' ] );
 		}
-		self::assertFalse( get_option( 'pinova_test_owned_option', false ) );
-		self::assertFalse( get_option( Install::SCHEMA_OPTION, false ) );
-		self::assertFalse( wp_next_scheduled( 'pinova_logging_cleanup' ) );
-		self::assertSame( '09120000000', get_user_meta( $user_id, 'pinova_mobile', true ) );
 	}
 
 	private function assert_tables_exist(): void {

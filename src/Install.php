@@ -2,8 +2,7 @@
 
 namespace Pinova;
 
-use Illuminate\Database\Schema\Blueprint;
-use Nabik_Net_Database;
+use RuntimeException;
 use Throwable;
 
 class Install extends \Nabik\Utils\V1\Install {
@@ -213,37 +212,6 @@ class Install extends \Nabik\Utils\V1\Install {
 	}
 
 	public static function create_tables(): void {
-		if ( ! Nabik_Net_Database::Schema()->hasTable( 'pinova_otp' ) ) {
-			Nabik_Net_Database::Schema()->create(
-				'pinova_otp',
-				function ( Blueprint $table ): void {
-					$table->bigIncrements( 'id' );
-					$table->foreignId( 'user_id' )->nullable();
-					$table->string( 'identifier' );
-					$table->string( 'code' );
-					$table->ipAddress( 'ip_address' )->index();
-					$table->unsignedTinyInteger( 'attempts' )->default( 0 );
-					$table->string( 'type', 25 );
-					$table->json( 'channels' );
-					$table->timestamp( 'expires_at' )->nullable();
-					$table->timestamp( 'verified_at' )->nullable();
-					$table->index( [ 'identifier', 'expires_at' ] );
-				}
-			);
-		}
-
-		if ( ! Nabik_Net_Database::Schema()->hasTable( 'pinova_blocks' ) ) {
-			Nabik_Net_Database::Schema()->create(
-				'pinova_blocks',
-				function ( Blueprint $table ): void {
-					$table->bigIncrements( 'id' );
-					$table->string( 'identifier' )->unique();
-					$table->foreignId( 'blocked_by' )->nullable();
-					$table->timestamp( 'blocked_until' )->nullable();
-				}
-			);
-		}
-
 		self::create_wordpress_tables();
 	}
 
@@ -253,8 +221,43 @@ class Install extends \Nabik\Utils\V1\Install {
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
 		$charset_collate = $wpdb->get_charset_collate();
+		$otp             = $wpdb->prefix . 'pinova_otp';
+		$blocks          = $wpdb->prefix . 'pinova_blocks';
 		$rate_limits     = $wpdb->prefix . 'pinova_rate_limits';
 		$logs            = $wpdb->prefix . 'pinova_logs';
+
+		if ( ! self::database_table_exists( $otp ) ) {
+			dbDelta(
+				"CREATE TABLE {$otp} (
+				id bigint unsigned NOT NULL AUTO_INCREMENT,
+				user_id bigint unsigned NULL,
+				identifier varchar(255) NOT NULL,
+				code varchar(255) NOT NULL,
+				ip_address varchar(45) NOT NULL,
+				attempts tinyint unsigned NOT NULL DEFAULT 0,
+				type varchar(25) NOT NULL,
+				channels longtext NOT NULL,
+				expires_at timestamp NULL DEFAULT NULL,
+				verified_at timestamp NULL DEFAULT NULL,
+				PRIMARY KEY  (id),
+				KEY ip_address (ip_address),
+				KEY identifier_expires (identifier(191), expires_at)
+			) {$charset_collate};"
+			);
+		}
+
+		if ( ! self::database_table_exists( $blocks ) ) {
+			dbDelta(
+				"CREATE TABLE {$blocks} (
+				id bigint unsigned NOT NULL AUTO_INCREMENT,
+				identifier varchar(255) NOT NULL,
+				blocked_by bigint unsigned NULL,
+				blocked_until timestamp NULL DEFAULT NULL,
+				PRIMARY KEY  (id),
+				UNIQUE KEY identifier (identifier(191))
+			) {$charset_collate};"
+			);
+		}
 
 		dbDelta(
 			"CREATE TABLE {$rate_limits} (
@@ -285,6 +288,12 @@ class Install extends \Nabik\Utils\V1\Install {
 				KEY correlation_id (correlation_id)
 			) {$charset_collate};"
 		);
+
+		foreach ( self::table_names() as $table ) {
+			if ( ! self::database_table_exists( $table ) ) {
+				throw new RuntimeException( 'Pinova database schema is incomplete.' );
+			}
+		}
 	}
 
 	/**
@@ -299,5 +308,11 @@ class Install extends \Nabik\Utils\V1\Install {
 			$wpdb->prefix . 'pinova_rate_limits',
 			$wpdb->prefix . 'pinova_logs',
 		];
+	}
+
+	private static function database_table_exists( string $table ): bool {
+		global $wpdb;
+
+		return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) === $table;
 	}
 }

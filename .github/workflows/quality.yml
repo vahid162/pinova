@@ -21,6 +21,8 @@ jobs:
           coverage: none
       - name: Verify synchronized release history
         run: php tools/check-changelog-sync.php
+      - name: Validate plugin metadata and WordPress readme
+        run: php tools/check-plugin-metadata.php
       - name: Verify AI and durable-document governance
         run: php tools/check-ai-governance.php
       - name: Require Pinova skill synchronization
@@ -35,7 +37,60 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - run: npm run lint:js
       - run: npm run test:js
+
+  repository-lint:
+    name: Workflow and shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+      - name: Lint shell scripts
+        run: shellcheck tools/*.sh
+
+  plugin-check:
+    name: WordPress Plugin Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: pinova-plugin-check-${{ github.run_id }}-${{ github.run_attempt }}
+      WP_ENV_HOME: /tmp/pinova-plugin-check-${{ github.run_id }}-${{ github.run_attempt }}
+      WP_ENV_PORT: '8892'
+      WP_ENV_TESTS_PORT: '8893'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:2.10.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: composer install --no-interaction --prefer-dist
+      - run: npm install --ignore-scripts
+      - run: npm run env:configure
+        env:
+          WP_VERSION: '7.1'
+          WC_VERSION: '11.1.0'
+      - run: npm run env:start -- --update
+      - name: Install PDO MySQL for Plugin Check
+        run: |
+          npx wp-env run wordpress sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
+          npx wp-env run wordpress sudo apache2ctl -k graceful
+          npx wp-env run cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
+      - name: Run WordPress Plugin Check
+        run: |
+          npx wp-env run cli wp plugin install plugin-check --activate
+          npx wp-env run cli wp plugin check pinova --mode=update --format=table --require=./wp-content/plugins/plugin-check/cli.php
+      - name: Stop disposable Plugin Check environment
+        if: always()
+        run: npm run env:stop
 
   browser-account-ui:
     name: Account UI / Stage 1 Chromium
@@ -187,6 +242,8 @@ jobs:
     needs:
       - project-guidance
       - javascript
+      - repository-lint
+      - plugin-check
       - browser-account-ui
       - php
       - integration
@@ -196,12 +253,16 @@ jobs:
         env:
           PROJECT_GUIDANCE: ${{ needs.project-guidance.result }}
           JAVASCRIPT: ${{ needs.javascript.result }}
+          REPOSITORY_LINT: ${{ needs.repository-lint.result }}
+          PLUGIN_CHECK: ${{ needs.plugin-check.result }}
           BROWSER: ${{ needs.browser-account-ui.result }}
           PHP: ${{ needs.php.result }}
           INTEGRATION: ${{ needs.integration.result }}
         run: |
           test "${PROJECT_GUIDANCE}" = success
           test "${JAVASCRIPT}" = success
+          test "${REPOSITORY_LINT}" = success
+          test "${PLUGIN_CHECK}" = success
           test "${BROWSER}" = success
           test "${PHP}" = success
           test "${INTEGRATION}" = success

@@ -80,7 +80,9 @@ AGENTS.md                         نخستین سند الزامی برای عا
 ```bash
 php tools/check-ai-governance.php
 php tools/check-changelog-sync.php
+php tools/check-plugin-metadata.php
 bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree
+npm run lint:js
 npm run test:js
 ```
 

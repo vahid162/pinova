@@ -5,6 +5,7 @@
     "env:configure": "node tools/configure-wp-env.mjs",
     "env:start": "wp-env start",
     "env:stop": "wp-env stop",
+    "lint:js": "node tools/lint-javascript.mjs",
     "test:browser": "playwright test --config tests/browser/playwright.config.mjs",
     "test:js": "node --test tests/js/*.test.mjs",
     "test:integration": "bash tools/run-integration.sh"

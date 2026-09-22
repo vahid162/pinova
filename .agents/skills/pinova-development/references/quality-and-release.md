@@ -13,7 +13,9 @@ Install dependencies using the repository lockfiles and commands documented by t
 ```bash
 php tools/check-ai-governance.php
 php tools/check-changelog-sync.php
+php tools/check-plugin-metadata.php
 bash .agents/skills/pinova-development/scripts/check-skill-sync.sh --working-tree
+npm run lint:js
 npm run test:js
 composer lint
 composer test
@@ -21,6 +23,8 @@ composer phpstan
 composer phpcs
 composer audit
 ```
+
+GitHub Actions additionally runs WordPress Plugin Check against a disposable site, `actionlint` against every workflow, and ShellCheck against repository shell scripts. The readme/metadata gate keeps the WordPress readme below 10 KiB, aligns stable version, license, WordPress, and PHP requirements with the plugin header and Composer metadata, and requires `readme.txt` to carry only the current release notes while `CHANGELOG.md` retains full history.
 
 Run only the subset that is safe on the current host. GitHub Actions remains authoritative for the complete compatibility matrix.
 

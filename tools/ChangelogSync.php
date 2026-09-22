@@ -86,22 +86,21 @@ final class ChangelogSync {
 	public static function assertSynchronized(string $markdown, string $readme): int {
 		$markdownReleases = self::parseMarkdown($markdown);
 		$readmeReleases   = self::parseWordPressReadme($readme);
+		$latestVersion    = array_key_first($markdownReleases);
 
-		if (array_keys($markdownReleases) !== array_keys($readmeReleases)) {
+		if ($latestVersion === null || array_keys($readmeReleases) !== [$latestVersion]) {
 			throw new RuntimeException(sprintf(
-				'Version order mismatch. CHANGELOG.md: %s; readme.txt: %s.',
-				implode(', ', array_keys($markdownReleases)),
+				'readme.txt must contain only the latest CHANGELOG.md release. Expected: %s; readme.txt: %s.',
+				$latestVersion ?? '(none)',
 				implode(', ', array_keys($readmeReleases))
 			));
 		}
 
-		foreach ($markdownReleases as $version => $entries) {
-			if ($entries !== $readmeReleases[$version]) {
-				throw new RuntimeException(sprintf('Changelog entries differ for version %s.', $version));
-			}
+		if ($markdownReleases[$latestVersion] !== $readmeReleases[$latestVersion]) {
+			throw new RuntimeException(sprintf('Changelog entries differ for version %s.', $latestVersion));
 		}
 
-		return count($markdownReleases);
+		return 1;
 	}
 
 	/**

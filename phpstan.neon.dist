@@ -6,8 +6,10 @@ parameters:
   parallel:
     maximumNumberOfProcesses: 1
   paths:
+    - pinova.php
     - src
     - utils
+    - templates
   excludePaths:
     analyse:
       - vendor

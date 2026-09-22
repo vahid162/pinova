@@ -18,23 +18,26 @@ defined( 'ABSPATH' ) || exit;
 class AdminAPI extends RestAPI {
 
 	public const ROUTE_PERMISSION = [
-		'/pinova/admin/test/sms'     => 'manage_options',
+		'/pinova/admin/test/sms' => 'manage_options',
 	];
 
 	public function register_routes() {
 
-		register_rest_route( 'pinova/admin/test', '/sms', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'test_sms' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'identifier' => [
-					'required'          => true,
-					'validate_callback' => [ ValidationService::class, 'identifier' ],
+		register_rest_route(
+			'pinova/admin/test',
+			'/sms',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'test_sms' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'identifier' => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'identifier' ],
+					],
 				],
-			],
-		] );
-
+			]
+		);
 	}
 
 	/**
@@ -53,7 +56,7 @@ class AdminAPI extends RestAPI {
 
 			SMS::send_code( $identifier->get_value(), $code );
 
-			$message = sprintf( "کد تایید «%d» با موفقیت پیامک شد.", $code );
+			$message = sprintf( 'کد تایید «%d» با موفقیت پیامک شد.', $code );
 			$success = true;
 			Logger::instance()->audit(
 				'notice',

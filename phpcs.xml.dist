@@ -1,13 +1,13 @@
 <?xml version="1.0"?>
 <ruleset name="Pinova">
     <description>WordPress coding standards for Pinova.</description>
-    <file>src/Exceptions/RateLimitException.php</file>
-    <file>src/Helpers/IP.php</file>
-    <file>src/Logging</file>
-    <file>src/Admin/Logs.php</file>
-    <file>src/Integrations/Wordpress/NativeLoginGate.php</file>
-    <file>src/Services/RateLimitService.php</file>
+    <file>pinova.php</file>
+    <file>src</file>
+    <file>utils</file>
+    <file>templates</file>
     <exclude-pattern>vendor/*</exclude-pattern>
+    <!-- The email template is static HTML despite its historical .php extension. -->
+    <exclude-pattern>templates/emails/*</exclude-pattern>
     <arg name="extensions" value="php"/>
     <arg value="sp"/>
     <rule ref="WordPress-Core">
@@ -23,5 +23,54 @@
         <exclude name="Universal.Operators.DisallowShortTernary"/>
         <exclude name="WordPress.NamingConventions.ValidHookName.UseUnderscores"/>
         <exclude name="WordPress.Security.EscapeOutput.ExceptionNotEscaped"/>
+    </rule>
+    <rule ref="WordPress.WP.Capabilities">
+        <properties>
+            <property name="custom_capabilities" type="array">
+                <element value="edit_shop_order"/>
+            </property>
+        </properties>
+    </rule>
+    <!-- These standalone route templates render before the normal wp_head()/wp_footer() lifecycle. -->
+    <rule ref="WordPress.WP.EnqueuedResources.NonEnqueuedScript">
+        <exclude-pattern>templates/login-form.php</exclude-pattern>
+        <exclude-pattern>templates/login-partial.php</exclude-pattern>
+    </rule>
+    <rule ref="WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet">
+        <exclude-pattern>templates/login-form.php</exclude-pattern>
+        <exclude-pattern>templates/login-partial.php</exclude-pattern>
+    </rule>
+    <!-- Public and hook callback parameter names are compatibility contracts. -->
+    <rule ref="WordPress.NamingConventions.ValidVariableName.VariableNotSnakeCase">
+        <exclude-pattern>src/Helper.php</exclude-pattern>
+        <exclude-pattern>src/Integrations/Wordpress/Load.php</exclude-pattern>
+    </rule>
+    <rule ref="WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase">
+        <exclude-pattern>src/Channels/Email.php</exclude-pattern>
+    </rule>
+    <rule ref="Universal.NamingConventions.NoReservedKeywordParameterNames">
+        <exclude-pattern>src/Gateways/BaseGateway.php</exclude-pattern>
+        <exclude-pattern>src/Helpers/Number.php</exclude-pattern>
+        <exclude-pattern>src/Integrations/Woocommerce/Customer.php</exclude-pattern>
+        <exclude-pattern>src/Pinova.php</exclude-pattern>
+        <exclude-pattern>src/Services/SMSService.php</exclude-pattern>
+    </rule>
+    <rule ref="Generic.CodeAnalysis.UnusedFunctionParameter">
+        <exclude-pattern>src/API/RestAPI.php</exclude-pattern>
+        <exclude-pattern>src/Integrations/Woocommerce/Redirect.php</exclude-pattern>
+        <exclude-pattern>src/Services/ChannelService.php</exclude-pattern>
+        <exclude-pattern>src/Services/ValidationService.php</exclude-pattern>
+    </rule>
+    <!-- Preserve established class/member identifiers until a versioned compatibility migration. -->
+    <rule ref="PSR2.Classes.PropertyDeclaration.Underscore">
+        <exclude-pattern>src/Admin/Settings.php</exclude-pattern>
+        <exclude-pattern>src/Integrations/*/Load.php</exclude-pattern>
+        <exclude-pattern>src/Pinova.php</exclude-pattern>
+    </rule>
+    <rule ref="WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid">
+        <exclude-pattern>utils/class-database.php</exclude-pattern>
+    </rule>
+    <rule ref="WordPress.WP.CapitalPDangit.MisspelledNamespaceName">
+        <exclude-pattern>src/Integrations/Wordpress/*</exclude-pattern>
     </rule>
 </ruleset>

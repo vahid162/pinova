@@ -134,7 +134,7 @@ class UserService {
 
 		$user = get_userdata( $user_id );
 
-		if ( $user === false ) {
+		if ( false === $user ) {
 			return null;
 		}
 
@@ -158,7 +158,6 @@ class UserService {
 			if ( $mobile->is_valid() ) {
 				return $mobile->get_formatted();
 			}
-
 		}
 
 		return null;
@@ -167,15 +166,15 @@ class UserService {
 	public static function match( Identifier $identifier ): ?int {
 		$user_id = null;
 		if ( $identifier->is_email() ) {
-			$user_id = UserService::get_by_email( $identifier->get_value() );
+			$user_id = self::get_by_email( $identifier->get_value() );
 		}
 
 		if ( $identifier->is_mobile() ) {
-			$user_id = UserService::get_by_mobile( $identifier->get_value() );
+			$user_id = self::get_by_mobile( $identifier->get_value() );
 		}
 
 		if ( $identifier->is_username() ) {
-			$user_id = UserService::get_by_username( $identifier->get_value() );
+			$user_id = self::get_by_username( $identifier->get_value() );
 		}
 
 		Logger::instance()->debug(
@@ -279,14 +278,17 @@ class UserService {
 			}
 		}
 
-		$userdata = wp_parse_args( $userdata, [
-			'user_email' => '',
-			'first_name' => __( 'کاربر', 'pinova' ),
-			'last_name'  => '',
-			'meta_input' => [],
-		] );
+		$userdata = wp_parse_args(
+			$userdata,
+			[
+				'user_email' => '',
+				'first_name' => __( 'کاربر', 'pinova' ),
+				'last_name'  => '',
+				'meta_input' => [],
+			]
+		);
 
-		$allowed_roles = self::allowed_registration_roles();
+		$allowed_roles  = self::allowed_registration_roles();
 		$requested_role = sanitize_key( (string) ( $userdata['role'] ?? get_option( 'default_role', 'subscriber' ) ) );
 
 		if ( ! isset( $allowed_roles[ $requested_role ] ) ) {
@@ -313,21 +315,25 @@ class UserService {
 
 		if ( is_wp_error( $user_id ) ) {
 			throw new Exception( 'خطایی در زمان ایجاد کاربر رخ داده است.' );
-		} elseif ( empty ( $user_id ) ) {
+		} elseif ( empty( $user_id ) ) {
 			throw new Exception( 'خطایی در زمان ایجاد کاربر رخ داده است!' );
 		}
 
-		$wpdb->update( $wpdb->users, [
-			'user_pass' => 'NO_PASSWORD_' . wp_generate_password(),
-		], [
-			'ID' => $user_id,
-		] );
+		$wpdb->update(
+			$wpdb->users,
+			[
+				'user_pass' => 'NO_PASSWORD_' . wp_generate_password(),
+			],
+			[
+				'ID' => $user_id,
+			]
+		);
 
 		do_action( 'pinova/user_registered', $user_id );
 		Logger::instance()->notice(
 			'user.registered',
 			[
-				'user_id'        => $user_id,
+				'user_id'         => $user_id,
 				'identifier_type' => 'mobile',
 				'auth_method'     => 'otp',
 			]
@@ -355,7 +361,7 @@ class UserService {
 	}
 
 	public static function allowed_registration_roles(): array {
-		$allowed = [];
+		$allowed             = [];
 		$denied_capabilities = [
 			'manage_options',
 			'promote_users',
@@ -423,7 +429,7 @@ class UserService {
 	public static function get_persisted_mobile_result( int $user_id ): array {
 		global $wpdb;
 
-		$raw_value = $wpdb->get_var(
+		$raw_value  = $wpdb->get_var(
 			$wpdb->prepare(
 				'SELECT `meta_value` FROM %i WHERE `user_id` = %d AND `meta_key` = %s ORDER BY `umeta_id` DESC LIMIT 1',
 				$wpdb->usermeta,
@@ -475,9 +481,12 @@ class UserService {
 	 * @return string
 	 */
 	public static function generate_jwt( int $user_id ): string {
-		return JWT::encode( [
-			'user_id' => $user_id,
-		], HOUR_IN_SECONDS );
+		return JWT::encode(
+			[
+				'user_id' => $user_id,
+			],
+			HOUR_IN_SECONDS
+		);
 	}
 
 	/**
@@ -500,5 +509,4 @@ class UserService {
 
 		throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
 	}
-
 }

@@ -66,12 +66,15 @@ class Pinova {
 	public function register_rewrite_rules(): void {
 		add_rewrite_rule( '^login/?$', 'index.php?pinova_login=1', 'top' );
 		add_rewrite_rule( '^logout/?$', 'index.php?pinova_logout=1', 'top' );
-		add_filter( 'query_vars', static function ( array $vars ): array {
-			$vars[] = 'pinova_login';
-			$vars[] = 'pinova_logout';
+		add_filter(
+			'query_vars',
+			static function ( array $vars ): array {
+				$vars[] = 'pinova_login';
+				$vars[] = 'pinova_logout';
 
-			return $vars;
-		} );
+				return $vars;
+			}
+		);
 	}
 
 	public static function handle_urls() {
@@ -88,7 +91,7 @@ class Pinova {
 			exit;
 		}
 
-		if ( $wp->request === 'login' || get_query_var( 'pinova_login' ) ) {
+		if ( 'login' === $wp->request || get_query_var( 'pinova_login' ) ) {
 			self::prepare_force_reauthentication();
 
 			if ( get_current_user_id() ) {
@@ -101,10 +104,9 @@ class Pinova {
 			exit;
 		}
 
-		if ( $wp->request === 'logout' || get_query_var( 'pinova_logout' ) ) {
+		if ( 'logout' === $wp->request || get_query_var( 'pinova_logout' ) ) {
 			self::logout();
 		}
-
 	}
 
 	/**
@@ -117,12 +119,14 @@ class Pinova {
 
 		if ( ! wp_verify_nonce( $nonce, 'logout' ) ) {
 			wp_die(
-				__( 'توکن امنیتی شما معتبر نمی‌باشد.', 'pinova' ),
-				__( 'درخواست خروج نامعتبر است', 'pinova' ),
+				esc_html__( 'توکن امنیتی شما معتبر نمی‌باشد.', 'pinova' ),
+				esc_html__( 'درخواست خروج نامعتبر است', 'pinova' ),
 				[
 					'response'  => 403,
+					// wp_die() escapes link_url when it renders the error template.
+					// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 					'link_url'  => site_url(),
-					'link_text' => __( 'بازگشت به سایت', 'pinova' ),
+					'link_text' => esc_html__( 'بازگشت به سایت', 'pinova' ),
 				]
 			);
 		}
@@ -145,17 +149,21 @@ class Pinova {
 
 	public function enqueue_admin( $hook ) {
 
-		if ( $hook !== 'toplevel_page_pinova' ) {
+		if ( 'toplevel_page_pinova' !== $hook ) {
 			return;
 		}
 
 		wp_enqueue_style( 'pinova-admin', PINOVA_URL . 'assets/css/admin.css', [], PINOVA_VERSION );
 
-		wp_enqueue_script( 'pinova-admin', PINOVA_URL . 'assets/js/admin.js', [ 'jquery' ], PINOVA_VERSION );
-		wp_localize_script( 'pinova-admin', 'pinova', [
-			'root'  => esc_url_raw( rest_url() ),
-			'nonce' => wp_create_nonce( 'wp_rest' ),
-		] );
+		wp_enqueue_script( 'pinova-admin', PINOVA_URL . 'assets/js/admin.js', [ 'jquery' ], PINOVA_VERSION, true );
+		wp_localize_script(
+			'pinova-admin',
+			'pinova',
+			[
+				'root'  => esc_url_raw( rest_url() ),
+				'nonce' => wp_create_nonce( 'wp_rest' ),
+			]
+		);
 	}
 
 	public function add_script_type_module( array $attributes ): array {
@@ -163,12 +171,12 @@ class Pinova {
 		$modules = [
 			'pinova-login-modal-js',
 			'pinova-blocks-js',
-			'pinova-create-customer-modal-js'
+			'pinova-create-customer-modal-js',
 		];
 
 		$id = $attributes['id'] ?? null;
 
-		if ( in_array( $id, $modules ) ) {
+		if ( in_array( $id, $modules, true ) ) {
 			$attributes['type'] = 'module';
 		}
 
@@ -180,6 +188,8 @@ class Pinova {
 		$args = [];
 
 		if ( $back_url ) {
+			// A nested URL must use form encoding so its own query string remains one argument.
+			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.urlencode_urlencode
 			$args['back_url'] = urlencode( $back_url );
 		}
 
@@ -215,6 +225,8 @@ class Pinova {
 		$url = home_url( '/logout/' );
 
 		if ( $back_url ) {
+			// A nested URL must use form encoding so its own query string remains one argument.
+			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.urlencode_urlencode
 			$url = add_query_arg( 'back_url', urlencode( $back_url ), $url );
 		}
 
@@ -222,7 +234,7 @@ class Pinova {
 	}
 
 	public static function users_can_register(): bool {
-		return (bool) self::get_option( 'general.wordpress_users_can_register', get_option( 'users_can_register' ) == 1 );
+		return (bool) self::get_option( 'general.wordpress_users_can_register', 1 === (int) get_option( 'users_can_register' ) );
 	}
 
 	/**
@@ -268,5 +280,4 @@ class Pinova {
 
 		update_option( 'pinova_' . $section, $options );
 	}
-
 }

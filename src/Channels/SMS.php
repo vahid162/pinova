@@ -39,4 +39,3 @@ class SMS implements ChannelInterface {
 		return $gateway->send( $identifier, $message );
 	}
 }
-

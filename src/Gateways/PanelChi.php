@@ -39,10 +39,14 @@ class PanelChi extends BaseGateway {
 
 		}
 
-		$response = Curl::post( $url, json_encode( $payload ), [
-			'Content-Type: application/json',
-			'Authorization: Bearer ' . $this->get_option( 'api_key' ),
-		] );
+		$response = Curl::post(
+			$url,
+			wp_json_encode( $payload ),
+			[
+				'Content-Type: application/json',
+				'Authorization: Bearer ' . $this->get_option( 'api_key' ),
+			]
+		);
 
 		if ( isset( $response['data']['uid'] ) ) {
 			return true;

@@ -24,46 +24,50 @@ class API extends RestAPI {
 
 	public function register_routes() {
 
-		register_rest_route( 'pinova/woocommerce/customer', '/create', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'create_customer' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'first_name' => [
-					'required'          => true,
-					'sanitize_callback' => 'sanitize_text_field',
-					'validate_callback' => [ ValidationService::class, 'not_empty' ],
+		register_rest_route(
+			'pinova/woocommerce/customer',
+			'/create',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'create_customer' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'first_name' => [
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+						'validate_callback' => [ ValidationService::class, 'not_empty' ],
+					],
+					'last_name'  => [
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+						'validate_callback' => [ ValidationService::class, 'not_empty' ],
+					],
+					'mobile'     => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'mobile' ],
+					],
+					'email'      => [
+						'required'          => false,
+						'validate_callback' => [ ValidationService::class, 'email' ],
+						'default'           => '',
+					],
+					'order_id'   => [
+						'required'          => false,
+						'default'           => null,
+						'type'              => [ 'integer', 'null' ],
+						'sanitize_callback' => 'absint',
+						'validate_callback' => 'rest_validate_request_arg',
+					],
+					'order_data' => [
+						'required'          => false,
+						'default'           => [],
+						'validate_callback' => function ( $value ) {
+							return is_array( $value );
+						},
+					],
 				],
-				'last_name'  => [
-					'required'          => true,
-					'sanitize_callback' => 'sanitize_text_field',
-					'validate_callback' => [ ValidationService::class, 'not_empty' ],
-				],
-				'mobile'     => [
-					'required'          => true,
-					'validate_callback' => [ ValidationService::class, 'mobile' ],
-				],
-				'email'      => [
-					'required'          => false,
-					'validate_callback' => [ ValidationService::class, 'email' ],
-					'default'           => ''
-				],
-				'order_id'   => [
-					'required'          => false,
-					'default'           => null,
-					'type'              => [ 'integer', 'null' ],
-					'sanitize_callback' => 'absint',
-					'validate_callback' => 'rest_validate_request_arg',
-				],
-				'order_data' => [
-					'required'          => false,
-					'default'           => [],
-					'validate_callback' => function( $value ) {
-						return is_array( $value );
-					},
-				],
-			],
-		] );
+			]
+		);
 	}
 
 	/**
@@ -97,7 +101,16 @@ class API extends RestAPI {
 		$user_id = UserService::match( $mobile );
 
 		if ( $user_id ) {
-			return self::response( false, sprintf( __( 'کاربر با تلفن همراه %s وجود دارد.', 'pinova' ), $mobile->get_value() ), [], 409 );
+			return self::response(
+				false,
+				sprintf(
+					/* translators: %s: mobile number. */
+					__( 'کاربر با تلفن همراه %s وجود دارد.', 'pinova' ),
+					$mobile->get_value()
+				),
+				[],
+				409
+			);
 		}
 
 		if ( ! empty( $email ) ) {
@@ -107,9 +120,17 @@ class API extends RestAPI {
 			$email = $email->get_value();
 
 			if ( $user_id ) {
-				return self::response( false, sprintf( __( 'کاربر با ایمیل %s وجود دارد.', 'pinova' ), $email ), [], 409 );
+				return self::response(
+					false,
+					sprintf(
+						/* translators: %s: email address. */
+						__( 'کاربر با ایمیل %s وجود دارد.', 'pinova' ),
+						$email
+					),
+					[],
+					409
+				);
 			}
-
 		}
 
 		$invalid_fields = $this->invalid_order_fields( $order_data );
@@ -125,11 +146,15 @@ class API extends RestAPI {
 
 		try {
 
-			$user_id = UserService::create( $mobile->get_value(), $email, [
-				'first_name' => $first_name,
-				'last_name'  => $last_name,
-				'role'       => 'customer',
-			] );
+			$user_id = UserService::create(
+				$mobile->get_value(),
+				$email,
+				[
+					'first_name' => $first_name,
+					'last_name'  => $last_name,
+					'role'       => 'customer',
+				]
+			);
 
 			$customer = new WC_Customer( $user_id );
 			$customer->set_role( 'customer' );
@@ -146,21 +171,25 @@ class API extends RestAPI {
 				$order->save();
 
 			}
-
 		} catch ( Exception $e ) {
 			return self::response( false, $e->getMessage(), [], 500 );
 		}
 
 		$message = sprintf(
-			__( 'حساب کاربری «%s %s» با تلفن همراه %s با موفقیت ایجاد شد.', 'pinova' ),
+			/* translators: 1: first name, 2: last name, 3: mobile number. */
+			__( 'حساب کاربری «%1$s %2$s» با تلفن همراه %3$s با موفقیت ایجاد شد.', 'pinova' ),
 			$first_name,
 			$last_name,
 			$mobile->get_value()
 		);
 
-		return self::response( true, $message, [
-			'user_id' => $user_id,
-		] );
+		return self::response(
+			true,
+			$message,
+			[
+				'user_id' => $user_id,
+			]
+		);
 	}
 
 	public function permission_callback( WP_REST_Request $request ): bool {
@@ -211,10 +240,8 @@ class API extends RestAPI {
 				$invalid_fields[] = sanitize_key( (string) $raw_key );
 				continue;
 			}
-
 		}
 
 		return array_values( array_unique( array_filter( $invalid_fields ) ) );
 	}
-
 }

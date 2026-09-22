@@ -20,92 +20,107 @@ class BlocksAPI extends RestAPI {
 
 	public function register_routes() {
 
-		register_rest_route( 'pinova/admin/blocks', 'filters', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'filters' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'blocked_by' => [
-					'required'          => false,
-					'sanitize_callback' => 'sanitize_text_field',
+		register_rest_route(
+			'pinova/admin/blocks',
+			'filters',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'filters' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'blocked_by' => [
+						'required'          => false,
+						'sanitize_callback' => 'sanitize_text_field',
+					],
 				],
-			],
-		] );
+			]
+		);
 
-		register_rest_route( 'pinova/admin/blocks', 'index', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'index' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'identifier' => [
-					'required'          => false,
-					'sanitize_callback' => 'sanitize_text_field',
+		register_rest_route(
+			'pinova/admin/blocks',
+			'index',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'index' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'identifier' => [
+						'required'          => false,
+						'sanitize_callback' => 'sanitize_text_field',
+					],
+					'from_date'  => [
+						'required'          => false,
+						'sanitize_callback' => 'absint',
+					],
+					'to_date'    => [
+						'required'          => false,
+						'sanitize_callback' => 'absint',
+					],
+					'blocked_by' => [
+						'required'          => false,
+						'sanitize_callback' => 'absint',
+					],
+					'page'       => [
+						'required'          => false,
+						'sanitize_callback' => 'absint',
+						'default'           => 1,
+					],
+					'per_page'   => [
+						'required'          => false,
+						'sanitize_callback' => 'absint',
+						'default'           => 20,
+					],
 				],
-				'from_date'  => [
-					'required'          => false,
-					'sanitize_callback' => 'absint',
-				],
-				'to_date'    => [
-					'required'          => false,
-					'sanitize_callback' => 'absint',
-				],
-				'blocked_by' => [
-					'required'          => false,
-					'sanitize_callback' => 'absint',
-				],
-				'page'       => [
-					'required'          => false,
-					'sanitize_callback' => 'absint',
-					'default'           => 1,
-				],
-				'per_page'   => [
-					'required'          => false,
-					'sanitize_callback' => 'absint',
-					'default'           => 20,
-				],
-			],
-		] );
+			]
+		);
 
-		register_rest_route( 'pinova/admin/blocks', 'add', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'add' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'blocked_type'  => [
-					'required'          => true,
-					'sanitize_callback' => 'sanitize_key',
-					'validate_callback' => [ $this, 'validate_blocked_type' ],
+		register_rest_route(
+			'pinova/admin/blocks',
+			'add',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'add' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'blocked_type'  => [
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_key',
+						'validate_callback' => [ $this, 'validate_blocked_type' ],
+					],
+					'identifier'    => [
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+						'validate_callback' => [ $this, 'validate_block_identifier' ],
+					],
+					'blocked_until' => [
+						'required'          => false,
+						'sanitize_callback' => 'absint',
+					],
 				],
-				'identifier'    => [
-					'required'          => true,
-					'sanitize_callback' => 'sanitize_text_field',
-					'validate_callback' => [ $this, 'validate_block_identifier' ],
-				],
-				'blocked_until' => [
-					'required'          => false,
-					'sanitize_callback' => 'absint',
-				],
-			],
-		] );
+			]
+		);
 
-		register_rest_route( 'pinova/admin/blocks', 'delete', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'delete' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'block_id' => [
-					'required'          => true,
-					'sanitize_callback' => 'absint',
+		register_rest_route(
+			'pinova/admin/blocks',
+			'delete',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'delete' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'block_id' => [
+						'required'          => true,
+						'sanitize_callback' => 'absint',
+					],
 				],
-			],
-		] );
-
+			]
+		);
 	}
 
 	public function filters( WP_REST_Request $request ) {
 
 		if ( ! function_exists( 'get_editable_roles' ) ) {
-			require_once( ABSPATH . '/wp-admin/includes/user.php' );
+			require_once ABSPATH . '/wp-admin/includes/user.php';
 		}
 
 		// Users
@@ -116,7 +131,6 @@ class BlocksAPI extends RestAPI {
 			if ( $role['capabilities']['manage_options'] ?? false ) {
 				$roles[] = $id;
 			}
-
 		}
 
 		$search     = trim( (string) $request->get_param( 'blocked_by' ) );
@@ -143,9 +157,13 @@ class BlocksAPI extends RestAPI {
 			$users->get_results()
 		);
 
-		return self::response( true, null, [
-			'users' => array_values( $users ),
-		] );
+		return self::response(
+			true,
+			null,
+			[
+				'users' => array_values( $users ),
+			]
+		);
 	}
 
 	public function index( WP_REST_Request $request ) {
@@ -180,31 +198,43 @@ class BlocksAPI extends RestAPI {
 
 		/** @var Block[]|Builder $query */
 		$query = Block::query()
-		              ->orderByDesc( 'id' )
-		              ->when( $raw_identifier, function ( Builder $query ) use ( $raw_identifier ) {
+						->orderByDesc( 'id' )
+						->when(
+							$raw_identifier,
+							function ( Builder $query ) use ( $raw_identifier ) {
 
-			              $query->where( function ( Builder $query ) use ( $raw_identifier ) {
+								$query->where(
+									function ( Builder $query ) use ( $raw_identifier ) {
 
-				              $query->where( 'identifier', 'LIKE', "%{$raw_identifier}%" );
+										$query->where( 'identifier', 'LIKE', "%{$raw_identifier}%" );
 
-				              $identifier = new Identifier( $raw_identifier );
+										$identifier = new Identifier( $raw_identifier );
 
-				              if ( $identifier->is_valid() ) {
-					              $query->orWhere( 'identifier', '=', $identifier->get_value() );
-				              }
-
-			              } );
-
-			              } )
-			              ->when( $blocked_by, function ( Builder $query ) use ( $blocked_by ) {
-				$query->where( 'blocked_by', '=', $blocked_by );
-			              } )
-		              ->when( $from_date, function ( Builder $query ) use ( $from_date ) {
-			              $query->where( 'blocked_until', '>=', $from_date );
-		              } )
-		              ->when( $to_date, function ( Builder $query ) use ( $to_date ) {
-			              $query->where( 'blocked_until', '<=', $to_date );
-		              } );
+										if ( $identifier->is_valid() ) {
+												$query->orWhere( 'identifier', '=', $identifier->get_value() );
+										}
+									}
+								);
+							}
+						)
+							->when(
+								$blocked_by,
+								function ( Builder $query ) use ( $blocked_by ) {
+									$query->where( 'blocked_by', '=', $blocked_by );
+								}
+							)
+						->when(
+							$from_date,
+							function ( Builder $query ) use ( $from_date ) {
+								$query->where( 'blocked_until', '>=', $from_date );
+							}
+						)
+						->when(
+							$to_date,
+							function ( Builder $query ) use ( $to_date ) {
+								$query->where( 'blocked_until', '<=', $to_date );
+							}
+						);
 
 		$total_items = $query->count();
 		$total_pages = max( 1, (int) ceil( $total_items / $per_page ) );
@@ -216,12 +246,16 @@ class BlocksAPI extends RestAPI {
 			->map( [ $this, 'resource' ] )
 			->toArray();
 
-		return self::response( true, null, [
-			'blocks'       => $blocks,
-			'current_page' => intval( $page ),
-			'total_pages'  => $total_pages,
-			'total_items'  => intval( $total_items ),
-		] );
+		return self::response(
+			true,
+			null,
+			[
+				'blocks'       => $blocks,
+				'current_page' => intval( $page ),
+				'total_pages'  => $total_pages,
+				'total_items'  => intval( $total_items ),
+			]
+		);
 	}
 
 	public function add( WP_REST_Request $request ) {
@@ -277,12 +311,15 @@ class BlocksAPI extends RestAPI {
 		}
 
 		/** @var Block $block */
-		$block = Block::query()->updateOrCreate( [
-			'identifier' => $identifier,
-		], [
-			'blocked_by'    => get_current_user_id(),
-			'blocked_until' => $blocked_until,
-		] );
+		$block = Block::query()->updateOrCreate(
+			[
+				'identifier' => $identifier,
+			],
+			[
+				'blocked_by'    => get_current_user_id(),
+				'blocked_until' => $blocked_until,
+			]
+		);
 
 		Logger::instance()->notice(
 			'security.block_added',
@@ -295,11 +332,15 @@ class BlocksAPI extends RestAPI {
 			]
 		);
 
-		return self::response( true, __( 'مسدودی با موفقیت ذخیره شد.', 'pinova' ), [
-			'block_id' => $block->id,
-			'block'    => $this->resource( $block ),
-			'blocks'   => $this->blocks(),
-		] );
+		return self::response(
+			true,
+			__( 'مسدودی با موفقیت ذخیره شد.', 'pinova' ),
+			[
+				'block_id' => $block->id,
+				'block'    => $this->resource( $block ),
+				'blocks'   => $this->blocks(),
+			]
+		);
 	}
 
 	public function delete( WP_REST_Request $request ) {
@@ -316,9 +357,14 @@ class BlocksAPI extends RestAPI {
 		}
 
 		if ( empty( $block->blocked_by ) ) {
-			return self::response( false, __( 'مسدودی‌های سیستمی قابل حذف نیستند.', 'pinova' ), [
-				'blocks' => $this->blocks(),
-			], 403 );
+			return self::response(
+				false,
+				__( 'مسدودی‌های سیستمی قابل حذف نیستند.', 'pinova' ),
+				[
+					'blocks' => $this->blocks(),
+				],
+				403
+			);
 		}
 
 		$identifier = (string) $block->identifier;
@@ -336,9 +382,13 @@ class BlocksAPI extends RestAPI {
 			]
 		);
 
-		return self::response( true, __( 'شناسه با موفقیت رفع مسدودی شد.', 'pinova' ), [
-			'blocks' => $this->blocks(),
-		] );
+		return self::response(
+			true,
+			__( 'شناسه با موفقیت رفع مسدودی شد.', 'pinova' ),
+			[
+				'blocks' => $this->blocks(),
+			]
+		);
 	}
 
 	public function permission_callback( WP_REST_Request $request ): bool {
@@ -347,10 +397,10 @@ class BlocksAPI extends RestAPI {
 
 	public function blocks(): array {
 		return Block::query()
-		            ->orderByDesc( 'id' )
-		            ->get()
-		            ->map( [ $this, 'resource' ] )
-		            ->toArray();
+					->orderByDesc( 'id' )
+					->get()
+					->map( [ $this, 'resource' ] )
+					->toArray();
 	}
 
 	public function resource( Block $block ): array {
@@ -402,7 +452,7 @@ class BlocksAPI extends RestAPI {
 			'ip'       => __( 'آدرس آی.پی', 'pinova' ),
 			'username' => __( 'نام کاربری', 'pinova' ),
 		];
-		$label = $labels[ $type ] ?? __( 'شناسه', 'pinova' );
+		$label  = $labels[ $type ] ?? __( 'شناسه', 'pinova' );
 
 		return sprintf(
 			/* translators: %s: identifier type label. */

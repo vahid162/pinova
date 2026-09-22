@@ -16,7 +16,6 @@ class Version extends \Nabik\Utils\V1\Version {
 	public function updated() {
 
 		flush_rewrite_rules();
-
 	}
 
 	public function update_107() {
@@ -28,7 +27,7 @@ class Version extends \Nabik\Utils\V1\Version {
 		// Fix maxsms panel id
 		$gateway = Pinova::get_option( 'sms.gateway' );
 
-		if ( $gateway == 'Pinova\Gateways\IPPanel' ) {
+		if ( 'Pinova\Gateways\IPPanel' === $gateway ) {
 			$gateway = MaxSMS::class;
 			Pinova::set_option( 'sms.gateway', MaxSMS::class );
 		} elseif ( empty( $gateway ) ) {
@@ -45,22 +44,27 @@ class Version extends \Nabik\Utils\V1\Version {
 		foreach ( get_option( 'pinova_sms', [] ) as $key => $value ) {
 			$gateway->set_option( $key, $value );
 
-			if ( $key == 'token' ) {
+			if ( 'token' === $key ) {
 				$gateway->set_option( 'api_key', $value );
 			}
 		}
-
 	}
 
 	public function update_108() {
 		global $wpdb;
 
 		if ( ! Nabik_Net_Database::Schema()->hasColumn( 'pinova_blocks', 'blocked_by' ) ) {
-			Nabik_Net_Database::Schema()->table( 'pinova_blocks', function ( Blueprint $table ) {
-				$table->after( 'identifier', function ( Blueprint $table ) {
-					$table->foreignId( 'blocked_by' )->nullable();
-				} );
-			} );
+			Nabik_Net_Database::Schema()->table(
+				'pinova_blocks',
+				function ( Blueprint $table ) {
+					$table->after(
+						'identifier',
+						function ( Blueprint $table ) {
+							$table->foreignId( 'blocked_by' )->nullable();
+						}
+					);
+				}
+			);
 		}
 
 		$table = $wpdb->prefix . 'pinova_blocks';
@@ -70,14 +74,13 @@ class Version extends \Nabik\Utils\V1\Version {
 
 	public function update_109() {
 
-		/** @var OTP[] $OTPs */
-		$OTPs = OTP::all();
+		/** @var OTP[] $otps */
+		$otps = OTP::all();
 
-		foreach ( $OTPs as $OTP ) {
-			$OTP->channels = array_fill_keys( $OTP->channels, true );
-			$OTP->save();
+		foreach ( $otps as $otp ) {
+			$otp->channels = array_fill_keys( $otp->channels, true );
+			$otp->save();
 		}
-
 	}
 
 	public function update_115() {
@@ -100,5 +103,4 @@ class Version extends \Nabik\Utils\V1\Version {
 	public function update_126() {
 		Install::create_wordpress_tables();
 	}
-
 }

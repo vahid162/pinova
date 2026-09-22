@@ -79,11 +79,11 @@ class Settings extends \Nabik\Utils\V1\Settings {
 	 */
 	public function get_fields(): array {
 
-		$roles = array_map(
+		$roles            = array_map(
 			static fn( string $name ): string => $name . ' - ' . translate_user_role( $name ),
 			UserService::allowed_registration_roles()
 		);
-		$all_roles = array_map(
+		$all_roles        = array_map(
 			static fn( array $role ): string => $role['name'] . ' - ' . translate_user_role( $role['name'] ),
 			get_editable_roles()
 		);
@@ -107,14 +107,14 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'label'   => 'عضویت',
 					'desc'    => 'هر کسی می‌تواند نام‌نویسی کند',
 					'type'    => 'checkbox',
-					'default' => get_option( 'users_can_register' ) == 1,
+					'default' => 1 === (int) get_option( 'users_can_register' ),
 				],
 				[
-					'id'      => 'wordpress_default_role',
-					'label'   => 'نقش پیشفرض کاربر تازه',
-					'type'    => 'select',
-					'options' => $roles,
-					'default' => get_option( 'default_role' ),
+					'id'                => 'wordpress_default_role',
+					'label'             => 'نقش پیشفرض کاربر تازه',
+					'type'              => 'select',
+					'options'           => $roles,
+					'default'           => get_option( 'default_role' ),
 					'sanitize_callback' => [ self::class, 'sanitize_registration_role' ],
 				],
 				[
@@ -281,13 +281,13 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'default' => 'otp',
 				],
 				[
-					'id'          => 'native_only_roles',
-					'label'       => 'نقش‌های ورود بومی',
-					'type'        => 'select2',
-					'options'     => $all_roles,
-					'default'     => [ 'administrator' ],
-					'attributes'  => [ 'multiple' => true ],
-					'desc'        => 'این نقش‌ها فقط از مسیر خصوصی ورود مدیریتی و سازوکار رمز/2FA وردپرس وارد می‌شوند. پیش‌فرض: مدیرکل.',
+					'id'                => 'native_only_roles',
+					'label'             => 'نقش‌های ورود بومی',
+					'type'              => 'select2',
+					'options'           => $all_roles,
+					'default'           => [ 'administrator' ],
+					'attributes'        => [ 'multiple' => true ],
+					'desc'              => 'این نقش‌ها فقط از مسیر خصوصی ورود مدیریتی و سازوکار رمز/2FA وردپرس وارد می‌شوند. پیش‌فرض: مدیرکل.',
 					'sanitize_callback' => [ self::class, 'sanitize_native_only_roles' ],
 				],
 				[
@@ -310,24 +310,24 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'desc'    => 'پس از آزمایش موفق مسیر خصوصی، این گزینه را فعال کنید تا ورود، ثبت‌نام و بازیابی حساب از wp-login.php پاسخ 404 بگیرد. خروج امن، تأیید درخواست حریم خصوصی و رمز نوشته‌های محافظت‌شده به‌عنوان عملیات غیرورودی وردپرس حفظ می‌شوند. برای بازیابی اضطراری می‌توان PINOVA_BLOCK_NATIVE_LOGIN را در wp-config.php برابر false قرار داد.',
 				],
 				[
-					'id'      => 'trusted_proxy_header',
-					'label'   => 'هدر پروکسی مورد اعتماد',
-					'type'    => 'select',
-					'options' => [
-						''                          => 'غیرفعال (فقط REMOTE_ADDR)',
-						'HTTP_X_FORWARDED_FOR'      => 'X-Forwarded-For',
-						'HTTP_CF_CONNECTING_IP'     => 'CF-Connecting-IP',
-						'HTTP_X_REAL_IP'            => 'X-Real-IP',
+					'id'                => 'trusted_proxy_header',
+					'label'             => 'هدر پروکسی مورد اعتماد',
+					'type'              => 'select',
+					'options'           => [
+						''                      => 'غیرفعال (فقط REMOTE_ADDR)',
+						'HTTP_X_FORWARDED_FOR'  => 'X-Forwarded-For',
+						'HTTP_CF_CONNECTING_IP' => 'CF-Connecting-IP',
+						'HTTP_X_REAL_IP'        => 'X-Real-IP',
 					],
-					'default' => '',
+					'default'           => '',
 					'sanitize_callback' => [ self::class, 'sanitize_proxy_header' ],
 				],
 				[
-					'id'      => 'trusted_proxy_cidrs',
-					'label'   => 'CIDR پروکسی‌های مورد اعتماد',
-					'type'    => 'textarea',
-					'desc'    => 'در هر خط یک IPv4/IPv6 یا CIDR وارد کنید. تا وقتی هدر و CIDR هر دو تنظیم نشده‌اند، فقط REMOTE_ADDR استفاده می‌شود.',
-					'default' => '',
+					'id'                => 'trusted_proxy_cidrs',
+					'label'             => 'CIDR پروکسی‌های مورد اعتماد',
+					'type'              => 'textarea',
+					'desc'              => 'در هر خط یک IPv4/IPv6 یا CIDR وارد کنید. تا وقتی هدر و CIDR هر دو تنظیم نشده‌اند، فقط REMOTE_ADDR استفاده می‌شود.',
+					'default'           => '',
 					'sanitize_callback' => [ self::class, 'sanitize_proxy_cidrs' ],
 				],
 				[
@@ -476,7 +476,13 @@ class Settings extends \Nabik\Utils\V1\Settings {
 		</select>
 		<?php if ( $until > time() ) : ?>
 			<p class="description">
-				<?php echo esc_html( sprintf( __( 'Debug تا %s فعال است. ذخیره با مقدار «خاموش»، پنجره را متوقف می‌کند.', 'pinova' ), wp_date( 'Y-m-d H:i:s', $until ) ) ); ?>
+				<?php
+				printf(
+					/* translators: %s: debug expiration date and time. */
+					esc_html__( 'Debug تا %s فعال است. ذخیره با مقدار «خاموش»، پنجره را متوقف می‌کند.', 'pinova' ),
+					esc_html( wp_date( 'Y-m-d H:i:s', $until ) )
+				);
+				?>
 			</p>
 		<?php endif; ?>
 		<?php if ( ! empty( $args['desc'] ) ) : ?>

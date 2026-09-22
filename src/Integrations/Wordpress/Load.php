@@ -73,9 +73,7 @@ class Load {
 				if ( str_contains( $class, 'comment-author-' ) ) {
 					$class = 'comment-author-' . sanitize_html_class( $comment->user_id );
 				}
-
 			}
-
 		}
 
 		return $classes;
@@ -83,7 +81,7 @@ class Load {
 
 	public function get_pinova_mobile( $value, int $object_id, string $meta_key ): ?string {
 
-		if ( $meta_key != 'pinova_mobile' ) {
+		if ( 'pinova_mobile' !== $meta_key ) {
 			return $value;
 		}
 
@@ -99,6 +97,5 @@ class Load {
 		if ( array_key_exists( 'wordpress_default_role', $value ) ) {
 			update_option( 'default_role', $value['wordpress_default_role'] );
 		}
-
 	}
 }

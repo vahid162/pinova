@@ -22,7 +22,7 @@ class Excel {
 
 	private const ACTION = 'pinova_export_users_excel';
 
-	private const FONT_FAMILY = 'Vazirmatn';
+	private const FONT_FAMILY  = 'Vazirmatn';
 	private const NONCE_ACTION = 'pinova_export_users_excel';
 
 	public function __construct() {
@@ -71,26 +71,29 @@ class Excel {
 			return;
 		}
 
+		// Read-only Users-screen filters are carried into the nonce-protected export URL.
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended
 		$export_url = add_query_arg(
 			array_merge( $_GET, [ 'action' => self::ACTION ] ),
 			admin_url( 'admin-post.php' )
 		);
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		$export_url = wp_nonce_url( $export_url, self::NONCE_ACTION );
 		?>
 		<script>
-            document.addEventListener("DOMContentLoaded", function () {
-                const add_new = document.querySelector(".page-title-action");
-                if (!add_new) return;
+			document.addEventListener("DOMContentLoaded", function () {
+				const add_new = document.querySelector(".page-title-action");
+				if (!add_new) return;
 
-                const btn = document.createElement("a");
-                btn.className = "page-title-action button-primary";
-                btn.textContent = "برون‌بری اکسل";
-                btn.style.marginInlineStart = "5px";
-                btn.style.color = "var(--wp-admin-theme-color)";
-                btn.href = "<?php echo esc_url_raw( $export_url ); ?>";
+				const btn = document.createElement("a");
+				btn.className = "page-title-action button-primary";
+				btn.textContent = "برون‌بری اکسل";
+				btn.style.marginInlineStart = "5px";
+				btn.style.color = "var(--wp-admin-theme-color)";
+				btn.href = "<?php echo esc_url_raw( $export_url ); ?>";
 
-                add_new.insertAdjacentElement("afterend", btn);
-            });
+				add_new.insertAdjacentElement("afterend", btn);
+			});
 		</script>
 		<?php
 	}
@@ -149,11 +152,10 @@ class Excel {
 				$row_number = $meta_start_row + $index;
 
 				$sheet->getStyle( 'B' . $row_number )
-				      ->getAlignment()
-				      ->setReadOrder( Alignment::READORDER_LTR );
+						->getAlignment()
+						->setReadOrder( Alignment::READORDER_LTR );
 
 			}
-
 		}
 
 		$meta_row_count  = count( $metadata ) + 2;
@@ -228,12 +230,13 @@ class Excel {
 			[],
 		];
 
-
-		$query_parameters = array_filter( $_GET );
+		// The export handler verifies its nonce before metadata is built.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$query_parameters = array_filter( wp_unslash( $_GET ) );
 
 		foreach ( $query_parameters as $parameter_key => $parameter_value ) {
 
-			if ( in_array( $parameter_key, [ 'action', '_wpnonce' ] ) ) {
+			if ( in_array( $parameter_key, [ 'action', '_wpnonce' ], true ) ) {
 				continue;
 			}
 
@@ -363,10 +366,9 @@ class Excel {
 				$column['label']
 			);
 
-			$current_column_index ++;
+			++$current_column_index;
 
 		}
-
 	}
 
 	private function render_table_rows( Worksheet $sheet, array $columns, array $users, int $start_row ): void {
@@ -383,7 +385,7 @@ class Excel {
 
 				$cell_coordinates = [ $current_column_index, $current_row_index ];
 
-					if ( 'id' !== $column_key ) {
+				if ( 'id' !== $column_key ) {
 
 					$sheet->setCellValueExplicit(
 						$cell_coordinates,
@@ -401,18 +403,17 @@ class Excel {
 
 				if ( is_string( $cell_value ) && ExportUsers::contains_latin( $cell_value ) ) {
 					$sheet->getStyle( $cell_coordinates )
-					      ->getAlignment()
-					      ->setReadOrder( Alignment::READORDER_LTR );
+							->getAlignment()
+							->setReadOrder( Alignment::READORDER_LTR );
 				}
 
-				$current_column_index ++;
+				++$current_column_index;
 
 			}
 
-			$current_row_index ++;
+			++$current_row_index;
 
 		}
-
 	}
 
 	/**
@@ -456,13 +457,12 @@ class Excel {
 			->getAllBorders()
 			->setBorderStyle( Border::BORDER_THIN );
 
-		for ( $row_index = $table_start_row; $row_index <= $last_row; $row_index ++ ) {
+		for ( $row_index = $table_start_row; $row_index <= $last_row; $row_index++ ) {
 			$sheet->getRowDimension( $row_index )->setRowHeight( 22 );
 		}
 
 		foreach ( range( 'A', $last_column ) as $column_letter ) {
 			$sheet->getColumnDimension( $column_letter )->setAutoSize( true );
 		}
-
 	}
 }

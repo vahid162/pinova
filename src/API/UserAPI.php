@@ -32,82 +32,102 @@ class UserAPI extends RestAPI {
 
 	public function register_routes() {
 
-		register_rest_route( 'pinova/user', '/authenticate', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'authenticate' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'identifier' => [
-					'required'          => true,
-					'validate_callback' => [ ValidationService::class, 'identifier' ],
+		register_rest_route(
+			'pinova/user',
+			'/authenticate',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'authenticate' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'identifier' => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'identifier' ],
+					],
 				],
-			],
-		] );
+			]
+		);
 
-		register_rest_route( 'pinova/user', '/login/password', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'login_password' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'identifier' => [
-					'required'          => true,
-					'validate_callback' => [ ValidationService::class, 'identifier' ],
+		register_rest_route(
+			'pinova/user',
+			'/login/password',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'login_password' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'identifier' => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'identifier' ],
+					],
+					'password'   => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'password' ],
+					],
 				],
-				'password'   => [
-					'required'          => true,
-					'validate_callback' => [ ValidationService::class, 'password' ],
-				],
-			],
-		] );
+			]
+		);
 
-		register_rest_route( 'pinova/user', '/login/otp', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'login_otp' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'jwt'  => [
-					'required' => true,
+		register_rest_route(
+			'pinova/user',
+			'/login/otp',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'login_otp' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'jwt'  => [
+						'required' => true,
+					],
+					'code' => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'code' ],
+					],
 				],
-				'code' => [
-					'required'          => true,
-					'validate_callback' => [ ValidationService::class, 'code' ],
-				],
-			],
-		] );
+			]
+		);
 
-		register_rest_route( 'pinova/auth', '/forgot/verify', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'forgot_verify' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'jwt'  => [
-					'required' => true,
+		register_rest_route(
+			'pinova/auth',
+			'/forgot/verify',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'forgot_verify' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'jwt'  => [
+						'required' => true,
+					],
+					'code' => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'code' ],
+					],
 				],
-				'code' => [
-					'required'          => true,
-					'validate_callback' => [ ValidationService::class, 'code' ],
-				],
-			],
-		] );
+			]
+		);
 
-		register_rest_route( 'pinova/auth', '/forgot/change', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'forgot_change' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-			'args'                => [
-				'jwt'        => [
-					'required' => true,
+		register_rest_route(
+			'pinova/auth',
+			'/forgot/change',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'forgot_change' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+				'args'                => [
+					'jwt'        => [
+						'required' => true,
+					],
+					'reset_key'  => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'reset_key' ],
+					],
+					'password_1' => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'new_password' ],
+					],
 				],
-				'reset_key'  => [
-					'required'          => true,
-					'validate_callback' => [ ValidationService::class, 'reset_key' ],
-				],
-				'password_1' => [
-					'required'          => true,
-					'validate_callback' => [ ValidationService::class, 'new_password' ],
-				],
-			],
-		] );
+			]
+		);
 	}
 
 	/**
@@ -186,7 +206,7 @@ class UserAPI extends RestAPI {
 				$otp_type,
 				$user_id
 			);
-			$message = ChannelService::get_message( $successful_channels, $identifier );
+			$message                               = ChannelService::get_message( $successful_channels, $identifier );
 		} catch ( RateLimitException $e ) {
 			return self::response(
 				false,
@@ -338,10 +358,14 @@ class UserAPI extends RestAPI {
 			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
 		}
 
-		return self::response( true, null, [
-			'jwt'       => UserService::generate_jwt( $user->ID ),
-			'reset_key' => $reset_key,
-		] );
+		return self::response(
+			true,
+			null,
+			[
+				'jwt'       => UserService::generate_jwt( $user->ID ),
+				'reset_key' => $reset_key,
+			]
+		);
 	}
 
 	/**
@@ -448,10 +472,12 @@ class UserAPI extends RestAPI {
 	}
 
 	private static function decoy_otp_jwt(): string {
-		return JWT::encode( [
-			'otp_id' => 0,
-			'nonce'  => wp_generate_password( 20, false ),
-		] );
+		return JWT::encode(
+			[
+				'otp_id' => 0,
+				'nonce'  => wp_generate_password( 20, false ),
+			]
+		);
 	}
 
 	private static function uniform_failure( float $started ): WP_REST_Response {
@@ -473,5 +499,4 @@ class UserAPI extends RestAPI {
 			usleep( (int) ( $remaining * 1000000 ) );
 		}
 	}
-
 }

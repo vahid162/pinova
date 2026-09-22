@@ -30,14 +30,10 @@ class Load {
 				.pinova-container .loader { border-color: var(--e-global-color-accent)}
 			</style>';
 
-		$data = [
-			'form_wrapper_classes'  => 'woocommerce-form-login',
-			'submit_button_classes' => 'button',
-			'custom_styles'         => $custom_styles
-		];
+		$form_wrapper_classes  = 'woocommerce-form-login';
+		$submit_button_classes = 'button';
 
 		ob_start();
-		extract( $data );
 		include PINOVA_DIR . '/templates/login-partial.php';
 
 		return ob_get_clean();
@@ -52,7 +48,7 @@ class Load {
 		$settings = whb_get_settings();
 
 		$login_dropdown = ! empty( $settings['account']['login_dropdown'] )
-		                  && ( empty( $settings['account']['form_display'] ) || $settings['account']['form_display'] === 'dropdown' );
+							&& ( empty( $settings['account']['form_display'] ) || 'dropdown' === $settings['account']['form_display'] );
 
 		if ( ! $login_dropdown ) {
 			return $links;
@@ -88,8 +84,8 @@ class Load {
 		$settings = whb_get_settings();
 
 		$login_side = isset( $settings['account'] )
-		              && $settings['account']['login_dropdown']
-		              && $settings['account']['form_display'] === 'side';
+						&& $settings['account']['login_dropdown']
+						&& 'side' === $settings['account']['form_display'];
 
 		if ( ! $login_side ) {
 			return;
@@ -101,7 +97,7 @@ class Load {
 			$wrapper_classes .= ' color-scheme-light';
 		}
 
-		$position        = is_rtl() ? 'left' : 'right';
+		$position         = is_rtl() ? 'left' : 'right';
 		$wrapper_classes .= ' wd-' . $position;
 
 		woodmart_enqueue_inline_style( 'header-my-account-sidebar' );
@@ -115,8 +111,12 @@ class Load {
 					<a href="#" rel="nofollow"><?php esc_html_e( 'Close', 'woodmart' ); ?></a>
 				</div>
 			</div>
-			<div class="woodmart-sidebar-login">
-				<?php echo self::get_template(); ?>
+		<div class="woodmart-sidebar-login">
+				<?php
+				// Rendered from the bundled login template; user input is escaped there.
+				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+				echo self::get_template();
+				?>
 			</div>
 		</div>
 

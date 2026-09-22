@@ -7,9 +7,9 @@ use Throwable;
 
 class Install extends \Nabik\Utils\V1\Install {
 
-	public const SCHEMA_OPTION = 'pinova_db_schema_version';
+	public const SCHEMA_OPTION  = 'pinova_db_schema_version';
 	public const SCHEMA_VERSION = 1;
-	public const PURGE_OPTION = 'pinova_delete_data_on_uninstall';
+	public const PURGE_OPTION   = 'pinova_delete_data_on_uninstall';
 
 	/**
 	 * Retained for compatibility with the legacy installer abstraction.
@@ -342,7 +342,7 @@ class Install extends \Nabik\Utils\V1\Install {
 
 		$pattern = $wpdb->esc_like( 'pinova_' ) . '%';
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- One-time lifecycle discovery must inspect physical state.
-		$option  = $wpdb->get_var(
+		$option = $wpdb->get_var(
 			$wpdb->prepare(
 				'SELECT `option_name` FROM %i WHERE `option_name` LIKE %s LIMIT 1',
 				$wpdb->options,

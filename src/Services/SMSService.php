@@ -35,9 +35,12 @@ class SMSService {
 		unset( $classes['BaseGateway'] );
 
 		/** @var BaseGateway[] $gateways */
-		$gateways = array_map( function ( $class ) {
-			return new $class;
-		}, $classes );
+		$gateways = array_map(
+			function ( $class ) {
+				return new $class();
+			},
+			$classes
+		);
 
 		shuffle( $gateways );
 
@@ -91,9 +94,13 @@ class SMSService {
 	}
 
 	public static function replace_code( string $message, int $code ): string {
-		return str_ireplace( [
-			'{{code}}',
-			'{{otp}}',
-		], (string) $code, $message );
+		return str_ireplace(
+			[
+				'{{code}}',
+				'{{otp}}',
+			],
+			(string) $code,
+			$message
+		);
 	}
 }

@@ -25,9 +25,9 @@ use Pinova\Helpers\IP;
  */
 class OTP extends Model {
 
-	const TYPE_LOGIN = 'login';
+	const TYPE_LOGIN    = 'login';
 	const TYPE_REGISTER = 'register';
-	const TYPE_FORGET = 'forget';
+	const TYPE_FORGET   = 'forget';
 
 	protected $table = 'pinova_otp';
 
@@ -86,5 +86,4 @@ class OTP extends Model {
 		$this->attempts += 1;
 		$this->save();
 	}
-
 }

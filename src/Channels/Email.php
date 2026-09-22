@@ -33,6 +33,8 @@ class Email implements ChannelInterface {
 			'{{purpose_footer}}'      => esc_html( $copy['footer'] ),
 		];
 
+		// This reads a bundled local template, not a remote resource.
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 		$content = file_get_contents( PINOVA_DIR . '/templates/emails/otp.php' );
 		if ( ! is_string( $content ) ) {
 			return false;
@@ -42,11 +44,14 @@ class Email implements ChannelInterface {
 			$phpmailer->Timeout = 8;
 		}
 
-		add_action( 'phpmailer_init', function () {
-			global $phpmailer;
+		add_action(
+			'phpmailer_init',
+			function () {
+				global $phpmailer;
 
-			$phpmailer->Timeout = 8;
-		} );
+				$phpmailer->Timeout = 8;
+			}
+		);
 
 		return wp_mail(
 			$identifier,

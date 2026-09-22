@@ -15,15 +15,19 @@ class Call implements ChannelInterface {
 			'code'   => $code,
 		];
 
-		$response = Curl::post( 'https://service.zohal.io/api/v0/services/inquiry/voice_otp', json_encode( $data ), [
-			'Content-Type: application/json',
-			'Authorization: Bearer ' . Pinova::get_option( 'zohal.api_key' ),
-			'zohal-reseller-id: pinova',
-		] );
+		$response = Curl::post(
+			'https://service.zohal.io/api/v0/services/inquiry/voice_otp',
+			wp_json_encode( $data ),
+			[
+				'Content-Type: application/json',
+				'Authorization: Bearer ' . Pinova::get_option( 'zohal.api_key' ),
+				'zohal-reseller-id: pinova',
+			]
+		);
 
 		$result = $response['result'] ?? 0;
 
-		if ( $result == 1 ) {
+		if ( 1 === (int) $result ) {
 			return true;
 		}
 
@@ -39,5 +43,4 @@ class Call implements ChannelInterface {
 
 		return ! empty( $api_key );
 	}
-
 }

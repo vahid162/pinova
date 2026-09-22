@@ -27,14 +27,17 @@ class FirewallService {
 		$normalized_ip = self::normalize_identifier( 'ip', $identifier );
 		$identifier    = $normalized_ip ?? $identifier;
 
-		/** @var Block $blockList */
-		$blockList = Block::query()->updateOrCreate( [
-			'identifier' => $identifier,
-		], [
-			'blocked_until' => Carbon::now()->addMinutes( $minutes ),
-		] );
+		/** @var Block $block_list */
+		$block_list = Block::query()->updateOrCreate(
+			[
+				'identifier' => $identifier,
+			],
+			[
+				'blocked_until' => Carbon::now()->addMinutes( $minutes ),
+			]
+		);
 
-		return $blockList;
+		return $block_list;
 	}
 
 	/**
@@ -53,16 +56,18 @@ class FirewallService {
 
 		$candidates = array_values( array_unique( $candidates ) );
 
-		/** @var Block $blockList */
-		$blockList = Block::query()
-		                  ->whereIn( 'identifier', $candidates )
-		                  ->where( static function ( Builder $query ): void {
-			                  $query->whereNull( 'blocked_until' )
-			                        ->orWhere( 'blocked_until', '>', Carbon::now() );
-		                  } )
-		                  ->first();
+		/** @var Block $block_list */
+		$block_list = Block::query()
+							->whereIn( 'identifier', $candidates )
+							->where(
+								static function ( Builder $query ): void {
+									$query->whereNull( 'blocked_until' )
+									->orWhere( 'blocked_until', '>', Carbon::now() );
+								}
+							)
+							->first();
 
-		return $blockList;
+		return $block_list;
 	}
 
 	public static function is_ip_blocked(): ?Block {
@@ -71,9 +76,9 @@ class FirewallService {
 
 	public static function delete_expired(): int {
 		return Block::query()
-		            ->whereNotNull( 'blocked_until' )
-		            ->where( 'blocked_until', '<', Carbon::now() )
-		            ->delete();
+					->whereNotNull( 'blocked_until' )
+					->where( 'blocked_until', '<', Carbon::now() )
+					->delete();
 	}
 
 	public static function normalize_identifier( string $identifier_type, string $raw_identifier ): ?string {

@@ -10,8 +10,8 @@ class Identifier {
 
 	private string $type = '';
 
-	public const TYPE_EMAIL = 'email';
-	public const TYPE_MOBILE = 'mobile';
+	public const TYPE_EMAIL    = 'email';
+	public const TYPE_MOBILE   = 'mobile';
 	public const TYPE_USERNAME = 'username';
 
 	public function __construct( string $value ) {
@@ -23,15 +23,15 @@ class Identifier {
 	}
 
 	public function is_email(): bool {
-		return $this->type === self::TYPE_EMAIL;
+		return self::TYPE_EMAIL === $this->type;
 	}
 
 	public function is_mobile(): bool {
-		return $this->type === self::TYPE_MOBILE;
+		return self::TYPE_MOBILE === $this->type;
 	}
 
 	public function is_username(): bool {
-		return $this->type === self::TYPE_USERNAME;
+		return self::TYPE_USERNAME === $this->type;
 	}
 
 	public function get_value(): string {
@@ -57,7 +57,7 @@ class Identifier {
 			return;
 		}
 
-		if ( $value == sanitize_user( $value, true ) ) {
+		if ( sanitize_user( $value, true ) === $value ) {
 			$this->type = self::TYPE_USERNAME;
 		}
 	}

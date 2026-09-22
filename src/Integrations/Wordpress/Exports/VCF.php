@@ -10,7 +10,7 @@ use WP_User;
 
 class VCF {
 
-	private const ACTION = 'pinova_export_users_vcf';
+	private const ACTION       = 'pinova_export_users_vcf';
 	private const NONCE_ACTION = 'pinova_export_users_vcf';
 
 	public function __construct() {
@@ -59,26 +59,29 @@ class VCF {
 			return;
 		}
 
+		// Read-only Users-screen filters are carried into the nonce-protected export URL.
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended
 		$export_url = add_query_arg(
 			array_merge( $_GET, [ 'action' => self::ACTION ] ),
 			admin_url( 'admin-post.php' )
 		);
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		$export_url = wp_nonce_url( $export_url, self::NONCE_ACTION );
 		?>
 		<script>
-            document.addEventListener("DOMContentLoaded", function () {
-                const add_new = document.querySelector(".page-title-action");
-                if (!add_new) return;
+			document.addEventListener("DOMContentLoaded", function () {
+				const add_new = document.querySelector(".page-title-action");
+				if (!add_new) return;
 
-                const btn = document.createElement("a");
-                btn.className = "page-title-action button-primary";
-                btn.textContent = "برون‌بری مخاطبین";
-                btn.style.marginInlineStart = "5px";
-                btn.style.color = "var(--wp-admin-theme-color)";
-                btn.href = "<?php echo esc_url_raw( $export_url ); ?>";
+				const btn = document.createElement("a");
+				btn.className = "page-title-action button-primary";
+				btn.textContent = "برون‌بری مخاطبین";
+				btn.style.marginInlineStart = "5px";
+				btn.style.color = "var(--wp-admin-theme-color)";
+				btn.href = "<?php echo esc_url_raw( $export_url ); ?>";
 
-                add_new.insertAdjacentElement("afterend", btn);
-            });
+				add_new.insertAdjacentElement("afterend", btn);
+			});
 		</script>
 		<?php
 	}
@@ -148,7 +151,7 @@ class VCF {
 
 			foreach ( $mobiles as $index => $mobile ) {
 
-				$type = $index === 0 ? 'CELL' : 'X-PHONE' . $index;
+				$type = 0 === $index ? 'CELL' : 'X-PHONE' . $index;
 
 				$key = strtolower( $type );
 
@@ -214,10 +217,10 @@ class VCF {
 			}
 
 			$roles         = array_map( [ self::class, 'escape' ], ExportUsers::translate_roles( $user->roles ) );
-			$card['roles'] = "X-WP-Roles:" . implode( ',', $roles );
+			$card['roles'] = 'X-WP-Roles:' . implode( ',', $roles );
 
 			if ( ! empty( $roles ) ) {
-				$note_fallback[] = "نقش کاربر: " . implode( ', ', $roles );
+				$note_fallback[] = 'نقش کاربر: ' . implode( ', ', $roles );
 			}
 
 			$card['wp_username'] = "X-WP-USERNAME:{$user_login}";
@@ -257,6 +260,8 @@ class VCF {
 		header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
 		header( 'Cache-Control: max-age=0' );
 
+		// This is a text/vcard download, escaped by generate(), not an HTML response.
+		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 		echo $contents;
 	}
 }

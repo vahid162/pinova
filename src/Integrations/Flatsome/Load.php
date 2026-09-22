@@ -25,7 +25,6 @@ class Load {
 
 		remove_action( 'wp_footer', 'flatsome_account_login_lightbox' );
 		add_action( 'wp_footer', [ $this, 'login_modal' ] );
-
 	}
 
 
@@ -39,27 +38,23 @@ class Load {
 				.pinova-container .button { background-color: var(--fs-color-primary) !important; color: #fff !important;}
 			</style>';
 
-		$data = [
-			'form_wrapper_classes'  => 'woocommerce-form-login',
-			'submit_button_classes' => 'woocommerce-button button woocommerce-form-login__submit',
-			'custom_styles'         => $custom_styles
-		];
+		$form_wrapper_classes  = 'woocommerce-form-login';
+		$submit_button_classes = 'woocommerce-button button woocommerce-form-login__submit';
 
 		ob_start();
-		extract( $data );
 		include PINOVA_DIR . '/templates/login-partial.php';
 
 		return ob_get_clean();
-
 	}
 
 	public function login_modal() {
-
 
 		if ( is_user_logged_in() ) {
 			return;
 		}
 
+		// Rendered from the bundled login template; user input is escaped there.
+		// phpcs:disable WordPress.Security.EscapeOutput.OutputNotEscaped
 		echo '<div  id="login-form-popup" class="lightbox-content mfp-hide">
                    <div class="account-login-inner">
                    <h2 class="uppercase h3">ورود / عضویت</h2>
@@ -67,7 +62,6 @@ class Load {
                    </div>
         </div>
     ';
-
+		// phpcs:enable WordPress.Security.EscapeOutput.OutputNotEscaped
 	}
-
 }

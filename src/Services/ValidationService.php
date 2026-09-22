@@ -53,7 +53,7 @@ class ValidationService {
 	/** @return bool|WP_Error */
 	public static function email( string $param, WP_REST_Request $request, string $key ) {
 		// Email is optional with default value of '', empty string skips conversion validation
-		if ( $param === '' ) {
+		if ( '' === $param ) {
 			return true;
 		}
 

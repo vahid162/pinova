@@ -19,5 +19,4 @@ class APIService {
 		// Integrations
 		new WooCommerceAPI();
 	}
-
 }

@@ -37,11 +37,14 @@ abstract class RestAPI {
 		int $status = 200,
 		array $headers = []
 	): WP_REST_Response {
-		$response = new WP_REST_Response( [
-			'success' => $success,
-			'message' => $message,
-			'data'    => $data,
-		], $status );
+		$response = new WP_REST_Response(
+			[
+				'success' => $success,
+				'message' => $message,
+				'data'    => $data,
+			],
+			$status
+		);
 
 		foreach ( $headers as $name => $value ) {
 			$response->header( sanitize_key( (string) $name ), (string) $value );
@@ -51,5 +54,4 @@ abstract class RestAPI {
 
 		return $response;
 	}
-
 }

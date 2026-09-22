@@ -1,0 +1,6 @@
+---
+description: Read the canonical Pinova repository instructions first
+alwaysApply: true
+---
+
+Before taking any action, read the root [`AGENTS.md`](../../AGENTS.md) completely and follow its routing. This file intentionally contains no duplicated repository rules or current project status.

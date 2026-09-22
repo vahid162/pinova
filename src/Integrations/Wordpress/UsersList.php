@@ -9,7 +9,7 @@ class UsersList {
 	public function __construct() {
 		global $pagenow;
 
-		if ( $pagenow !== 'users.php' ) {
+		if ( 'users.php' !== $pagenow ) {
 			return;
 		}
 
@@ -28,7 +28,7 @@ class UsersList {
 
 	public function render_registered_column( $value, string $column_name, int $user_id ) {
 
-		if ( $column_name === 'registered' ) {
+		if ( 'registered' === $column_name ) {
 
 			$user = get_user( $user_id );
 
@@ -47,6 +47,8 @@ class UsersList {
 
 	public function handle_registered_sorting( WP_User_Query $query ): void {
 
+		// This only supplies defaults to the read-only Users list query.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		if ( empty( $_GET['orderby'] ?? '' ) ) {
 
 			$_GET['orderby'] = 'registered';
@@ -55,6 +57,5 @@ class UsersList {
 			$query->set( 'order', 'DESC' );
 
 		}
-
 	}
 }

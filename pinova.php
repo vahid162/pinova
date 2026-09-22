@@ -65,24 +65,39 @@ if ( ! ( new \Pinova\Version() )->migrate() ) {
 \Pinova\Integrations\Perfmatters\Load::instance();
 \Pinova\Integrations\GravityForms\Load::instance();
 
-add_action( 'plugins_loaded', function () {
-	\Pinova\Integrations\PMP\Load::instance();
-} );
-
-add_action( 'woocommerce_loaded', function () {
-	\Pinova\Integrations\Woocommerce\Load::instance();
-} );
-
-add_action( 'woodmart_after_body_open', function () {
-	\Pinova\Integrations\Woodmart\Load::instance();
-} );
-
-add_action( 'after_setup_theme', function () {
-	Pinova\Integrations\Flatsome\Load::instance();
-} );
-
-add_action( 'before_woocommerce_init', function () {
-	if ( class_exists( \Automattic\WooCommerce\Utilities\FeaturesUtil::class ) ) {
-		\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'custom_order_tables', __FILE__ );
+add_action(
+	'plugins_loaded',
+	function () {
+		\Pinova\Integrations\PMP\Load::instance();
 	}
-} );
+);
+
+add_action(
+	'woocommerce_loaded',
+	function () {
+		\Pinova\Integrations\Woocommerce\Load::instance();
+	}
+);
+
+add_action(
+	'woodmart_after_body_open',
+	function () {
+		\Pinova\Integrations\Woodmart\Load::instance();
+	}
+);
+
+add_action(
+	'after_setup_theme',
+	function () {
+		Pinova\Integrations\Flatsome\Load::instance();
+	}
+);
+
+add_action(
+	'before_woocommerce_init',
+	function () {
+		if ( class_exists( \Automattic\WooCommerce\Utilities\FeaturesUtil::class ) ) {
+			\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'custom_order_tables', __FILE__ );
+		}
+	}
+);

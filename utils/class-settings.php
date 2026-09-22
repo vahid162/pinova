@@ -26,12 +26,15 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		private function register() {
 
 			foreach ( $this->get_sections() as $section ) {
-				register_setting( $section['id'], $section['id'], [
-					'type'              => 'array',
-					'sanitize_callback' => [ $this, 'sanitize_options' ],
-				] );
+				register_setting(
+					$section['id'],
+					$section['id'],
+					[
+						'type'              => 'array',
+						'sanitize_callback' => [ $this, 'sanitize_options' ],
+					]
+				);
 			}
-
 		}
 
 		public function init() {
@@ -47,7 +50,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 			wp_enqueue_style( 'wp-color-picker' );
 
 			if ( defined( 'WC_PLUGIN_FILE' ) ) {
-				wp_register_script( 'select2-js', plugins_url( 'assets/js/select2/select2.js', WC_PLUGIN_FILE ), [ 'jquery' ], Constants::get_constant( 'WC_VERSION' ) );
+				wp_register_script( 'select2-js', plugins_url( 'assets/js/select2/select2.js', WC_PLUGIN_FILE ), [ 'jquery' ], Constants::get_constant( 'WC_VERSION' ), true );
 				wp_register_style( 'select2-css', plugins_url( 'assets/css/select2.css', WC_PLUGIN_FILE ), [], Constants::get_constant( 'WC_VERSION' ) );
 			}
 
@@ -79,21 +82,22 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 * This function gets the initiated settings sections and fields. Then
 		 * registers them to WordPress and ready for use.
 		 */
-		function admin_init() {
+		public function admin_init() {
 
 			// Register settings sections
 			foreach ( $this->get_sections() as $section ) {
 
-				if ( false == get_option( $section['id'] ) ) {
+				if ( false === get_option( $section['id'] ) ) {
 					add_option( $section['id'] );
 				}
 
 				if ( ! empty( $section['desc'] ) ) {
 					$section['desc'] = '<div class="inside">' . $section['desc'] . '</div>';
 					$callback        = function () use ( $section ) {
+						// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 						echo $this->esc_html( str_replace( '"', '\"', $section['desc'] ) );
 					};
-				} else if ( isset( $section['callback'] ) ) {
+				} elseif ( isset( $section['callback'] ) ) {
 					$callback = $section['callback'];
 				} else {
 					$callback = null;
@@ -139,12 +143,18 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 						$callback_method = 'callback_error';
 					}
 
-					add_settings_field( $section . '[' . $id . ']', $label, [
-						$this,
-						$callback_method,
-					], $section, $section, $args );
+					add_settings_field(
+						$section . '[' . $id . ']',
+						$label,
+						[
+							$this,
+							$callback_method,
+						],
+						$section,
+						$section,
+						$args
+					);
 				}
-
 			}
 		}
 
@@ -163,7 +173,8 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 			return $desc;
 		}
 
-		function callback_error( array $args ) {
+		public function callback_error( array $args ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $this->get_field_description( $args ) );
 		}
 
@@ -172,15 +183,16 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_text( array $args ) {
+		public function callback_text( array $args ) {
 
 			$value = sanitize_text_field( $this->get_option( $args ) );
 			$size  = isset( $args['size'] ) && ! is_null( $args['size'] ) ? $args['size'] : 'regular';
 			$type  = isset( $args['type'] ) ? $args['type'] : 'text';
 
-			$html = sprintf( '<input type="%1$s" class="%2$s-text %3$s" id="%4$s[%5$s]" name="%4$s[%5$s]" value="%6$s" placeholder="%7$s"/>', $type, $size, $args['field_class'], $args['section'], $args['id'], $value, $args['placeholder'] );
+			$html  = sprintf( '<input type="%1$s" class="%2$s-text %3$s" id="%4$s[%5$s]" name="%4$s[%5$s]" value="%6$s" placeholder="%7$s"/>', $type, $size, $args['field_class'], $args['section'], $args['id'], $value, $args['placeholder'] );
 			$html .= $this->get_field_description( $args );
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
@@ -189,7 +201,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_url( array $args ) {
+		public function callback_url( array $args ) {
 			$this->callback_text( $args );
 		}
 
@@ -198,7 +210,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_number( array $args ) {
+		public function callback_number( array $args ) {
 			$this->callback_text( $args );
 		}
 
@@ -207,17 +219,18 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_checkbox( array $args ) {
+		public function callback_checkbox( array $args ) {
 
 			$value = sanitize_text_field( $this->get_option( $args ) );
 
-			$html = '<fieldset>';
+			$html  = '<fieldset>';
 			$html .= sprintf( '<label for="wpuf-%1$s[%2$s]">', $args['section'], $args['id'] );
 			$html .= sprintf( '<input type="hidden" name="%1$s[%2$s]" value="0" />', $args['section'], $args['id'] );
 			$html .= sprintf( '<input type="checkbox" class="checkbox" id="wpuf-%1$s[%2$s]" name="%1$s[%2$s]" value="1" %3$s />', $args['section'], $args['id'], checked( $value, '1', false ) );
 			$html .= sprintf( '%1$s</label>', $args['desc'] );
 			$html .= '</fieldset>';
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
@@ -226,21 +239,22 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_multicheck( array $args ) {
+		public function callback_multicheck( array $args ) {
 
 			$value = $this->get_option( $args );
 			$html  = '<fieldset>';
 
 			foreach ( $args['options'] as $key => $label ) {
 				$checked = isset( $value[ $key ] ) ? $value[ $key ] : '0';
-				$html    .= sprintf( '<label for="wpuf-%1$s[%2$s][%3$s]">', $args['section'], $args['id'], $key );
-				$html    .= sprintf( '<input type="checkbox" class="checkbox" id="wpuf-%1$s[%2$s][%3$s]" name="%1$s[%2$s][%3$s]" value="%3$s" %4$s />', $args['section'], $args['id'], $key, checked( $checked, $key, false ) );
-				$html    .= sprintf( '%1$s</label><br>', $label );
+				$html   .= sprintf( '<label for="wpuf-%1$s[%2$s][%3$s]">', $args['section'], $args['id'], $key );
+				$html   .= sprintf( '<input type="checkbox" class="checkbox" id="wpuf-%1$s[%2$s][%3$s]" name="%1$s[%2$s][%3$s]" value="%3$s" %4$s />', $args['section'], $args['id'], $key, checked( $checked, $key, false ) );
+				$html   .= sprintf( '%1$s</label><br>', $label );
 			}
 
 			$html .= $this->get_field_description( $args );
 			$html .= '</fieldset>';
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
@@ -249,7 +263,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_radio( array $args ) {
+		public function callback_radio( array $args ) {
 
 			$value = $this->get_option( $args );
 			$html  = '<fieldset>';
@@ -263,6 +277,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 			$html .= $this->get_field_description( $args );
 			$html .= '</fieldset>';
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
@@ -271,7 +286,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_select( array $args ) {
+		public function callback_select( array $args ) {
 
 			$value = sanitize_text_field( $this->get_option( $args ) );
 			$size  = isset( $args['size'] ) && ! is_null( $args['size'] ) ? $args['size'] : 'regular';
@@ -284,6 +299,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 			$html .= sprintf( '</select>' );
 			$html .= $this->get_field_description( $args );
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
@@ -292,7 +308,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_select2( array $args ) {
+		public function callback_select2( array $args ) {
 
 			$section = $args['section'];
 			$id      = $args['id'];
@@ -318,12 +334,13 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 			$html = sprintf( '<select class="%s select2" name="%s" id="%s" %s placeholder="%s" style="width: 25em">', $size, $attr_name, $attr_id, $multiple, $args['placeholder'] );
 
 			foreach ( $args['options'] as $key => $label ) {
-				$html .= sprintf( '<option value="%s"%s>%s</option>', $key, selected( in_array( $key, $value ), true, false ), $label );
+				$html .= sprintf( '<option value="%s"%s>%s</option>', $key, selected( in_array( (string) $key, $value, true ), true, false ), $label );
 			}
 
 			$html .= sprintf( '</select>' );
 			$html .= $this->get_field_description( $args );
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
@@ -332,12 +349,12 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_textarea( array $args ) {
+		public function callback_textarea( array $args ) {
 
 			$value = sanitize_textarea_field( $this->get_option( $args ) );
 			$size  = isset( $args['size'] ) && ! is_null( $args['size'] ) ? $args['size'] : 'regular';
 
-			$html = sprintf(
+			$html  = sprintf(
 				'<textarea rows="5" cols="55" class="%1$s-text %5$s" id="%2$s[%3$s]" name="%2$s[%3$s]" placeholder="%6$s">%4$s</textarea>',
 				$size,
 				$args['section'],
@@ -348,6 +365,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 			);
 			$html .= $this->get_field_description( $args );
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
@@ -356,7 +374,8 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_html( array $args ) {
+		public function callback_html( array $args ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $this->get_field_description( $args ) );
 		}
 
@@ -365,7 +384,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_wysiwyg( array $args ) {
+		public function callback_wysiwyg( array $args ) {
 
 			$value = $this->get_option( $args );
 			$size  = isset( $args['size'] ) && ! is_null( $args['size'] ) ? $args['size'] : '500px';
@@ -386,6 +405,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 
 			echo '</div>';
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $this->get_field_description( $args ) );
 		}
 
@@ -394,24 +414,25 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_file( array $args ) {
+		public function callback_file( array $args ) {
 
 			$value = sanitize_text_field( $this->get_option( $args ) );
 			$size  = isset( $args['size'] ) && ! is_null( $args['size'] ) ? $args['size'] : 'regular';
 			$id    = $args['section'] . '[' . $args['id'] . ']';
 			$label = isset( $args['options']['button_label'] ) ? $args['options']['button_label'] : 'انتخاب فایل';
 
-			$html = sprintf( '<input type="text" class="%1$s-text wpsa-url" id="%2$s[%3$s]" name="%2$s[%3$s]" value="%4$s"/>', $size, $args['section'], $args['id'], $value );
+			$html  = sprintf( '<input type="text" class="%1$s-text wpsa-url" id="%2$s[%3$s]" name="%2$s[%3$s]" value="%4$s"/>', $size, $args['section'], $args['id'], $value );
 			$html .= '<input type="button" class="button wpsa-browse" value="' . $label . '" />';
 			$html .= $this->get_field_description( $args );
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
 		/**
 		 * @param array $args settings field args
 		 */
-		function callback_photo( array $args ) {
+		public function callback_photo( array $args ) {
 
 			$image_url = sanitize_url( $this->get_option( $args ) );
 
@@ -429,53 +450,57 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 
 			?>
 			<img id="<?php echo esc_attr( $id ); ?>_image" src="<?php echo esc_url( $image_url ); ?>"
-			     style="max-width:50%; display:block; margin-bottom: 10px;"/>
+				style="max-width:50%; display:block; margin-bottom: 10px;"/>
 
 			<a href="#" id="<?php echo esc_attr( $id ); ?>_upload_button" class="button"
-			   style="display: <?php echo strlen( $image_url ) ? 'none' : 'inherit'; ?>">
+				style="display: <?php echo strlen( $image_url ) ? 'none' : 'inherit'; ?>">
 				<?php echo esc_attr( $value['button'] ); ?>
 			</a>
 
 			<input type="hidden"
-			       name="<?php echo esc_attr( $value['section'] ); ?>[<?php echo esc_attr( $value['id'] ); ?>]"
-			       id="<?php echo esc_attr( $value['section'] ); ?>[<?php echo esc_attr( $value['id'] ); ?>]"
-			       value="<?php echo esc_url( $image_url ); ?>"/>
+					name="<?php echo esc_attr( $value['section'] ); ?>[<?php echo esc_attr( $value['id'] ); ?>]"
+					id="<?php echo esc_attr( $value['section'] ); ?>[<?php echo esc_attr( $value['id'] ); ?>]"
+					value="<?php echo esc_url( $image_url ); ?>"/>
 
 			<a href="#" id="<?php echo esc_attr( $id ); ?>_remove_button"
-			   style="display: <?php echo esc_attr( $display ); ?>">حذف تصویر</a>
+				style="display: <?php echo esc_attr( $display ); ?>">حذف تصویر</a>
 
-			<?php echo $this->esc_html( $value['suffix'] ?? '' ); ?>
-			<?php echo $this->esc_html( $description ); // WPCS: XSS ok. ?>
+			<?php
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
+			echo $this->esc_html( $value['suffix'] ?? '' );
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
+			echo $this->esc_html( $description );
+			?>
 
 			<script>
-                jQuery(function ($) {
+				jQuery(function ($) {
 
-                    $('body').on('click', '#<?php echo esc_js( $id ); ?>_upload_button', function (e) {
-                        e.preventDefault();
+					$('body').on('click', '#<?php echo esc_js( $id ); ?>_upload_button', function (e) {
+						e.preventDefault();
 
-                        let button = $(this),
-                            custom_uploader = wp.media({
-                                title: 'درج فایل',
-                                library: {
-                                    type: 'image'
-                                },
-                                button: {
-                                    text: 'انتخاب' // button label text
-                                },
-                                multiple: false // for multiple image selection set to true
-                            }).on('select', function () { // it also has "open" and "close" events
-                                let attachment = custom_uploader.state().get('selection').first().toJSON();
-                                $('#<?php echo esc_js( $id ); ?>_image').attr('src', attachment.url).next().hide().next().val(attachment.url).next().show();
-                            })
-                                .open();
-                    });
+						let button = $(this),
+							custom_uploader = wp.media({
+								title: 'درج فایل',
+								library: {
+									type: 'image'
+								},
+								button: {
+									text: 'انتخاب' // button label text
+								},
+								multiple: false // for multiple image selection set to true
+							}).on('select', function () { // it also has "open" and "close" events
+								let attachment = custom_uploader.state().get('selection').first().toJSON();
+								$('#<?php echo esc_js( $id ); ?>_image').attr('src', attachment.url).next().hide().next().val(attachment.url).next().show();
+							})
+								.open();
+					});
 
-                    $('body').on('click', '#<?php echo esc_js( $id ); ?>_remove_button', function () {
-                        $(this).hide().prev().val('').prev().show().prev().attr('src', '');
-                        return false;
-                    });
+					$('body').on('click', '#<?php echo esc_js( $id ); ?>_remove_button', function () {
+						$(this).hide().prev().val('').prev().show().prev().attr('src', '');
+						return false;
+					});
 
-                });
+				});
 			</script>
 			<?php
 		}
@@ -485,14 +510,15 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_password( array $args ) {
+		public function callback_password( array $args ) {
 
 			$value = sanitize_text_field( $this->get_option( $args ) );
 			$size  = isset( $args['size'] ) && ! is_null( $args['size'] ) ? $args['size'] : 'regular';
 
-			$html = sprintf( '<input type="password" class="%1$s-text" id="%2$s[%3$s]" name="%2$s[%3$s]" value="%4$s"/>', $size, $args['section'], $args['id'], $value );
+			$html  = sprintf( '<input type="password" class="%1$s-text" id="%2$s[%3$s]" name="%2$s[%3$s]" value="%4$s"/>', $size, $args['section'], $args['id'], $value );
 			$html .= $this->get_field_description( $args );
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
@@ -501,21 +527,22 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @param array $args settings field args
 		 */
-		function callback_color( array $args ) {
+		public function callback_color( array $args ) {
 
 			$value = sanitize_text_field( $this->get_option( $args ) );
 			$size  = isset( $args['size'] ) && ! is_null( $args['size'] ) ? $args['size'] : 'regular';
 
-			$html = sprintf( '<input type="text" class="%1$s-text wp-color-picker-field" id="%2$s[%3$s]" name="%2$s[%3$s]" value="%4$s" data-default-color="%5$s" />', $size, $args['section'], $args['id'], $value, $args['std'] );
+			$html  = sprintf( '<input type="text" class="%1$s-text wp-color-picker-field" id="%2$s[%3$s]" name="%2$s[%3$s]" value="%4$s" data-default-color="%5$s" />', $size, $args['section'], $args['id'], $value, $args['std'] );
 			$html .= $this->get_field_description( $args );
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
 		/**
 		 * Sanitize callback for Settings API
 		 */
-		function sanitize_options( $options ) {
+		public function sanitize_options( $options ) {
 
 			if ( ! is_array( $options ) ) {
 				return $options;
@@ -540,7 +567,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @return mixed string or bool false
 		 */
-		function get_sanitize_callback( $slug = '' ) {
+		public function get_sanitize_callback( $slug = '' ) {
 			if ( empty( $slug ) ) {
 				return false;
 			}
@@ -548,7 +575,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 			// Iterate over registered fields and see if we can find proper callback
 			foreach ( $this->get_fields() as $section => $options ) {
 				foreach ( array_filter( $options ) as $option ) {
-					if ( $option['id'] != $slug ) {
+					if ( (string) $option['id'] !== (string) $slug ) {
 						continue;
 					}
 
@@ -567,7 +594,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * @return string
 		 */
-		function get_option( array $args ) {
+		public function get_option( array $args ) {
 
 			if ( array_key_exists( 'value', $args ) ) {
 				return $args['value'];
@@ -591,13 +618,15 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * Shows all the settings section labels as tab
 		 */
-		function show_navigation() {
+		public function show_navigation() {
 
-			if ( count( $this->get_sections() ) == 1 ) {
+			if ( 1 === count( $this->get_sections() ) ) {
 				return false;
 			}
 
-			$tab = strval( $_GET['tab'] ?? '' );
+			// This read-only parameter selects the active settings tab.
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$tab = sanitize_key( wp_unslash( $_GET['tab'] ?? '' ) );
 
 			$html = '<h2 class="nav-tab-wrapper">';
 
@@ -607,7 +636,7 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 					$url   = add_query_arg( 'tab', $section['id'] );
 					$class = ' nav-tab ';
 
-					if ( $tab == $section['id'] ) {
+					if ( (string) $section['id'] === $tab ) {
 						$class .= 'nav-tab-active';
 					}
 
@@ -617,11 +646,11 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 				} else {
 					$html .= sprintf( '<a href="#%1$s" class="inside nav-tab" id="%1$s-tab">%2$s</a>', $section['id'], $section['title'] );
 				}
-
 			}
 
 			$html .= '</h2>';
 
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_html() wraps wp_kses().
 			echo $this->esc_html( $html );
 		}
 
@@ -630,18 +659,21 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		 *
 		 * This function displays every sections in a different form
 		 */
-		function show_forms() {
+		public function show_forms() {
 			do_action( 'nabik_settings_top_form' );
 
-			$tab = strval( $_GET['tab'] ?? '' );
+			// This read-only parameter selects the active settings tab.
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$tab = sanitize_key( wp_unslash( $_GET['tab'] ?? '' ) );
 
 			$style = $tab ? '' : 'display: none';
 
 			?>
 			<div class="metabox-holder">
-				<?php foreach ( $this->get_sections() as $section ) {
+				<?php
+				foreach ( $this->get_sections() as $section ) {
 
-					if ( $tab && $tab != $section['id'] ) {
+					if ( $tab && (string) $section['id'] !== $tab ) {
 						continue; // Prevent tabbing
 					} elseif ( ! $tab && isset( $section['callback'] ) ) {
 						continue; // Prevent load callbacks
@@ -649,13 +681,13 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 
 					?>
 					<div id="<?php echo esc_attr( $section['id'] ); ?>" class="group"
-					     style="<?php echo esc_attr( $style ); ?>">
+						style="<?php echo esc_attr( $style ); ?>">
 						<form method="post" action="options.php">
 							<?php
 							settings_fields( $section['id'] );
 							do_settings_sections( $section['id'] );
 
-							if ( ! isset( $_GET['tab'] ) ) {
+							if ( '' === $tab ) {
 								?>
 								<div style="padding-left: 10px">
 									<?php submit_button(); ?>
@@ -676,108 +708,108 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 			$this->styles();
 		}
 
-		function tab_scripts() {
+		public function tab_scripts() {
 			?>
 			<script>
-                jQuery(document).ready(function ($) {
+				jQuery(document).ready(function ($) {
 
-                    // Switches option sections
-                    $('.group').hide();
-                    let active_tab = '';
+					// Switches option sections
+					$('.group').hide();
+					let active_tab = '';
 
-                    if (new URL(document.URL).hash) {
-                        active_tab = new URL(document.URL).hash;
+					if (new URL(document.URL).hash) {
+						active_tab = new URL(document.URL).hash;
 
-                        if (typeof (localStorage) != 'undefined') {
-                            localStorage.setItem('active_tab', active_tab);
-                        }
+						if (typeof (localStorage) != 'undefined') {
+							localStorage.setItem('active_tab', active_tab);
+						}
 
-                    } else if (typeof (localStorage) != 'undefined' && localStorage.getItem('active_tab')) {
-                        active_tab = localStorage.getItem('active_tab');
-                    }
+					} else if (typeof (localStorage) != 'undefined' && localStorage.getItem('active_tab')) {
+						active_tab = localStorage.getItem('active_tab');
+					}
 
-                    if (active_tab.indexOf('#') === 0 && $(active_tab).length) {
-                        $(active_tab).fadeIn();
-                    } else {
-                        $('.group:first').fadeIn();
-                    }
+					if (active_tab.indexOf('#') === 0 && $(active_tab).length) {
+						$(active_tab).fadeIn();
+					} else {
+						$('.group:first').fadeIn();
+					}
 
-                    $('.group .collapsed').each(function () {
-                        $(this).find('input:checked').parent().parent().parent().nextAll().each(
-                            function () {
-                                if ($(this).hasClass('last')) {
-                                    $(this).removeClass('hidden');
-                                    return false;
-                                }
-                                $(this).filter('.hidden').removeClass('hidden');
-                            });
-                    });
+					$('.group .collapsed').each(function () {
+						$(this).find('input:checked').parent().parent().parent().nextAll().each(
+							function () {
+								if ($(this).hasClass('last')) {
+									$(this).removeClass('hidden');
+									return false;
+								}
+								$(this).filter('.hidden').removeClass('hidden');
+							});
+					});
 
-                    if (active_tab.indexOf('#') === 0 && $(active_tab + '-tab').length) {
-                        $(active_tab + '-tab').addClass('nav-tab-active');
-                    } else {
-                        $('.nav-tab-wrapper a:first').addClass('nav-tab-active');
-                    }
+					if (active_tab.indexOf('#') === 0 && $(active_tab + '-tab').length) {
+						$(active_tab + '-tab').addClass('nav-tab-active');
+					} else {
+						$('.nav-tab-wrapper a:first').addClass('nav-tab-active');
+					}
 
-                    $('.nav-tab-wrapper a.inside').click(function (evt) {
-                        $('.nav-tab-wrapper a').removeClass('nav-tab-active');
-                        $(this).addClass('nav-tab-active').blur();
-                        let clicked_group = $(this).attr('href');
+					$('.nav-tab-wrapper a.inside').click(function (evt) {
+						$('.nav-tab-wrapper a').removeClass('nav-tab-active');
+						$(this).addClass('nav-tab-active').blur();
+						let clicked_group = $(this).attr('href');
 
-                        if (typeof (localStorage) != 'undefined') {
-                            localStorage.setItem('active_tab', $(this).attr('href'));
-                        }
+						if (typeof (localStorage) != 'undefined') {
+							localStorage.setItem('active_tab', $(this).attr('href'));
+						}
 
-                        $('.group').hide();
-                        $(clicked_group).fadeIn();
-                        evt.preventDefault();
-                    });
-                });
+						$('.group').hide();
+						$(clicked_group).fadeIn();
+						evt.preventDefault();
+					});
+				});
 			</script>
 			<?php
 		}
 
-		function fields_scripts() {
+		public function fields_scripts() {
 			?>
 			<script>
-                jQuery(document).ready(function ($) {
+				jQuery(document).ready(function ($) {
 
-                    $('.select2').each((index, element) => {
-                        let select2_args = {
-                            placeholder: $(element).attr('data-placeholder') || $(element).attr('placeholder') || '',
-                        };
+					$('.select2').each((index, element) => {
+						let select2_args = {
+							placeholder: $(element).attr('data-placeholder') || $(element).attr('placeholder') || '',
+						};
 
-                        $(element).select2(select2_args);
-                    });
+						$(element).select2(select2_args);
+					});
 
-                    //Initiate Color Picker
-                    $('.wp-color-picker-field').wpColorPicker();
+					//Initiate Color Picker
+					$('.wp-color-picker-field').wpColorPicker();
 
-                    $('.wpsa-browse').on('click', function (event) {
-                        event.preventDefault();
+					$('.wpsa-browse').on('click', function (event) {
+						event.preventDefault();
 
-                        var self = $(this);
+						var self = $(this);
 
-                        // Create the media frame.
-                        var file_frame = wp.media.frames.file_frame = wp.media({
-                            title: self.data('uploader_title'),
-                            button: {
-                                text: self.data('uploader_button_text'),
-                            },
-                            multiple: false
-                        });
+						// Create the media frame.
+						var file_frame = wp.media.frames.file_frame = wp.media({
+							title: self.data('uploader_title'),
+							button: {
+								text: self.data('uploader_button_text'),
+							},
+							multiple: false
+						});
 
-                        file_frame.on('select', function () {
-                            attachment = file_frame.state().get('selection').first().toJSON();
+						file_frame.on('select', function () {
+							attachment = file_frame.state().get('selection').first().toJSON();
 
-                            self.prev('.wpsa-url').val(attachment.url);
-                        });
+							self.prev('.wpsa-url').val(attachment.url);
+						});
 
-                        // Finally, open the modal
-                        file_frame.open();
-                    });
+						// Finally, open the modal
+						file_frame.open();
+					});
 
-                });
+				});
 			</script>
 			<?php
 		}
@@ -844,13 +876,12 @@ if ( ! class_exists( '\Nabik\Utils\V1\Settings' ) ) {
 		public function styles() {
 			?>
 			<style>
-                .metabox-holder form > h2 {
-                    display: none;
-                }
+				.metabox-holder form > h2 {
+					display: none;
+				}
 			</style>
 			<?php
 		}
-
 	}
 
 }

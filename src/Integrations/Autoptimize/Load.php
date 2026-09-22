@@ -30,10 +30,13 @@ class Load {
 			return $exclusions;
 		}
 
-		$pinova_exclusions = implode( ',', [
-			'pinova/assets',
-			'var pinova =',
-		] );
+		$pinova_exclusions = implode(
+			',',
+			[
+				'pinova/assets',
+				'var pinova =',
+			]
+		);
 
 		if ( empty( trim( $exclusions ) ) ) {
 			return $pinova_exclusions;

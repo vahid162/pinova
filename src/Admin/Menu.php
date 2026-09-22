@@ -47,7 +47,6 @@ class Menu {
 		foreach ( $submenus as $submenu ) {
 			add_submenu_page( 'pinova', $submenu['title'], $submenu['title'], $submenu['capability'], $submenu['slug'], $submenu['callback'] );
 		}
-
 	}
 
 	public function settings_action( array $actions ): array {
@@ -63,7 +62,7 @@ class Menu {
 
 	public function plugin_row_meta( array $plugin_meta, $plugin_file ): array {
 
-		if ( $plugin_file != $this->plugin_file ) {
+		if ( $this->plugin_file !== $plugin_file ) {
 			return $plugin_meta;
 		}
 

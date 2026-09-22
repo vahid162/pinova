@@ -23,7 +23,7 @@ class PWSMS extends BaseGateway {
 
 		$response = PWSMS()->send_sms( $data );
 
-		if ( $response === true ) {
+		if ( true === $response ) {
 			return true;
 		}
 

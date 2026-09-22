@@ -28,5 +28,4 @@ class Number {
 
 		return $string;
 	}
-
 }

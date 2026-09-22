@@ -40,10 +40,14 @@ class MaxSMS extends BaseGateway {
 
 		}
 
-		$response = Curl::post( 'https://edge.ippanel.com/v1/api/send', json_encode( $payload ), [
-			'Content-Type: application/json',
-			'Authorization: ' . $this->get_option( 'api_key' ),
-		] );
+		$response = Curl::post(
+			'https://edge.ippanel.com/v1/api/send',
+			wp_json_encode( $payload ),
+			[
+				'Content-Type: application/json',
+				'Authorization: ' . $this->get_option( 'api_key' ),
+			]
+		);
 
 		if ( isset( $response['meta']['status'] ) && $response['meta']['status'] ) {
 			return true;

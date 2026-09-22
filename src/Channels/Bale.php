@@ -29,10 +29,14 @@ class Bale implements ChannelInterface {
 			],
 		];
 
-		$response = Curl::post( 'https://safir.bale.ai/api/v3/send_message', wp_json_encode( $data ), [
-			'api-access-key: ' . self::get_api_token(),
-			'Content-Type: application/json',
-		] );
+		$response = Curl::post(
+			'https://safir.bale.ai/api/v3/send_message',
+			wp_json_encode( $data ),
+			[
+				'api-access-key: ' . self::get_api_token(),
+				'Content-Type: application/json',
+			]
+		);
 
 		if ( isset( $response['message_id'] ) ) {
 			return true;
@@ -64,10 +68,14 @@ class Bale implements ChannelInterface {
 			],
 		];
 
-		$response = Curl::post( 'https://safir.bale.ai/api/v3/send_message', wp_json_encode( $data ), [
-			'api-access-key: ' . self::get_api_token(),
-			'Content-Type: application/json',
-		] );
+		$response = Curl::post(
+			'https://safir.bale.ai/api/v3/send_message',
+			wp_json_encode( $data ),
+			[
+				'api-access-key: ' . self::get_api_token(),
+				'Content-Type: application/json',
+			]
+		);
 
 		if ( isset( $response['message_id'] ) ) {
 			return true;
@@ -95,5 +103,4 @@ class Bale implements ChannelInterface {
 	public static function get_bot_id() {
 		return Pinova::get_option( 'messengers.bale_bot_id' );
 	}
-
 }

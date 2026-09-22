@@ -15,7 +15,7 @@ class Helper {
 	 * @return no-return
 	 */
 	public static function redirect_to( string $url, string $operation = 'redirect' ) {
-		$url = wp_validate_redirect( $url, site_url() );
+		$url          = wp_validate_redirect( $url, site_url() );
 		$headers_sent = headers_sent();
 		$redirected   = false;
 
@@ -39,12 +39,12 @@ class Helper {
 		);
 
 		wp_die(
-			__( 'انتقال خودکار انجام نشد. برای ادامه از پیوند امن زیر استفاده کنید.', 'pinova' ),
-			__( 'انتقال انجام نشد', 'pinova' ),
+			esc_html__( 'انتقال خودکار انجام نشد. برای ادامه از پیوند امن زیر استفاده کنید.', 'pinova' ),
+			esc_html__( 'انتقال انجام نشد', 'pinova' ),
 			[
 				'response'  => 503,
-				'link_url'  => $url,
-				'link_text' => __( 'ادامه', 'pinova' ),
+				'link_url'  => esc_url( $url ),
+				'link_text' => esc_html__( 'ادامه', 'pinova' ),
 			]
 		);
 	}
@@ -57,7 +57,7 @@ class Helper {
 	public static function js_redirect_to( string $url ) {
 		?>
 		<script>
-            window.location.replace('<?php echo esc_url( $url ); ?>');
+			window.location.replace('<?php echo esc_url( $url ); ?>');
 		</script>
 		<?php
 		exit;
@@ -76,7 +76,9 @@ class Helper {
 	public static function get_login_back_url( ?string $back_url = null ): string {
 
 		if ( ! filter_var( $back_url, FILTER_VALIDATE_URL ) ) {
-			$back_url = sanitize_url( $_POST['back_url'] ?? $_GET['back_url'] ?? '' );
+			// A redirect target is read-only input; no state change occurs here.
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.NonceVerification.Recommended
+			$back_url = sanitize_url( wp_unslash( $_POST['back_url'] ?? $_GET['back_url'] ?? '' ) );
 		}
 
 		$fallback = current_user_can( 'manage_options' ) ? admin_url() : site_url();
@@ -91,7 +93,9 @@ class Helper {
 	public static function get_logout_back_url( ?string $back_url = null ): string {
 
 		if ( ! filter_var( $back_url, FILTER_VALIDATE_URL ) ) {
-			$back_url = sanitize_url( $_POST['back_url'] ?? $_GET['back_url'] ?? '' );
+			// A redirect target is read-only input; no state change occurs here.
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.NonceVerification.Recommended
+			$back_url = sanitize_url( wp_unslash( $_POST['back_url'] ?? $_GET['back_url'] ?? '' ) );
 		}
 
 		$fallback = site_url();
@@ -102,5 +106,4 @@ class Helper {
 
 		return '' === $back_url ? $fallback : wp_validate_redirect( $back_url, $fallback );
 	}
-
 }

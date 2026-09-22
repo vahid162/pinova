@@ -17,9 +17,11 @@ class ExportUsers {
 	public static function get_users( int $limit = 10000 ): array {
 		$args = [
 			'number' => 1,
-			'fields' => 'all_with_meta'
+			'fields' => 'all_with_meta',
 		];
 
+		// These read-only parameters mirror filters on the protected Users screen.
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended
 		if ( ! empty( $_GET['s'] ) ) {
 			$args['search'] = '*' . trim( wp_unslash( $_GET['s'] ) ) . '*';
 		}
@@ -49,10 +51,12 @@ class ExportUsers {
 				$args['order'] = $order;
 			}
 		}
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
-		$query = new WP_User_Query( $args );
+		$query       = new WP_User_Query( $args );
+		$total_users = $query->get_total();
 
-		if ( $query->get_total() > $limit ) {
+		if ( $total_users > $limit ) {
 			throw new \RuntimeException(
 				sprintf(
 					/* translators: %d: maximum number of users in one XLSX/VCF export. */
@@ -65,11 +69,11 @@ class ExportUsers {
 		$users      = [];
 		$batch_size = 500;
 
-		for ( $offset = 0; $offset < $query->get_total(); $offset += $batch_size ) {
-			$args['number'] = min( $batch_size, $limit - $offset );
-			$args['offset'] = $offset;
+		for ( $offset = 0; $offset < $total_users; $offset += $batch_size ) {
+			$args['number']      = min( $batch_size, $limit - $offset );
+			$args['offset']      = $offset;
 			$args['count_total'] = false;
-			$batch = ( new WP_User_Query( $args ) )->get_results();
+			$batch               = ( new WP_User_Query( $args ) )->get_results();
 
 			if ( ! $batch ) {
 				break;
@@ -88,20 +92,23 @@ class ExportUsers {
 	public static function translate_roles( array $roles ): array {
 		$wp_roles = wp_roles();
 
-		return array_map( function ( $role ) use ( $wp_roles ) {
-			if ( isset( $wp_roles->roles[ $role ]['name'] ) ) {
-				return translate_user_role( $wp_roles->roles[ $role ]['name'] );
-			}
+		return array_map(
+			function ( $role ) use ( $wp_roles ) {
+				if ( isset( $wp_roles->roles[ $role ]['name'] ) ) {
+						return translate_user_role( $wp_roles->roles[ $role ]['name'] );
+				}
 
-			return $role;
-		}, $roles );
+				return $role;
+			},
+			$roles
+		);
 	}
 
 	public static function state_city_name( string $id ): string {
 
-		$country_state = explode( ":", $id );
+		$country_state = explode( ':', $id );
 
-		if ( count( $country_state ) == 2 ) {
+		if ( 2 === count( $country_state ) ) {
 			$id = $country_state[1];
 		}
 
@@ -120,7 +127,6 @@ class ExportUsers {
 			if ( ! is_null( $state_city ) ) {
 				return $state_city;
 			}
-
 		}
 
 		if ( function_exists( 'PW' ) && isset( PW()->address::$states[ $id ] ) ) {

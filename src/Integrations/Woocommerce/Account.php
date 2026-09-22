@@ -35,8 +35,8 @@ class Account {
 				<span class="required" aria-hidden="true">*</span>
 			</label>
 			<input type="tel" class="woocommerce-Input woocommerce-Input--text input-text"
-			       name="pinova_mobile" id="pinova_mobile" required
-			       value="<?php echo esc_attr( $mobile ); ?>"
+					name="pinova_mobile" id="pinova_mobile" required
+					value="<?php echo esc_attr( $mobile ); ?>"
 			>
 			<span id="pinova_mobile_description">
 				<?php esc_html_e( 'تغییر تلفن همراه، نام کاربری وردپرس را تغییر نمی‌دهد. پس از ذخیره، شمارهٔ جدید برای ورود پینوا استفاده می‌شود.', 'pinova' ); ?>
@@ -49,7 +49,9 @@ class Account {
 
 	public function validate_mobile_field( WP_Error $errors, stdClass $user ) {
 
-		$mobile = sanitize_text_field( $_POST['pinova_mobile'] ?? '' );
+		// WooCommerce verifies its account-details nonce before firing this validation hook.
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing
+		$mobile = sanitize_text_field( wp_unslash( $_POST['pinova_mobile'] ?? '' ) );
 
 		if ( empty( $mobile ) ) {
 			$errors->add( 'mobile_required', __( 'لطفاً تلفن همراه خود را وارد نمایید.', 'pinova' ) );
@@ -72,10 +74,14 @@ class Account {
 		}
 
 		if ( ! UserService::mobile_is_available_for_user( $identifier->get_value(), (int) $user->ID ) ) {
-			$errors->add( 'mobile_duplicate', sprintf(
-				__( 'با تلفن همراه %s یک حساب کاربری وجود دارد، لطفاً تلفن همراه دیگری وارد نمایید.', 'pinova' ),
-				$identifier->get_value()
-			) );
+			$errors->add(
+				'mobile_duplicate',
+				sprintf(
+					/* translators: %s: mobile number. */
+					__( 'با تلفن همراه %s یک حساب کاربری وجود دارد، لطفاً تلفن همراه دیگری وارد نمایید.', 'pinova' ),
+					$identifier->get_value()
+				)
+			);
 		}
 	}
 

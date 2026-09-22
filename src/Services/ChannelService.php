@@ -43,12 +43,10 @@ class ChannelService {
 					);
 					do_action( 'pinova/channel_send_failed', sanitize_key( (string) $channel ) );
 				}
-
 			}
-
 		}
 
-		$successful_channels = array_keys( $channels, true );
+		$successful_channels = array_keys( $channels, true, true );
 
 		if ( empty( $successful_channels ) ) {
 			throw new SendOTPException( 'خطایی در زمان ارسال کد تایید رخ داده است.' );
@@ -134,18 +132,17 @@ class ChannelService {
 
 			/** @var OTP $last_otp */
 			$last_otp = OTP::query()
-			               ->where( 'identifier', $identifier->get_value() )
-			               ->where( 'expires_at', '>=', Carbon::now()->subMinutes( 14 ) )
-			               ->latest( 'id' )
-			               ->first();
+							->where( 'identifier', $identifier->get_value() )
+							->where( 'expires_at', '>=', Carbon::now()->subMinutes( 14 ) )
+							->latest( 'id' )
+							->first();
 
 			if ( isset( $last_otp->channels['sms'] ) && Call::is_enable() ) {
 				$channels[] = 'call';
 			} else {
 				$channels[] = 'sms';
 			}
-
-		} else { // $identifier->is_email()
+		} else { // Email identifiers use only the email channel.
 			$channels = [
 				'email',
 			];
@@ -163,19 +160,23 @@ class ChannelService {
 			'email' => 'ایمیل',
 		];
 
-		$successful_channels = array_map( function ( $key, $value ) {
-			return is_string( $value ) ? $value : $key;
-		}, array_keys( $successful_channels ), $successful_channels );
+		$successful_channels = array_map(
+			function ( $key, $value ) {
+				return is_string( $value ) ? $value : $key;
+			},
+			array_keys( $successful_channels ),
+			$successful_channels
+		);
 
 		$successful_channels = array_intersect_key( $channel_labels, array_flip( $successful_channels ) );
 
-		$destination = strip_tags( (string) $identifier->get_value() );
+		$destination = wp_strip_all_tags( (string) $identifier->get_value() );
 
 		return sprintf(
+			/* translators: 1: delivery channel labels, 2: destination identifier. */
 			__( 'کد تأیید از طریق %1$s به %2$s ارسال شد.', 'pinova' ),
 			implode( ' و ', array_values( $successful_channels ) ),
 			"\u{2066}" . $destination . "\u{2069}"
 		);
 	}
-
 }

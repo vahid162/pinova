@@ -27,7 +27,6 @@ class Load {
 
 		$scripts[] = '/pinova/assets/js/(.*).js';
 
-
 		return $scripts;
 	}
 }

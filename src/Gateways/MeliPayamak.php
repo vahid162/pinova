@@ -55,9 +55,13 @@ class MeliPayamak extends BaseGateway {
 			];
 		}
 
-		$response = Curl::post( $url, wp_json_encode( $payload ), [
-			'Content-Type: application/json; charset=utf-8',
-		] );
+		$response = Curl::post(
+			$url,
+			wp_json_encode( $payload ),
+			[
+				'Content-Type: application/json; charset=utf-8',
+			]
+		);
 
 		$value = $response['Value'] ?? '';
 

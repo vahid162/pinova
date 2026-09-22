@@ -26,13 +26,13 @@ class Mobile {
 	 */
 	public function parse( string $mobile, ?string $region = 'IR' ): PhoneNumber {
 
-		$phoneUtil = PhoneNumberUtil::getInstance();
+		$phone_util = PhoneNumberUtil::getInstance();
 
 		try {
 
-			$phoneNumber = $phoneUtil->parse( $mobile, $region );
+			$phone_number = $phone_util->parse( $mobile, $region );
 
-			if ( ! $phoneUtil->isValidNumber( $phoneNumber ) ) {
+			if ( ! $phone_util->isValidNumber( $phone_number ) ) {
 
 				if ( ! str_contains( $mobile, '+' ) ) {
 					return self::parse( '+' . $mobile, null );
@@ -41,19 +41,22 @@ class Mobile {
 				throw new Exception( 'تلفن همراه وارد شده معتبر نمی‌باشد.' );
 			}
 
-			if ( ! in_array( $phoneUtil->getNumberType( $phoneNumber ), [
-				PhoneNumberType::MOBILE,
-				PhoneNumberType::FIXED_LINE_OR_MOBILE,
-			] ) ) {
+			if ( ! in_array(
+				$phone_util->getNumberType( $phone_number ),
+				[
+					PhoneNumberType::MOBILE,
+					PhoneNumberType::FIXED_LINE_OR_MOBILE,
+				],
+				true
+			) ) {
 				throw new Exception( 'شماره وارد شده تلفن همراه نیست.' );
 			}
 
-			return $phoneNumber;
+			return $phone_number;
 
 		} catch ( Exception $e ) {
 			throw new Exception( 'تلفن همراه وارد شده صحیح نمی‌باشد.' );
 		}
-
 	}
 
 	public function get_country(): ?int {
@@ -70,14 +73,18 @@ class Mobile {
 
 	public function possible_formats(): array {
 
-		$phoneUtil = PhoneNumberUtil::getInstance();
+		$phone_util = PhoneNumberUtil::getInstance();
 
-		return apply_filters( 'pinova/mobile_possible_formats', [
-			$this->value->getNationalNumber(),
-			$this->value->getCountryCode() . $this->value->getNationalNumber(),
-			$phoneUtil->format( $this->value, PhoneNumberFormat::E164 ),
-			str_replace( ' ', '', $phoneUtil->format( $this->value, PhoneNumberFormat::NATIONAL ) ),
-		], $this );
+		return apply_filters(
+			'pinova/mobile_possible_formats',
+			[
+				$this->value->getNationalNumber(),
+				$this->value->getCountryCode() . $this->value->getNationalNumber(),
+				$phone_util->format( $this->value, PhoneNumberFormat::E164 ),
+				str_replace( ' ', '', $phone_util->format( $this->value, PhoneNumberFormat::NATIONAL ) ),
+			],
+			$this
+		);
 	}
 
 	public function get_value(): string {
@@ -90,6 +97,7 @@ class Mobile {
 		try {
 			$this->value = self::parse( $value );
 		} catch ( Exception $e ) {
+			return;
 		}
 	}
 }

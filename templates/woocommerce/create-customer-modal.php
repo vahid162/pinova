@@ -6,7 +6,7 @@
 		href="#"
 		onclick="event.preventDefault(); pinovaOpenCreateCustomerModal();"
 	>
-		<?php _e( 'افزودن مشتری جدید &larr;', 'pinova' ); ?>
+		<?php esc_html_e( 'افزودن مشتری جدید ←', 'pinova' ); ?>
 	</a>
 
 	<section
@@ -38,7 +38,7 @@
 				<div class="mb-3">
 					<div class="size-12 flex items-center justify-center bg-primary-50 rounded-full">
 						<div class="size-9 flex items-center justify-center bg-primary-100 rounded-full">
-							<img src="<?php echo PINOVA_URL ?>/assets/images/icons/add-circle.svg">
+							<img src="<?php echo esc_url( PINOVA_URL ); ?>/assets/images/icons/add-circle.svg">
 						</div>
 					</div>
 				</div>
@@ -65,8 +65,8 @@
 						</div>
 						<!--error msg-->
 						<div class="text-xs text-error-400 pt-1.5 empty:pt-0"
-						     pinova-show="forms.createCustomer.inputs.first_name.errorMsg"
-						     pinova-text="forms.createCustomer.inputs.first_name.errorMsg"
+							pinova-show="forms.createCustomer.inputs.first_name.errorMsg"
+							pinova-text="forms.createCustomer.inputs.first_name.errorMsg"
 						></div>
 					</div>
 					<div class="mb-4">
@@ -86,8 +86,8 @@
 						</div>
 						<!--error msg-->
 						<div class="text-xs text-error-400 pt-1.5 empty:pt-0"
-						     pinova-show="forms.createCustomer.inputs.last_name.errorMsg"
-						     pinova-text="forms.createCustomer.inputs.last_name.errorMsg"
+							pinova-show="forms.createCustomer.inputs.last_name.errorMsg"
+							pinova-text="forms.createCustomer.inputs.last_name.errorMsg"
 						></div>
 					</div>
 					<div class="mb-4">
@@ -107,8 +107,8 @@
 						</div>
 						<!--error msg-->
 						<div class="text-xs text-error-400 pt-1.5 empty:pt-0"
-						     pinova-show="forms.createCustomer.inputs.mobile.errorMsg"
-						     pinova-text="forms.createCustomer.inputs.mobile.errorMsg"
+							pinova-show="forms.createCustomer.inputs.mobile.errorMsg"
+							pinova-text="forms.createCustomer.inputs.mobile.errorMsg"
 						></div>
 					</div>
 					<div class="mb-4">
@@ -127,22 +127,22 @@
 						</div>
 						<!--error msg-->
 						<div class="text-xs text-error-400 pt-1.5 empty:pt-0"
-						     pinova-show="forms.createCustomer.inputs.email.errorMsg"
-						     pinova-text="forms.createCustomer.inputs.email.errorMsg"
+							pinova-show="forms.createCustomer.inputs.email.errorMsg"
+							pinova-text="forms.createCustomer.inputs.email.errorMsg"
 						></div>
 					</div>
 				</div>
 
 				<div class="flex sm:flex-nowrap flex-wrap justify-center gap-3">
 					<button type="button"
-					        class="sm:w-1/2 w-full border border-gray-300 text-gray-700 font-semibold rounded-lg hover:shadow py-2"
-					        pinova-on:click="modalIsOpen = false"
+							class="sm:w-1/2 w-full border border-gray-300 text-gray-700 font-semibold rounded-lg hover:shadow py-2"
+							pinova-on:click="modalIsOpen = false"
 					>
 						انصراف
 					</button>
 					<button type="button"
-					        class="flex justify-center items-center sm:w-1/2 w-full border bg-primary-600 border-primary-600 text-white font-semibold rounded-lg hover:shadow py-2"
-					        pinova-on:click="submit()"
+							class="flex justify-center items-center sm:w-1/2 w-full border bg-primary-600 border-primary-600 text-white font-semibold rounded-lg hover:shadow py-2"
+							pinova-on:click="submit()"
 					>
 						افزودن
 					</button>
@@ -157,17 +157,17 @@
 </div>
 
 <style>
-    .pinova-ltr-input-rtl-placeholder {
-        direction: ltr;
-        text-align: left;
-    }
+	.pinova-ltr-input-rtl-placeholder {
+		direction: ltr;
+		text-align: left;
+	}
 
-    .pinova-ltr-input-rtl-placeholder::placeholder {
-        direction: rtl;
-        text-align: right;
-    }
+	.pinova-ltr-input-rtl-placeholder::placeholder {
+		direction: rtl;
+		text-align: right;
+	}
 
-    .pinova-create-customer-modal-trigger-link {
-        padding: 3px 0 0;
-    }
+	.pinova-create-customer-modal-trigger-link {
+		padding: 3px 0 0;
+	}
 </style>

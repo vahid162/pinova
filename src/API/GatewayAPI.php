@@ -11,12 +11,15 @@ class GatewayAPI extends RestAPI {
 
 	public function register_routes() {
 
-		register_rest_route( 'pinova/admin', '/gateway/get-options', [
-			'methods'             => 'POST',
-			'callback'            => [ $this, 'get_options' ],
-			'permission_callback' => [ $this, 'permission_callback' ],
-		] );
-
+		register_rest_route(
+			'pinova/admin',
+			'/gateway/get-options',
+			[
+				'methods'             => 'POST',
+				'callback'            => [ $this, 'get_options' ],
+				'permission_callback' => [ $this, 'permission_callback' ],
+			]
+		);
 	}
 
 	/**

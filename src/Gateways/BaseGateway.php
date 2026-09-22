@@ -2,7 +2,6 @@
 
 namespace Pinova\Gateways;
 
-
 use Exception;
 
 abstract class BaseGateway {
@@ -67,7 +66,7 @@ abstract class BaseGateway {
 	 */
 	public function set_option( string $option_name, $value ): void {
 
-		if ( in_array( $option_name, [ 'gateway', 'message_code', 'test_mobile' ] ) ) {
+		if ( in_array( $option_name, [ 'gateway', 'message_code', 'test_mobile' ], true ) ) {
 			return;
 		}
 
@@ -119,12 +118,11 @@ abstract class BaseGateway {
 			$key   = trim( $key, "}{% \n\r\t\v\x00" );
 			$value = trim( $value );
 
-			if ( $key === 'pattern' ) {
+			if ( 'pattern' === $key ) {
 				$result['code'] = $value;
 			} elseif ( strlen( $key ) ) {
 				$result['vars'][ $key ] = $value;
 			}
-
 		}
 
 		return $result;

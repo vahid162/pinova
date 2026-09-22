@@ -64,7 +64,6 @@ if ( ! class_exists( 'Nabik_Net_Database' ) ) {
 		public static function Schema(): Builder {
 			return self::DB()->getSchemaBuilder();
 		}
-
 	}
 
 	if (

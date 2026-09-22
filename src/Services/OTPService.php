@@ -24,13 +24,15 @@ class OTPService {
 		$code = self::generate_code();
 
 		/** @var OTP $otp */
-		$otp = OTP::query()->create( [
-			'user_id'    => $user_id,
-			'identifier' => $identifier->get_value(),
-			'code'       => $code,
-			'type'       => $type,
-			'channels'   => array_fill_keys( $channels, false ),
-		] );
+		$otp = OTP::query()->create(
+			[
+				'user_id'    => $user_id,
+				'identifier' => $identifier->get_value(),
+				'code'       => $code,
+				'type'       => $type,
+				'channels'   => array_fill_keys( $channels, false ),
+			]
+		);
 
 		try {
 			$successful_channels = ChannelService::send( $otp, $code );
@@ -64,7 +66,7 @@ class OTPService {
 		);
 
 		return [
-			JWT::encode( [ 'otp_id' => $otp->id, ] ),
+			JWT::encode( [ 'otp_id' => $otp->id ] ),
 			$successful_channels,
 		];
 	}
@@ -79,7 +81,13 @@ class OTPService {
 		try {
 			$payload = JWT::decode( $jwt );
 		} catch ( Exception $e ) {
-			Logger::instance()->notice( 'otp.verify_failed', [ 'reason' => 'invalid_token', 'exception' => $e ] );
+			Logger::instance()->notice(
+				'otp.verify_failed',
+				[
+					'reason'    => 'invalid_token',
+					'exception' => $e,
+				]
+			);
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
@@ -87,7 +95,13 @@ class OTPService {
 			/** @var OTP $otp */
 			$otp = OTP::query()->findOrFail( absint( $payload['otp_id'] ?? 0 ) );
 		} catch ( \Throwable $e ) {
-			Logger::instance()->notice( 'otp.verify_failed', [ 'reason' => 'record_not_found', 'exception' => $e ] );
+			Logger::instance()->notice(
+				'otp.verify_failed',
+				[
+					'reason'    => 'record_not_found',
+					'exception' => $e,
+				]
+			);
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
@@ -116,7 +130,7 @@ class OTPService {
 			Logger::instance()->notice(
 				'otp.verify_failed',
 				[
-					'user_id' => $otp->user_id,
+					'user_id'  => $otp->user_id,
 					'otp_type' => $otp->type,
 					'attempts' => $otp->attempts,
 					'reason'   => $otp->isExpired() ? 'expired' : ( $otp->isVerified() ? 'already_verified' : 'attempt_limit' ),
@@ -125,14 +139,14 @@ class OTPService {
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
-		if ( $otp->ip_address != IP::get() ) {
+		if ( IP::get() !== $otp->ip_address ) {
 			Logger::instance()->warning(
 				'otp.verify_failed',
 				[
-					'user_id'       => $otp->user_id,
-					'otp_type'      => $otp->type,
+					'user_id'        => $otp->user_id,
+					'otp_type'       => $otp->type,
 					'ip_fingerprint' => Logger::instance()->fingerprint( IP::get(), 'ip' ),
-					'reason'        => 'ip_mismatch',
+					'reason'         => 'ip_mismatch',
 				]
 			);
 			throw new Exception( __( 'شما به این کد دسترسی ندارید.', 'pinova' ) );
@@ -144,7 +158,7 @@ class OTPService {
 			Logger::instance()->notice(
 				'otp.verify_failed',
 				[
-					'user_id' => $otp->user_id,
+					'user_id'  => $otp->user_id,
 					'otp_type' => $otp->type,
 					'attempts' => $otp->attempts,
 					'reason'   => 'invalid_code',

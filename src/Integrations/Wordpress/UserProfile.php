@@ -19,7 +19,7 @@ class UserProfile {
 	public function __construct() {
 		global $pagenow;
 
-		if ( ! in_array( $pagenow, [ 'user-new.php', 'profile.php', 'user-edit.php' ] ) ) {
+		if ( ! in_array( $pagenow, [ 'user-new.php', 'profile.php', 'user-edit.php' ], true ) ) {
 			return;
 		}
 
@@ -53,15 +53,15 @@ class UserProfile {
 			<tr class="user-mobile-wrap">
 				<th>
 					<label for="user_mobile">
-						<?php _e( 'تلفن همراه', 'pinova' ); ?>
+						<?php esc_html_e( 'تلفن همراه', 'pinova' ); ?>
 						<span class="description">
-							<?php _e( '(لازم)', 'pinova' ); ?>
+							<?php esc_html_e( '(لازم)', 'pinova' ); ?>
 						</span>
 					</label>
 				</th>
 				<td>
 					<input class="regular-text ltr" type="tel" name="user_mobile" id="user_mobile" required
-					       value="<?php echo esc_attr( $phone ); ?>"
+							value="<?php echo esc_attr( $phone ); ?>"
 					>
 					<p class="description" id="mobile-description">
 						<?php esc_html_e( 'تغییر تلفن همراه، نام کاربری وردپرس را تغییر نمی‌دهد. پس از ذخیره، شمارهٔ جدید برای ورود پینوا استفاده می‌شود.', 'pinova' ); ?>
@@ -99,10 +99,14 @@ class UserProfile {
 
 		if ( ! UserService::mobile_is_available_for_user( $mobile->get_value(), $user_id ) ) {
 
-			$errors->add( 'user_mobile_duplicate', sprintf(
-				__( 'با تلفن همراه %s یک حساب کاربری وجود دارد، لفطا تلفن همراه دیگری وارد نمایید.', 'pinova' ),
-				$mobile->get_value()
-			) );
+			$errors->add(
+				'user_mobile_duplicate',
+				sprintf(
+					/* translators: %s: mobile number. */
+					__( 'با تلفن همراه %s یک حساب کاربری وجود دارد، لفطا تلفن همراه دیگری وارد نمایید.', 'pinova' ),
+					$mobile->get_value()
+				)
+			);
 
 		}
 
@@ -127,7 +131,9 @@ class UserProfile {
 			return;
 		}
 
-		$mobile = sanitize_user( $_POST['user_mobile'] ?? '' );
+		// WordPress verifies the profile-edit nonce before firing this validation hook.
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing
+		$mobile = sanitize_user( wp_unslash( $_POST['user_mobile'] ?? '' ) );
 
 		$this->validate_mobile( $mobile, $user->ID, $errors );
 	}
@@ -143,7 +149,9 @@ class UserProfile {
 			return;
 		}
 
-		$mobile = sanitize_user( $_POST['user_mobile'] ?? '' );
+		// WordPress verifies the profile-edit nonce before firing this save hook.
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing
+		$mobile = sanitize_user( wp_unslash( $_POST['user_mobile'] ?? '' ) );
 
 		$validation = $this->validate_mobile( $mobile, $user_id, new WP_Error() );
 
@@ -167,22 +175,23 @@ class UserProfile {
 	 */
 	public function remove_empty_email_validation( WP_Error $errors ): WP_Error {
 
+		// WordPress verifies the profile-edit nonce before firing this validation filter.
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing
 		if ( empty( $_POST['email'] ) ) {
 			$errors->remove( 'empty_email' );
 			$errors->remove( 'invalid_email' );
 		}
 
 		return $errors;
-
 	}
 
 	public function enqueue_scripts( string $hook ): void {
 
-		if ( $hook == 'user-new.php' ) {
+		if ( 'user-new.php' === $hook ) {
 			wp_enqueue_script( 'pinova-wp-user-create', PINOVA_URL . 'assets/js/wordpress/user-create.js', [ 'jquery' ], PINOVA_VERSION, [] );
 		}
 
-		if ( in_array( $hook, [ 'user-edit.php', 'profile.php' ] ) ) {
+		if ( in_array( $hook, [ 'user-edit.php', 'profile.php' ], true ) ) {
 			wp_enqueue_script( 'pinova-wp-user-edit', PINOVA_URL . 'assets/js/wordpress/user-edit.js', [ 'jquery' ], PINOVA_VERSION, [] );
 		}
 	}

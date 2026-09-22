@@ -123,7 +123,9 @@ class Pinova {
 				esc_html__( 'درخواست خروج نامعتبر است', 'pinova' ),
 				[
 					'response'  => 403,
-					'link_url'  => esc_url( site_url() ),
+					// wp_die() escapes link_url when it renders the error template.
+					// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+					'link_url'  => site_url(),
 					'link_text' => esc_html__( 'بازگشت به سایت', 'pinova' ),
 				]
 			);
@@ -186,7 +188,9 @@ class Pinova {
 		$args = [];
 
 		if ( $back_url ) {
-			$args['back_url'] = $back_url;
+			// A nested URL must use form encoding so its own query string remains one argument.
+			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.urlencode_urlencode
+			$args['back_url'] = urlencode( $back_url );
 		}
 
 		if ( $force_reauth ) {
@@ -221,7 +225,9 @@ class Pinova {
 		$url = home_url( '/logout/' );
 
 		if ( $back_url ) {
-			$url = add_query_arg( 'back_url', $back_url, $url );
+			// A nested URL must use form encoding so its own query string remains one argument.
+			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.urlencode_urlencode
+			$url = add_query_arg( 'back_url', urlencode( $back_url ), $url );
 		}
 
 		return wp_nonce_url( $url, 'logout', '_pinova_nonce' );

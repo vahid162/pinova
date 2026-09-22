@@ -43,7 +43,9 @@ class Helper {
 			esc_html__( 'انتقال انجام نشد', 'pinova' ),
 			[
 				'response'  => 503,
-				'link_url'  => esc_url( $url ),
+				// wp_die() escapes link_url when it renders the error template.
+				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+				'link_url'  => $url,
 				'link_text' => esc_html__( 'ادامه', 'pinova' ),
 			]
 		);

@@ -175,7 +175,16 @@ final class Privacy {
 	 * @return string[]
 	 */
 	private static function erasure_identifiers( WP_User $user, string $email_address, ?string $physical_mobile ): array {
-		$identifiers = [ $email_address ];
+		$identifiers = [];
+		foreach ( [ $user->user_email, $email_address ] as $email ) {
+			$email = sanitize_email( $email );
+			if ( '' === $email ) {
+				continue;
+			}
+
+			$identifiers[] = $email;
+			$identifiers[] = strtolower( $email );
+		}
 
 		if ( null !== $physical_mobile ) {
 			$identifiers[] = $physical_mobile;

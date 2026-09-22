@@ -233,6 +233,37 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertStringNotContainsString( 'identifier_fingerprint', $context );
 	}
 
+	public function test_eraser_uses_the_matched_accounts_stored_email_for_fingerprints(): void {
+		global $wpdb;
+
+		$stored_email = 'StoredCase@example.test';
+		$user_id      = self::factory()->user->create( [ 'user_email' => $stored_email ] );
+		$fingerprint  = Logger::instance()->fingerprint( $stored_email, 'email' );
+		Logger::instance()->audit(
+			'info',
+			'privacy.pre_account_email',
+			[
+				'identifier_type'        => 'email',
+				'identifier_fingerprint' => $fingerprint,
+			]
+		);
+
+		$result  = Privacy::erase_personal_data( 'storedcase@example.test', 1 );
+		$context = (string) $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT `context` FROM %i WHERE `event` = %s',
+				$wpdb->prefix . 'pinova_logs',
+				'privacy.pre_account_email'
+			)
+		);
+
+		self::assertGreaterThan( 0, $user_id );
+		self::assertTrue( $result['done'] );
+		self::assertFalse( $result['items_retained'] );
+		self::assertStringNotContainsString( $fingerprint, $context );
+		self::assertStringNotContainsString( 'identifier_fingerprint', $context );
+	}
+
 	public function test_eraser_removes_mobile_and_otp_then_anonymizes_audit_row(): void {
 		global $wpdb;
 

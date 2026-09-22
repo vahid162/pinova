@@ -40,6 +40,70 @@ function pinova_parse_readme_headers( string $contents ): array {
 	return $headers;
 }
 
+/**
+ * @param array<int, array{int, string, int}|string> $tokens
+ */
+function pinova_next_significant_token_index( array $tokens, int $index ): ?int {
+	$tokenCount = count( $tokens );
+	for ( ; $index < $tokenCount; $index++ ) {
+		$token = $tokens[ $index ];
+		if ( is_array( $token ) && in_array( $token[0], [ T_WHITESPACE, T_COMMENT, T_DOC_COMMENT ], true ) ) {
+			continue;
+		}
+
+		return $index;
+	}
+
+	return null;
+}
+
+/**
+ * @return list<string>
+ */
+function pinova_php_defined_string_constants( string $contents, string $constant ): array {
+	$tokens = token_get_all( $contents );
+	$values = [];
+
+	foreach ( $tokens as $index => $token ) {
+		if ( ! is_array( $token ) || T_STRING !== $token[0] || 0 !== strcasecmp( $token[1], 'define' ) ) {
+			continue;
+		}
+
+		$previousIndex = $index - 1;
+		while ( $previousIndex >= 0 ) {
+			$previousToken = $tokens[ $previousIndex ];
+			if ( ! is_array( $previousToken ) || ! in_array( $previousToken[0], [ T_WHITESPACE, T_COMMENT, T_DOC_COMMENT ], true ) ) {
+				break;
+			}
+			$previousIndex--;
+		}
+
+		$previousToken = $previousIndex >= 0 ? $tokens[ $previousIndex ] : null;
+		if ( is_array( $previousToken ) && in_array( $previousToken[0], [ T_FUNCTION, T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR, T_DOUBLE_COLON ], true ) ) {
+			continue;
+		}
+
+		$openIndex = pinova_next_significant_token_index( $tokens, $index + 1 );
+		$nameIndex = null === $openIndex ? null : pinova_next_significant_token_index( $tokens, $openIndex + 1 );
+		$commaIndex = null === $nameIndex ? null : pinova_next_significant_token_index( $tokens, $nameIndex + 1 );
+		$valueIndex = null === $commaIndex ? null : pinova_next_significant_token_index( $tokens, $commaIndex + 1 );
+		$closeIndex = null === $valueIndex ? null : pinova_next_significant_token_index( $tokens, $valueIndex + 1 );
+
+		if ( null === $openIndex || '(' !== $tokens[ $openIndex ] ||
+			null === $nameIndex || ! is_array( $tokens[ $nameIndex ] ) || T_CONSTANT_ENCAPSED_STRING !== $tokens[ $nameIndex ][0] ||
+			! in_array( $tokens[ $nameIndex ][1], [ "'{$constant}'", "\"{$constant}\"" ], true ) ||
+			null === $commaIndex || ',' !== $tokens[ $commaIndex ] ||
+			null === $valueIndex || ! is_array( $tokens[ $valueIndex ] ) || T_CONSTANT_ENCAPSED_STRING !== $tokens[ $valueIndex ][0] ||
+			null === $closeIndex || ')' !== $tokens[ $closeIndex ] ) {
+			continue;
+		}
+
+		$values[] = substr( $tokens[ $valueIndex ][1], 1, -1 );
+	}
+
+	return $values;
+}
+
 function pinova_php_class_declares_public_method( string $contents, string $class, string $method ): bool {
 	$tokens             = token_get_all( $contents );
 	$braceDepth         = 0;
@@ -50,6 +114,10 @@ function pinova_php_class_declares_public_method( string $contents, string $clas
 
 	for ( $index = 0; $index < $tokenCount; $index++ ) {
 		$token = $tokens[ $index ];
+		if ( is_array( $token ) && in_array( $token[0], [ T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES ], true ) ) {
+			$braceDepth++;
+			continue;
+		}
 
 		if ( null === $targetClassDepth && 0 === $braceDepth && is_array( $token ) && T_NAMESPACE === $token[0] ) {
 			$namespace = '';
@@ -226,18 +294,19 @@ if ( ( $pluginHeaders['Version'] ?? '' ) !== ( $readmeHeaders['Stable tag'] ?? '
 	$errors[] = 'Plugin Version and readme.txt Stable tag differ.';
 }
 
-$runtimeVersion = '';
-if ( preg_match( '/define\(\s*[\'\"]PINOVA_VERSION[\'\"]\s*,\s*[\'\"]((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))[\'\"]\s*\)/', $plugin, $matches ) === 1 ) {
-	$runtimeVersion = $matches[1];
-}
+$runtimeVersions = pinova_php_defined_string_constants( $plugin, 'PINOVA_VERSION' );
+$runtimeVersion  = count( $runtimeVersions ) === 1 ? $runtimeVersions[0] : '';
+$runtimeVersionCanonical = preg_match( '/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/', $runtimeVersion ) === 1;
 
 if ( '' === $runtimeVersion ) {
-	$errors[] = 'pinova.php does not define a valid PINOVA_VERSION.';
+	$errors[] = 'pinova.php must contain exactly one executable string definition of PINOVA_VERSION.';
+} elseif ( ! $runtimeVersionCanonical ) {
+	$errors[] = 'PINOVA_VERSION must use canonical non-zero-padded semantic-version components.';
 } elseif ( ( $pluginHeaders['Version'] ?? '' ) !== $runtimeVersion ) {
 	$errors[] = 'Plugin Version and PINOVA_VERSION differ.';
 }
 
-if ( '' !== $runtimeVersion ) {
+if ( $runtimeVersionCanonical ) {
 	[ , $minorVersion, $patchVersion ] = array_map( 'intval', explode( '.', $runtimeVersion ) );
 	if ( $minorVersion >= 10 || $patchVersion >= 10 ) {
 		$errors[] = 'PINOVA_VERSION minor and patch components must remain below 10 until the migration runner supports multi-digit components.';
@@ -245,7 +314,7 @@ if ( '' !== $runtimeVersion ) {
 }
 
 $migrationMethod = 'update_' . str_replace( '.', '', $runtimeVersion );
-if ( '' !== $runtimeVersion && ! pinova_php_class_declares_public_method( $versionClass, 'Pinova\\Version', $migrationMethod ) ) {
+if ( $runtimeVersionCanonical && ! pinova_php_class_declares_public_method( $versionClass, 'Pinova\\Version', $migrationMethod ) ) {
 	$errors[] = "src/Version.php must define {$migrationMethod}().";
 }
 

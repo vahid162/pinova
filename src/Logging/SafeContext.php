@@ -139,6 +139,18 @@ final class SafeContext {
 			$value = strtolower( $value );
 		}
 
+		return $this->fingerprint_value( $value, $purpose );
+	}
+
+	/**
+	 * Reproduce the pre-canonicalization HMAC only for privacy erasure of
+	 * retained legacy records. New logs must use fingerprint().
+	 */
+	public function legacy_fingerprint( string $value, string $purpose = 'identifier' ): string {
+		return $this->fingerprint_value( $value, $purpose );
+	}
+
+	private function fingerprint_value( string $value, string $purpose ): string {
 		$salt = (string) call_user_func( $this->salt_provider );
 
 		return substr( hash_hmac( 'sha256', $purpose . ':' . $value, $salt ), 0, 32 );

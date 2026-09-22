@@ -41,13 +41,32 @@ final class LogRepository {
 	 *
 	 * Context is deliberately excluded because it can contain keyed fingerprints.
 	 *
-	 * @return array<int, array{id:int,created_at:string,event:string,correlation_id:string}>
+	 * @return array{rows:array<int, array{id:int,created_at:string,event:string,correlation_id:string}>,success:bool}
 	 */
 	public static function export_for_user( int $user_id, int $page = 1, int $per_page = 100 ): array {
 		global $wpdb;
 
-		if ( $user_id <= 0 || ! self::table_exists() ) {
-			return [];
+		if ( $user_id <= 0 ) {
+			return [
+				'rows'    => [],
+				'success' => true,
+			];
+		}
+
+		$table       = self::table_name();
+		$table_found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+		if ( self::database_error_present() ) {
+			return [
+				'rows'    => [],
+				'success' => false,
+			];
+		}
+
+		if ( $table_found !== $table ) {
+			return [
+				'rows'    => [],
+				'success' => true,
+			];
 		}
 
 		$page     = max( 1, $page );
@@ -63,22 +82,37 @@ final class LogRepository {
 			),
 			ARRAY_A
 		);
+		if ( self::database_error_present() ) {
+			return [
+				'rows'    => [],
+				'success' => false,
+			];
+		}
 
-		return is_array( $rows ) ? $rows : [];
+		return [
+			'rows'    => is_array( $rows ) ? $rows : [],
+			'success' => true,
+		];
 	}
 
 	/**
 	 * Remove the user link and keyed fingerprints while retaining event facts.
 	 *
 	 * @param string[] $fingerprints
+	 * @param bool     $include_legacy_unowned_email
 	 * @return array{processed:int,done:bool,success:bool}
 	 */
-	public static function anonymize_user( int $user_id, int $limit = 100, array $fingerprints = [] ): array {
+	public static function anonymize_user(
+		int $user_id,
+		int $limit = 100,
+		array $fingerprints = [],
+		bool $include_legacy_unowned_email = false
+	): array {
 		global $wpdb;
 
 		$limit        = max( 1, min( 100, $limit ) );
 		$fingerprints = array_values( array_unique( array_filter( array_map( 'strval', $fingerprints ) ) ) );
-		if ( $user_id <= 0 && ! $fingerprints ) {
+		if ( $user_id <= 0 && ! $fingerprints && ! $include_legacy_unowned_email ) {
 			return [
 				'processed' => 0,
 				'done'      => true,
@@ -114,6 +148,11 @@ final class LogRepository {
 		foreach ( $fingerprints as $fingerprint ) {
 			$matches[] = '`context` LIKE %s';
 			$values[]  = '%"' . $wpdb->esc_like( $fingerprint ) . '"%';
+		}
+		if ( $include_legacy_unowned_email ) {
+			$matches[] = '(`context` LIKE %s AND `context` LIKE %s)';
+			$values[]  = '%"identifier_type":"email"%';
+			$values[]  = '%"identifier_fingerprint":"%';
 		}
 		if ( $matches ) {
 			$where[] = '(`user_id` IS NULL AND (' . implode( ' OR ', $matches ) . '))';

@@ -112,6 +112,7 @@ final class LoggingTest extends TestCase {
 
 		self::assertSame( $context->fingerprint( 'value', 'email' ), $context->fingerprint( 'value', 'email' ) );
 		self::assertSame( $context->fingerprint( 'Case@Example.Test', 'email' ), $context->fingerprint( 'case@example.test', 'EMAIL' ) );
+		self::assertNotSame( $context->fingerprint( 'Case@Example.Test', 'email' ), $context->legacy_fingerprint( 'Case@Example.Test', 'email' ) );
 		self::assertNotSame( hash( 'sha256', 'value' ), $context->fingerprint( 'value', 'email' ) );
 		self::assertNotSame( $context->fingerprint( 'value', 'email' ), $context->fingerprint( 'value', 'mobile' ) );
 	}

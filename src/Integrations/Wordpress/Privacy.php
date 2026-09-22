@@ -52,35 +52,60 @@ final class Privacy {
 	 * @return array{data:array<int, array<string, mixed>>,done:bool}
 	 */
 	public static function export_personal_data( string $email_address, int $page = 1 ): array {
-		$user = get_user_by( 'email', sanitize_email( $email_address ) );
-		if ( ! $user instanceof WP_User ) {
+		$user_lookup = self::find_user_by_email( sanitize_email( $email_address ) );
+		if ( ! $user_lookup['success'] ) {
+			return [
+				'data' => [],
+				'done' => false,
+			];
+		}
+
+		$user = $user_lookup['user'];
+		if ( null === $user ) {
 			return [
 				'data' => [],
 				'done' => true,
 			];
 		}
 
-		$page = max( 1, $page );
-		$data = [];
+		$page   = max( 1, $page );
+		$data   = [];
+		$mobile = null;
 
 		if ( 1 === $page ) {
-			$mobile = UserService::get_persisted_mobile( $user->ID );
-			if ( is_string( $mobile ) && '' !== $mobile ) {
-				$data[] = [
-					'group_id'    => 'pinova-profile',
-					'group_label' => __( 'پروفایل پینوا', 'pinova' ),
-					'item_id'     => 'pinova-profile-' . $user->ID,
-					'data'        => [
-						[
-							'name'  => __( 'شماره موبایل', 'pinova' ),
-							'value' => $mobile,
-						],
-					],
+			$mobile_lookup = UserService::get_persisted_mobile_result( $user->ID );
+			if ( ! $mobile_lookup['success'] ) {
+				return [
+					'data' => [],
+					'done' => false,
 				];
 			}
+			$mobile = $mobile_lookup['value'];
 		}
 
-		$logs = LogRepository::export_for_user( $user->ID, $page, self::BATCH_SIZE );
+		$log_result = LogRepository::export_for_user( $user->ID, $page, self::BATCH_SIZE );
+		if ( ! $log_result['success'] ) {
+			return [
+				'data' => [],
+				'done' => false,
+			];
+		}
+		$logs = $log_result['rows'];
+
+		if ( is_string( $mobile ) && '' !== $mobile ) {
+			$data[] = [
+				'group_id'    => 'pinova-profile',
+				'group_label' => __( 'پروفایل پینوا', 'pinova' ),
+				'item_id'     => 'pinova-profile-' . $user->ID,
+				'data'        => [
+					[
+						'name'  => __( 'شماره موبایل', 'pinova' ),
+						'value' => $mobile,
+					],
+				],
+			];
+		}
+
 		foreach ( $logs as $log ) {
 			$data[] = [
 				'group_id'    => 'pinova-audit',
@@ -117,10 +142,19 @@ final class Privacy {
 	 */
 	public static function erase_personal_data( string $email_address, int $page = 1 ): array {
 		unset( $page );
-		$email = sanitize_email( $email_address );
-		$user  = get_user_by( 'email', $email );
+		$email       = sanitize_email( $email_address );
+		$user_lookup = self::find_user_by_email( $email );
+		if ( ! $user_lookup['success'] ) {
+			return [
+				'items_removed'  => false,
+				'items_retained' => true,
+				'messages'       => [ __( 'بخشی از داده‌های پینوا حذف نشد. لطفاً عملیات پاک‌سازی را دوباره اجرا کنید.', 'pinova' ) ],
+				'done'           => false,
+			];
+		}
 
-		if ( ! $user instanceof WP_User ) {
+		$user = $user_lookup['user'];
+		if ( null === $user ) {
 			return self::erase_unowned_email_data( $email );
 		}
 
@@ -138,7 +172,7 @@ final class Privacy {
 		$identifiers      = self::erasure_identifiers( $user, $email_address, $mobile );
 		$otp_result       = self::delete_otp_records( $user->ID, $identifiers );
 		$fingerprints     = self::identifier_fingerprints( $identifiers );
-		$logs             = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE, $fingerprints );
+		$logs             = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE, $fingerprints, true );
 		$mobile_result    = [
 			'removed' => 0,
 			'success' => true,
@@ -168,7 +202,7 @@ final class Privacy {
 		$identifiers  = self::email_variants( $email_address );
 		$otp_result   = self::delete_otp_records( 0, $identifiers );
 		$fingerprints = self::identifier_fingerprints( $identifiers );
-		$logs         = LogRepository::anonymize_user( 0, self::BATCH_SIZE, $fingerprints );
+		$logs         = LogRepository::anonymize_user( 0, self::BATCH_SIZE, $fingerprints, (bool) $identifiers );
 		$success      = $otp_result['success'] && $logs['success'];
 
 		return [
@@ -234,6 +268,7 @@ final class Privacy {
 	 */
 	private static function identifier_fingerprints( array $identifiers ): array {
 		$fingerprints = [];
+		$logger       = Logger::instance();
 
 		foreach ( $identifiers as $value ) {
 			$identifier = new Identifier( $value );
@@ -241,13 +276,59 @@ final class Privacy {
 				continue;
 			}
 
-			$fingerprint = Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() );
+			$fingerprint = $logger->fingerprint( $identifier->get_value(), $identifier->get_type() );
 			if ( '' !== $fingerprint ) {
 				$fingerprints[] = $fingerprint;
+			}
+
+			if ( $identifier->is_email() ) {
+				$legacy_fingerprint = $logger->legacy_fingerprint( $identifier->get_value(), $identifier->get_type() );
+				if ( '' !== $legacy_fingerprint ) {
+					$fingerprints[] = $legacy_fingerprint;
+				}
 			}
 		}
 
 		return array_values( array_unique( $fingerprints ) );
+	}
+
+	/** @return array{user:?WP_User,success:bool} */
+	private static function find_user_by_email( string $email_address ): array {
+		global $wpdb;
+
+		$user_id = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT `ID` FROM %i WHERE `user_email` = %s LIMIT 1',
+				$wpdb->users,
+				$email_address
+			)
+		);
+		if ( self::database_error_present() ) {
+			return [
+				'user'    => null,
+				'success' => false,
+			];
+		}
+
+		if ( null === $user_id ) {
+			return [
+				'user'    => null,
+				'success' => true,
+			];
+		}
+
+		$user = get_userdata( (int) $user_id );
+		if ( self::database_error_present() || ! $user instanceof WP_User ) {
+			return [
+				'user'    => null,
+				'success' => false,
+			];
+		}
+
+		return [
+			'user'    => $user,
+			'success' => true,
+		];
 	}
 
 	/**
@@ -347,6 +428,7 @@ final class Privacy {
 		];
 	}
 
+	/** @phpstan-impure */
 	private static function database_error_present(): bool {
 		global $wpdb;
 

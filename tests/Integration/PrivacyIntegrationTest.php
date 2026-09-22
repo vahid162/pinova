@@ -238,7 +238,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 
 		$stored_email = 'StoredCase@example.test';
 		$user_id      = self::factory()->user->create( [ 'user_email' => $stored_email ] );
-		$fingerprint  = Logger::instance()->fingerprint( 'STOREDcase@example.test', 'email' );
+		$fingerprint  = Logger::instance()->legacy_fingerprint( 'STOREDcase@example.test', 'email' );
 		Logger::instance()->audit(
 			'info',
 			'privacy.pre_account_email',
@@ -262,6 +262,102 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertFalse( $result['items_retained'] );
 		self::assertStringNotContainsString( $fingerprint, $context );
 		self::assertStringNotContainsString( 'identifier_fingerprint', $context );
+	}
+
+	public function test_export_retries_when_an_owned_read_fails(): void {
+		global $wpdb;
+
+		$email   = 'export-read-failure@example.test';
+		$user_id = self::factory()->user->create( [ 'user_email' => $email ] );
+		update_user_meta( $user_id, 'pinova_mobile', '09124445555' );
+		Logger::instance()->audit( 'warning', 'privacy.export_read_failure', [ 'user_id' => $user_id ] );
+
+		$fail_mobile_read = static function ( string $query ) use ( $wpdb ): string {
+			if ( str_contains( $query, 'SELECT `meta_value`' ) && str_contains( $query, 'pinova_mobile' ) ) {
+				return "SELECT `pinova_missing_column` FROM {$wpdb->usermeta} LIMIT 1";
+			}
+
+			return $query;
+		};
+		add_filter( 'query', $fail_mobile_read );
+		try {
+			$mobile_failure = Privacy::export_personal_data( $email, 1 );
+		} finally {
+			remove_filter( 'query', $fail_mobile_read );
+		}
+
+		$fail_log_read = static function ( string $query ) use ( $wpdb ): string {
+			if ( str_contains( $query, 'SELECT `id`, `created_at`, `event`, `correlation_id`' ) ) {
+				return "SELECT `pinova_missing_column` FROM {$wpdb->prefix}pinova_logs LIMIT 1";
+			}
+
+			return $query;
+		};
+		add_filter( 'query', $fail_log_read );
+		try {
+			$log_failure = Privacy::export_personal_data( $email, 1 );
+		} finally {
+			remove_filter( 'query', $fail_log_read );
+		}
+
+		self::assertSame( [], $mobile_failure['data'] );
+		self::assertFalse( $mobile_failure['done'] );
+		self::assertSame( [], $log_failure['data'] );
+		self::assertFalse( $log_failure['done'] );
+	}
+
+	public function test_eraser_retries_when_the_account_lookup_fails(): void {
+		global $wpdb;
+
+		$email   = 'account-read-failure@example.test';
+		$user_id = self::factory()->user->create( [ 'user_email' => $email ] );
+		update_user_meta( $user_id, 'pinova_mobile', '09123336666' );
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_otp',
+			[
+				'user_id'     => $user_id,
+				'identifier'  => $email,
+				'code'        => '112233',
+				'ip_address'  => '127.0.0.1',
+				'attempts'    => 0,
+				'type'        => 'login',
+				'channels'    => '{}',
+				'expires_at'  => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ),
+				'verified_at' => null,
+			]
+		);
+
+		$fail_user_read = static function ( string $query ) use ( $wpdb ): string {
+			if ( str_contains( $query, 'SELECT `ID`' ) && str_contains( $query, '`user_email`' ) ) {
+				return "SELECT `pinova_missing_column` FROM {$wpdb->users} LIMIT 1";
+			}
+
+			return $query;
+		};
+		add_filter( 'query', $fail_user_read );
+		try {
+			$export = Privacy::export_personal_data( $email, 1 );
+			$result = Privacy::erase_personal_data( $email, 1 );
+		} finally {
+			remove_filter( 'query', $fail_user_read );
+		}
+
+		self::assertSame( [], $export['data'] );
+		self::assertFalse( $export['done'] );
+		self::assertFalse( $result['items_removed'] );
+		self::assertTrue( $result['items_retained'] );
+		self::assertFalse( $result['done'] );
+		self::assertSame( '+989123336666', UserService::get_persisted_mobile( $user_id ) );
+		self::assertSame(
+			'1',
+			(string) $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT COUNT(*) FROM %i WHERE `user_id` = %d',
+					$wpdb->prefix . 'pinova_otp',
+					$user_id
+				)
+			)
+		);
 	}
 
 	public function test_eraser_retries_when_the_physical_mobile_lookup_fails(): void {

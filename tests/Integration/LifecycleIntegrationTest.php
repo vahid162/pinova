@@ -9,6 +9,13 @@ use WP_UnitTestCase;
 
 final class LifecycleIntegrationTest extends WP_UnitTestCase {
 
+	public function set_up(): void {
+		parent::set_up();
+
+		delete_option( Install::PURGE_OPTION );
+		self::assertTrue( Install::migrate() );
+	}
+
 	public function tear_down(): void {
 		delete_option( Install::PURGE_OPTION );
 		Install::migrate();
@@ -85,6 +92,7 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 		update_option( 'pinova_test_owned_option', 'delete-me', false );
 		update_option( Install::PURGE_OPTION, 1, false );
 		wp_schedule_single_event( time() + HOUR_IN_SECONDS, 'pinova_logging_cleanup' );
+		self::assertTrue( (bool) get_option( Install::PURGE_OPTION, false ) );
 
 		Install::uninstall();
 

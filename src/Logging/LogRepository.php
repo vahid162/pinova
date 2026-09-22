@@ -110,8 +110,8 @@ final class LogRepository {
 	): array {
 		global $wpdb;
 
-		$limit                             = max( 1, min( 100, $limit ) );
-		$fingerprints                      = array_values( array_unique( array_filter( array_map( 'strval', $fingerprints ) ) ) );
+		$limit                           = max( 1, min( 100, $limit ) );
+		$fingerprints                    = array_values( array_unique( array_filter( array_map( 'strval', $fingerprints ) ) ) );
 		$legacy_unowned_identifier_types = array_values(
 			array_intersect(
 				[ 'email', 'mobile', 'username' ],

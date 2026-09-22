@@ -250,6 +250,7 @@ final class LogRepository {
 		return $wpdb->prefix . 'pinova_logs';
 	}
 
+	/** @phpstan-impure */
 	private static function database_error_present(): bool {
 		global $wpdb;
 

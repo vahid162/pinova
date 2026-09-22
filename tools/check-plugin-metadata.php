@@ -11,6 +11,19 @@ $composerJson = json_decode( (string) file_get_contents( $root . '/composer.json
 $errors       = [];
 
 /**
+ * @param list<string> $canonicalNames
+ */
+function pinova_canonical_header_name( string $name, array $canonicalNames ): string {
+	foreach ( $canonicalNames as $canonicalName ) {
+		if ( 0 === strcasecmp( $name, $canonicalName ) ) {
+			return $canonicalName;
+		}
+	}
+
+	return $name;
+}
+
+/**
  * @param list<string> $errors
  * @return array<string, string>
  */
@@ -31,7 +44,7 @@ function pinova_parse_plugin_headers( string $contents, array &$errors ): array 
 		break;
 	}
 
-	if ( null === $headerBlock || preg_match( '/^[ \t]*\*[ \t]*Plugin Name:[ \t]*\S.*$/m', $headerBlock ) !== 1 ) {
+	if ( null === $headerBlock || preg_match( '/^[ \t]*\*[ \t]*Plugin Name:[ \t]*\S.*$/mi', $headerBlock ) !== 1 ) {
 		$errors[] = 'pinova.php must begin with one canonical plugin header block.';
 
 		return [];
@@ -40,10 +53,28 @@ function pinova_parse_plugin_headers( string $contents, array &$errors ): array 
 	$headers    = [];
 	$duplicates = [];
 	$pattern    = '/^[ \t]*\*[ \t]*([^:\r\n]+):[ \t]*(.*?)[ \t]*$/m';
+	$canonicalNames = [
+		'Plugin Name',
+		'Plugin URI',
+		'Description',
+		'Version',
+		'Author',
+		'Author URI',
+		'Text Domain',
+		'Domain Path',
+		'Network',
+		'Requires at least',
+		'Requires PHP',
+		'Update URI',
+		'License',
+		'License URI',
+		'WC requires at least',
+		'WC tested up to',
+	];
 
 	if ( preg_match_all( $pattern, $headerBlock, $matches, PREG_SET_ORDER ) ) {
 		foreach ( $matches as $match ) {
-			$name = trim( $match[1] );
+			$name = pinova_canonical_header_name( trim( $match[1] ), $canonicalNames );
 			if ( array_key_exists( $name, $headers ) ) {
 				$duplicates[ $name ] = true;
 				continue;
@@ -60,7 +91,7 @@ function pinova_parse_plugin_headers( string $contents, array &$errors ): array 
 
 		if ( preg_match_all( $pattern, $token[1], $matches, PREG_SET_ORDER ) ) {
 			foreach ( $matches as $match ) {
-				$name = trim( $match[1] );
+				$name = pinova_canonical_header_name( trim( $match[1] ), $canonicalNames );
 				if ( array_key_exists( $name, $headers ) ) {
 					$duplicates[ $name ] = true;
 				}
@@ -84,6 +115,17 @@ function pinova_parse_readme_headers( string $contents, array &$errors ): array 
 	$headers    = [];
 	$duplicates = [];
 	$bodyOffset = null;
+	$canonicalNames = [
+		'Contributors',
+		'Donate link',
+		'Tags',
+		'Requires at least',
+		'Tested up to',
+		'Requires PHP',
+		'Stable tag',
+		'License',
+		'License URI',
+	];
 
 	if ( false === $lines ) {
 		$errors[] = 'Unable to parse readme.txt headers.';
@@ -101,7 +143,7 @@ function pinova_parse_readme_headers( string $contents, array &$errors ): array 
 			continue;
 		}
 
-		$name = trim( $match[1] );
+		$name = pinova_canonical_header_name( trim( $match[1] ), $canonicalNames );
 		if ( array_key_exists( $name, $headers ) ) {
 			$duplicates[ $name ] = true;
 			continue;
@@ -111,8 +153,11 @@ function pinova_parse_readme_headers( string $contents, array &$errors ): array 
 	}
 
 	foreach ( array_slice( $lines, $bodyOffset ?? count( $lines ) ) as $line ) {
-		if ( preg_match( '/^([A-Za-z][A-Za-z ]+):\s*(.*?)\s*$/', $line, $match ) === 1 && array_key_exists( trim( $match[1] ), $headers ) ) {
-			$duplicates[ trim( $match[1] ) ] = true;
+		if ( preg_match( '/^([A-Za-z][A-Za-z ]+):\s*(.*?)\s*$/', $line, $match ) === 1 ) {
+			$name = pinova_canonical_header_name( trim( $match[1] ), $canonicalNames );
+			if ( array_key_exists( $name, $headers ) ) {
+				$duplicates[ $name ] = true;
+			}
 		}
 	}
 

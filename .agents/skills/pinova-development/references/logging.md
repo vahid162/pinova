@@ -42,7 +42,7 @@ Never persist any of the following, even at debug level:
 - request/response body, message content, billing/shipping profile, or arbitrary user metadata;
 - exception message, file path, stack trace, database error text, or provider response.
 
-When correlation across events is required, call `Logger::fingerprint( $normalized_value, $purpose )`. It uses a keyed HMAC derived from the WordPress auth salt and stores only 32 hexadecimal characters. Use a purpose such as `email`, `mobile`, `ip`, or `rate_limit_subject` so identical raw values are not linkable across unrelated domains. A fingerprint is still operational data and follows the same retention policy.
+When correlation across events is required, call `Logger::fingerprint( $normalized_value, $purpose )`. It uses a keyed HMAC derived from the WordPress auth salt and stores only 32 hexadecimal characters. Email values and the purpose are trimmed and lowercased centrally before HMAC calculation so case variants have one erasable fingerprint; callers must still normalize mobile, IP, username, and other purpose-specific values before calling it. Use a purpose such as `email`, `mobile`, `ip`, or `rate_limit_subject` so identical raw values are not linkable across unrelated domains. A fingerprint is still operational data and follows the same retention policy.
 
 Adding a context key requires all of:
 

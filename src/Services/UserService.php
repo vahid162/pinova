@@ -410,6 +410,17 @@ class UserService {
 	 * privacy operations do not claim a login name or another plugin's meta.
 	 */
 	public static function get_persisted_mobile( int $user_id ): ?string {
+		$result = self::get_persisted_mobile_result( $user_id );
+
+		return $result['value'];
+	}
+
+	/**
+	 * Read the physical Pinova mobile while preserving database failure state.
+	 *
+	 * @return array{value:?string,success:bool}
+	 */
+	public static function get_persisted_mobile_result( int $user_id ): array {
 		global $wpdb;
 
 		$raw_value = $wpdb->get_var(
@@ -420,9 +431,21 @@ class UserService {
 				'pinova_mobile'
 			)
 		);
-		$mobile    = new Mobile( is_scalar( $raw_value ) ? (string) $raw_value : '' );
+		$properties = get_object_vars( $wpdb );
+		$error      = $properties['last_error'] ?? '';
+		if ( is_string( $error ) && '' !== $error ) {
+			return [
+				'value'   => null,
+				'success' => false,
+			];
+		}
 
-		return $mobile->is_valid() ? $mobile->get_formatted() : null;
+		$mobile = new Mobile( is_scalar( $raw_value ) ? (string) $raw_value : '' );
+
+		return [
+			'value'   => $mobile->is_valid() ? $mobile->get_formatted() : null,
+			'success' => true,
+		];
 	}
 
 	/**

@@ -133,6 +133,12 @@ final class SafeContext {
 	}
 
 	public function fingerprint( string $value, string $purpose = 'identifier' ): string {
+		$purpose = strtolower( trim( $purpose ) );
+		$value   = trim( $value );
+		if ( 'email' === $purpose ) {
+			$value = strtolower( $value );
+		}
+
 		$salt = (string) call_user_func( $this->salt_provider );
 
 		return substr( hash_hmac( 'sha256', $purpose . ':' . $value, $salt ), 0, 32 );

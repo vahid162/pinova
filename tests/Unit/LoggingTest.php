@@ -111,6 +111,7 @@ final class LoggingTest extends TestCase {
 		$context = new SafeContext( static fn(): string => 'stable-secret' );
 
 		self::assertSame( $context->fingerprint( 'value', 'email' ), $context->fingerprint( 'value', 'email' ) );
+		self::assertSame( $context->fingerprint( 'Case@Example.Test', 'email' ), $context->fingerprint( 'case@example.test', 'EMAIL' ) );
 		self::assertNotSame( hash( 'sha256', 'value' ), $context->fingerprint( 'value', 'email' ) );
 		self::assertNotSame( $context->fingerprint( 'value', 'email' ), $context->fingerprint( 'value', 'mobile' ) );
 	}

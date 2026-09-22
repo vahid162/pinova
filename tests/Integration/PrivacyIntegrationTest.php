@@ -238,7 +238,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 
 		$stored_email = 'StoredCase@example.test';
 		$user_id      = self::factory()->user->create( [ 'user_email' => $stored_email ] );
-		$fingerprint  = Logger::instance()->fingerprint( $stored_email, 'email' );
+		$fingerprint  = Logger::instance()->fingerprint( 'STOREDcase@example.test', 'email' );
 		Logger::instance()->audit(
 			'info',
 			'privacy.pre_account_email',
@@ -262,6 +262,57 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertFalse( $result['items_retained'] );
 		self::assertStringNotContainsString( $fingerprint, $context );
 		self::assertStringNotContainsString( 'identifier_fingerprint', $context );
+	}
+
+	public function test_eraser_retries_when_the_physical_mobile_lookup_fails(): void {
+		global $wpdb;
+
+		$email   = 'mobile-read-failure@example.test';
+		$user_id = self::factory()->user->create( [ 'user_email' => $email ] );
+		update_user_meta( $user_id, 'pinova_mobile', '09128889999' );
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_otp',
+			[
+				'user_id'     => $user_id,
+				'identifier'  => '+989128889999',
+				'code'        => '135790',
+				'ip_address'  => '127.0.0.1',
+				'attempts'    => 0,
+				'type'        => 'login',
+				'channels'    => '{}',
+				'expires_at'  => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ),
+				'verified_at' => null,
+			]
+		);
+
+		$fail_mobile_read = static function ( string $query ) use ( $wpdb ): string {
+			if ( str_contains( $query, 'SELECT `meta_value`' ) && str_contains( $query, 'pinova_mobile' ) ) {
+				return "SELECT `pinova_missing_column` FROM {$wpdb->usermeta} LIMIT 1";
+			}
+
+			return $query;
+		};
+		add_filter( 'query', $fail_mobile_read );
+		try {
+			$result = Privacy::erase_personal_data( $email, 1 );
+		} finally {
+			remove_filter( 'query', $fail_mobile_read );
+		}
+
+		self::assertFalse( $result['items_removed'] );
+		self::assertTrue( $result['items_retained'] );
+		self::assertFalse( $result['done'] );
+		self::assertSame( '+989128889999', UserService::get_persisted_mobile( $user_id ) );
+		self::assertSame(
+			'1',
+			(string) $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT COUNT(*) FROM %i WHERE `user_id` = %d',
+					$wpdb->prefix . 'pinova_otp',
+					$user_id
+				)
+			)
+		);
 	}
 
 	public function test_eraser_removes_unowned_pre_account_email_records_without_a_user(): void {

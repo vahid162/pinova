@@ -124,7 +124,17 @@ final class Privacy {
 			return self::erase_unowned_email_data( $email );
 		}
 
-		$mobile           = UserService::get_persisted_mobile( $user->ID );
+		$mobile_lookup = UserService::get_persisted_mobile_result( $user->ID );
+		if ( ! $mobile_lookup['success'] ) {
+			return [
+				'items_removed'  => false,
+				'items_retained' => true,
+				'messages'       => [ __( 'بخشی از داده‌های پینوا حذف نشد. لطفاً عملیات پاک‌سازی را دوباره اجرا کنید.', 'pinova' ) ],
+				'done'           => false,
+			];
+		}
+
+		$mobile           = $mobile_lookup['value'];
 		$identifiers      = self::erasure_identifiers( $user, $email_address, $mobile );
 		$otp_result       = self::delete_otp_records( $user->ID, $identifiers );
 		$fingerprints     = self::identifier_fingerprints( $identifiers );

@@ -8,6 +8,7 @@ use Pinova\Install;
 use Pinova\Integrations\Wordpress\Privacy;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
+use Pinova\Services\UserService;
 use WP_UnitTestCase;
 
 final class PrivacyIntegrationTest extends WP_UnitTestCase {
@@ -69,12 +70,23 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 	}
 
 	public function test_export_does_not_claim_a_mobile_shaped_login_without_owned_meta(): void {
+		global $wpdb;
+
 		$user_id = self::factory()->user->create(
 			[
 				'user_email' => 'login-mobile@example.test',
 				'user_login' => '09123334444',
 			]
 		);
+		$wpdb->delete(
+			$wpdb->usermeta,
+			[
+				'user_id'  => $user_id,
+				'meta_key' => 'pinova_mobile',
+			],
+			[ '%d', '%s' ]
+		);
+		clean_user_cache( $user_id );
 
 		$export        = Privacy::export_personal_data( 'login-mobile@example.test', 1 );
 		$json          = (string) wp_json_encode( $export );
@@ -86,6 +98,8 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		);
 
 		self::assertGreaterThan( 0, $user_id );
+		self::assertSame( '+989123334444', UserService::get_mobile( $user_id ) );
+		self::assertNull( UserService::get_persisted_mobile( $user_id ) );
 		self::assertSame( [], $profile_items );
 		self::assertStringNotContainsString( '09123334444', $json );
 		self::assertStringNotContainsString( '+989123334444', $json );

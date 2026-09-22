@@ -6,6 +6,7 @@ $root         = dirname( __DIR__ );
 $plugin       = (string) file_get_contents( $root . '/pinova.php' );
 $readme       = (string) file_get_contents( $root . '/readme.txt' );
 $changelog    = (string) file_get_contents( $root . '/CHANGELOG.md' );
+$versionClass = (string) file_get_contents( $root . '/src/Version.php' );
 $composerJson = json_decode( (string) file_get_contents( $root . '/composer.json' ), true );
 $errors       = [];
 
@@ -78,6 +79,22 @@ foreach ( [ 'Requires at least', 'Requires PHP' ] as $header ) {
 
 if ( ( $pluginHeaders['Version'] ?? '' ) !== ( $readmeHeaders['Stable tag'] ?? '' ) ) {
 	$errors[] = 'Plugin Version and readme.txt Stable tag differ.';
+}
+
+$runtimeVersion = '';
+if ( preg_match( '/define\(\s*[\'\"]PINOVA_VERSION[\'\"]\s*,\s*[\'\"](\d+\.\d+\.\d+)[\'\"]\s*\)/', $plugin, $matches ) === 1 ) {
+	$runtimeVersion = $matches[1];
+}
+
+if ( '' === $runtimeVersion ) {
+	$errors[] = 'pinova.php does not define a valid PINOVA_VERSION.';
+} elseif ( ( $pluginHeaders['Version'] ?? '' ) !== $runtimeVersion ) {
+	$errors[] = 'Plugin Version and PINOVA_VERSION differ.';
+}
+
+$migrationMethod = 'update_' . str_replace( '.', '', $runtimeVersion );
+if ( '' !== $runtimeVersion && preg_match( '/\bfunction\s+' . preg_quote( $migrationMethod, '/' ) . '\s*\(/', $versionClass ) !== 1 ) {
+	$errors[] = "src/Version.php must define {$migrationMethod}().";
 }
 
 $currentChangelogVersion = '';

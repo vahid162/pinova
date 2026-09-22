@@ -171,7 +171,7 @@ final class Privacy {
 			)
 		);
 
-		if ( '' !== $wpdb->last_error ) {
+		if ( self::database_error_present() ) {
 			return [
 				'removed' => 0,
 				'success' => false,
@@ -202,7 +202,7 @@ final class Privacy {
 
 		$table       = $wpdb->prefix . 'pinova_otp';
 		$table_found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
-		if ( '' !== $wpdb->last_error ) {
+		if ( self::database_error_present() ) {
 			return [
 				'removed' => 0,
 				'success' => false,
@@ -239,5 +239,14 @@ final class Privacy {
 			'removed' => false === $removed ? 0 : max( 0, (int) $removed ),
 			'success' => false !== $removed,
 		];
+	}
+
+	private static function database_error_present(): bool {
+		global $wpdb;
+
+		$properties = get_object_vars( $wpdb );
+		$error      = $properties['last_error'] ?? '';
+
+		return is_string( $error ) && '' !== $error;
 	}
 }

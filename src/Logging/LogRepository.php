@@ -86,7 +86,7 @@ final class LogRepository {
 
 		$table       = self::table_name();
 		$table_found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
-		if ( '' !== $wpdb->last_error ) {
+		if ( self::database_error_present() ) {
 			return [
 				'processed' => 0,
 				'done'      => false,
@@ -111,7 +111,7 @@ final class LogRepository {
 			),
 			ARRAY_A
 		);
-		if ( '' !== $wpdb->last_error ) {
+		if ( self::database_error_present() ) {
 			return [
 				'processed' => 0,
 				'done'      => false,
@@ -242,5 +242,14 @@ final class LogRepository {
 		global $wpdb;
 
 		return $wpdb->prefix . 'pinova_logs';
+	}
+
+	private static function database_error_present(): bool {
+		global $wpdb;
+
+		$properties = get_object_vars( $wpdb );
+		$error      = $properties['last_error'] ?? '';
+
+		return is_string( $error ) && '' !== $error;
 	}
 }

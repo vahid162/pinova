@@ -403,7 +403,13 @@ class UserService {
 		return $safe;
 	}
 
-	private static function get_persisted_mobile( int $user_id ): ?string {
+	/**
+	 * Return only the physical Pinova-owned mobile value.
+	 *
+	 * This bypasses the virtual get_user_metadata compatibility filter so
+	 * privacy operations do not claim a login name or another plugin's meta.
+	 */
+	public static function get_persisted_mobile( int $user_id ): ?string {
 		global $wpdb;
 
 		$raw_value = $wpdb->get_var(

@@ -61,7 +61,7 @@ final class Privacy {
 		$data = [];
 
 		if ( 1 === $page ) {
-			$mobile = UserService::get_mobile( $user->ID );
+			$mobile = UserService::get_persisted_mobile( $user->ID );
 			if ( is_string( $mobile ) && '' !== $mobile ) {
 				$data[] = [
 					'group_id'    => 'pinova-profile',
@@ -125,7 +125,7 @@ final class Privacy {
 			];
 		}
 
-		$mobile           = UserService::get_mobile( $user->ID );
+		$mobile           = UserService::get_persisted_mobile( $user->ID );
 		$had_mobile       = metadata_exists( 'user', $user->ID, 'pinova_mobile' );
 		$otp_rows_removed = self::delete_otp_records( $user->ID, [ $email_address, $mobile ?? '' ] );
 		delete_user_meta( $user->ID, 'pinova_mobile' );
@@ -179,7 +179,7 @@ final class Privacy {
 		$values      = [ $table, $user_id ];
 
 		if ( $identifiers ) {
-			$query   .= ' OR `identifier` IN (' . implode( ',', array_fill( 0, count( $identifiers ), '%s' ) ) . ')';
+			$query   .= ' OR (`user_id` IS NULL AND `identifier` IN (' . implode( ',', array_fill( 0, count( $identifiers ), '%s' ) ) . '))';
 			$values   = array_merge( $values, $identifiers );
 		}
 

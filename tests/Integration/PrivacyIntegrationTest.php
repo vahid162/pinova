@@ -68,10 +68,34 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertStringNotContainsString( 'identifier_fingerprint', $json );
 	}
 
+	public function test_export_does_not_claim_a_mobile_shaped_login_without_owned_meta(): void {
+		$user_id = self::factory()->user->create(
+			[
+				'user_email' => 'login-mobile@example.test',
+				'user_login' => '09123334444',
+			]
+		);
+
+		$export        = Privacy::export_personal_data( 'login-mobile@example.test', 1 );
+		$json          = (string) wp_json_encode( $export );
+		$profile_items = array_values(
+			array_filter(
+				$export['data'],
+				static fn( array $item ): bool => 'pinova-profile' === ( $item['group_id'] ?? '' )
+			)
+		);
+
+		self::assertGreaterThan( 0, $user_id );
+		self::assertSame( [], $profile_items );
+		self::assertStringNotContainsString( '09123334444', $json );
+		self::assertStringNotContainsString( '+989123334444', $json );
+	}
+
 	public function test_eraser_removes_mobile_and_otp_then_anonymizes_audit_row(): void {
 		global $wpdb;
 
-		$user_id = self::factory()->user->create( [ 'user_email' => 'erase@example.test' ] );
+		$user_id       = self::factory()->user->create( [ 'user_email' => 'erase@example.test' ] );
+		$other_user_id = self::factory()->user->create( [ 'user_email' => 'other@example.test' ] );
 		update_user_meta( $user_id, 'pinova_mobile', '09121111111' );
 		Logger::instance()->audit(
 			'warning',
@@ -91,6 +115,34 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 				'ip_address'  => '127.0.0.1',
 				'attempts'    => 0,
 				'type'        => 'forget',
+				'channels'    => '{}',
+				'expires_at'  => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ),
+				'verified_at' => null,
+			]
+		);
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_otp',
+			[
+				'user_id'     => null,
+				'identifier'  => '+989121111111',
+				'code'        => '111222',
+				'ip_address'  => '127.0.0.1',
+				'attempts'    => 0,
+				'type'        => 'login',
+				'channels'    => '{}',
+				'expires_at'  => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ),
+				'verified_at' => null,
+			]
+		);
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_otp',
+			[
+				'user_id'     => $other_user_id,
+				'identifier'  => '+989121111111',
+				'code'        => '333444',
+				'ip_address'  => '127.0.0.1',
+				'attempts'    => 0,
+				'type'        => 'login',
 				'channels'    => '{}',
 				'expires_at'  => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ),
 				'verified_at' => null,
@@ -117,6 +169,27 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 					$wpdb->prefix . 'pinova_otp',
 					$user_id,
 					'erase@example.test'
+				)
+			)
+		);
+		self::assertSame(
+			'1',
+			(string) $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT COUNT(*) FROM %i WHERE `user_id` = %d AND `identifier` = %s',
+					$wpdb->prefix . 'pinova_otp',
+					$other_user_id,
+					'+989121111111'
+				)
+			)
+		);
+		self::assertSame(
+			'1',
+			(string) $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT COUNT(*) FROM %i WHERE `identifier` = %s',
+					$wpdb->prefix . 'pinova_otp',
+					'+989121111111'
 				)
 			)
 		);

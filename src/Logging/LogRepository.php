@@ -37,6 +37,190 @@ final class LogRepository {
 	}
 
 	/**
+	 * Return the non-sensitive audit facts owned by one WordPress user.
+	 *
+	 * Context is deliberately excluded because it can contain keyed fingerprints.
+	 *
+	 * @return array{rows:array<int, array{id:int,created_at:string,event:string,correlation_id:string}>,success:bool}
+	 */
+	public static function export_for_user( int $user_id, int $page = 1, int $per_page = 100 ): array {
+		global $wpdb;
+
+		if ( $user_id <= 0 ) {
+			return [
+				'rows'    => [],
+				'success' => true,
+			];
+		}
+
+		$table       = self::table_name();
+		$table_found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+		if ( self::database_error_present() ) {
+			return [
+				'rows'    => [],
+				'success' => false,
+			];
+		}
+
+		if ( $table_found !== $table ) {
+			return [
+				'rows'    => [],
+				'success' => true,
+			];
+		}
+
+		$page     = max( 1, $page );
+		$per_page = max( 1, min( 100, $per_page ) );
+		$offset   = ( $page - 1 ) * $per_page;
+		$rows     = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT `id`, `created_at`, `event`, `correlation_id` FROM %i WHERE `user_id` = %d ORDER BY `id` ASC LIMIT %d OFFSET %d',
+				self::table_name(),
+				$user_id,
+				$per_page,
+				$offset
+			),
+			ARRAY_A
+		);
+		if ( self::database_error_present() ) {
+			return [
+				'rows'    => [],
+				'success' => false,
+			];
+		}
+
+		return [
+			'rows'    => is_array( $rows ) ? $rows : [],
+			'success' => true,
+		];
+	}
+
+	/**
+	 * Remove the user link and keyed fingerprints while retaining event facts.
+	 *
+	 * @param string[] $fingerprints
+	 * @param string[] $legacy_unowned_identifier_types
+	 * @return array{processed:int,done:bool,success:bool}
+	 */
+	public static function anonymize_user(
+		int $user_id,
+		int $limit = 100,
+		array $fingerprints = [],
+		array $legacy_unowned_identifier_types = []
+	): array {
+		global $wpdb;
+
+		$limit                           = max( 1, min( 100, $limit ) );
+		$fingerprints                    = array_values( array_unique( array_filter( array_map( 'strval', $fingerprints ) ) ) );
+		$legacy_unowned_identifier_types = array_values(
+			array_intersect(
+				[ 'email', 'mobile', 'username' ],
+				array_unique( array_map( 'sanitize_key', $legacy_unowned_identifier_types ) )
+			)
+		);
+		if ( $user_id <= 0 && ! $fingerprints && ! $legacy_unowned_identifier_types ) {
+			return [
+				'processed' => 0,
+				'done'      => true,
+				'success'   => true,
+			];
+		}
+
+		$table       = self::table_name();
+		$table_found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+		if ( self::database_error_present() ) {
+			return [
+				'processed' => 0,
+				'done'      => false,
+				'success'   => false,
+			];
+		}
+
+		if ( $table_found !== $table ) {
+			return [
+				'processed' => 0,
+				'done'      => true,
+				'success'   => true,
+			];
+		}
+
+		$where   = [];
+		$values  = [ self::table_name() ];
+		$matches = [];
+		if ( $user_id > 0 ) {
+			$where[]  = '`user_id` = %d';
+			$values[] = $user_id;
+		}
+		foreach ( $fingerprints as $fingerprint ) {
+			$matches[] = '`context` LIKE %s';
+			$values[]  = '%"' . $wpdb->esc_like( $fingerprint ) . '"%';
+		}
+		foreach ( $legacy_unowned_identifier_types as $identifier_type ) {
+			$matches[] = '(`context` LIKE %s AND `context` LIKE %s)';
+			$values[]  = '%"identifier_type":"' . $wpdb->esc_like( $identifier_type ) . '"%';
+			$values[]  = '%"identifier_fingerprint":"%';
+		}
+		if ( $matches ) {
+			$where[] = '(`user_id` IS NULL AND (' . implode( ' OR ', $matches ) . '))';
+		}
+		$values[] = $limit;
+		$query    = 'SELECT `id`, `context` FROM %i WHERE (' . implode( ' OR ', $where ) . ') ORDER BY `id` ASC LIMIT %d';
+		$rows     = $wpdb->get_results(
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The dynamic fragment contains fixed placeholders only.
+			$wpdb->prepare( $query, $values ),
+			ARRAY_A
+		);
+		if ( self::database_error_present() ) {
+			return [
+				'processed' => 0,
+				'done'      => false,
+				'success'   => false,
+			];
+		}
+		$rows = is_array( $rows ) ? $rows : [];
+
+		$processed = 0;
+		foreach ( $rows as $row ) {
+			$context = json_decode( (string) ( $row['context'] ?? '{}' ), true );
+			$context = is_array( $context ) ? $context : [];
+			unset(
+				$context['identifier_fingerprint'],
+				$context['ip_fingerprint'],
+				$context['subject_fingerprint'],
+				$context['user_id']
+			);
+
+			$encoded = wp_json_encode( $context );
+			$updated = $wpdb->update(
+				self::table_name(),
+				[
+					'user_id' => null,
+					'context' => is_string( $encoded ) ? $encoded : '{}',
+				],
+				[ 'id' => (int) $row['id'] ],
+				[ '%d', '%s' ],
+				[ '%d' ]
+			);
+
+			if ( false === $updated ) {
+				return [
+					'processed' => $processed,
+					'done'      => false,
+					'success'   => false,
+				];
+			}
+
+			++$processed;
+		}
+
+		return [
+			'processed' => $processed,
+			'done'      => count( $rows ) < $limit,
+			'success'   => true,
+		];
+	}
+
+	/**
 	 * @return array{rows:array<int, array<string, mixed>>, total:int}
 	 */
 	public static function paginate( int $page = 1, int $per_page = 50, string $level = '' ): array {
@@ -117,5 +301,15 @@ final class LogRepository {
 		global $wpdb;
 
 		return $wpdb->prefix . 'pinova_logs';
+	}
+
+	/** @phpstan-impure */
+	private static function database_error_present(): bool {
+		global $wpdb;
+
+		$properties = get_object_vars( $wpdb );
+		$error      = $properties['last_error'] ?? '';
+
+		return is_string( $error ) && '' !== $error;
 	}
 }

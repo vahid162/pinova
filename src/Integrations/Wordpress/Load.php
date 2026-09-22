@@ -24,6 +24,7 @@ class Load {
 
 	public function __construct() {
 		new NativeLoginGate();
+		new Privacy();
 		new ExportUsers();
 		new UsersList();
 		new UserProfile();

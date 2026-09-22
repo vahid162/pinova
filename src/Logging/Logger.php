@@ -119,6 +119,18 @@ final class Logger extends AbstractLogger {
 	}
 
 	/**
+	 * Reproduce the legacy case-sensitive HMAC for privacy erasure only.
+	 */
+	public function legacy_fingerprint( string $value, string $purpose = 'identifier' ): string {
+		try {
+			return $this->safe_context->legacy_fingerprint( $value, $purpose );
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+			return '';
+		}
+	}
+
+	/**
 	 * @param mixed                $message
 	 * @param array<string, mixed> $context
 	 */

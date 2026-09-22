@@ -51,8 +51,6 @@ if ( ! \Pinova\Install::migrate() ) {
 	return;
 }
 
-new \Pinova\Notice();
-
 if ( ! ( new \Pinova\Version() )->migrate() ) {
 	add_action( 'admin_notices', [ \Pinova\Install::class, 'render_migration_notice' ] );
 

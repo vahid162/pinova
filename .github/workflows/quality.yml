@@ -180,3 +180,28 @@ jobs:
       - run: npm run test:integration
         env:
           PINOVA_TEST_HPOS: ${{ matrix.hpos }}
+
+  quality-gate:
+    name: Required Quality Gate
+    if: always()
+    needs:
+      - project-guidance
+      - javascript
+      - browser-account-ui
+      - php
+      - integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every quality job
+        env:
+          PROJECT_GUIDANCE: ${{ needs.project-guidance.result }}
+          JAVASCRIPT: ${{ needs.javascript.result }}
+          BROWSER: ${{ needs.browser-account-ui.result }}
+          PHP: ${{ needs.php.result }}
+          INTEGRATION: ${{ needs.integration.result }}
+        run: |
+          test "${PROJECT_GUIDANCE}" = success
+          test "${JAVASCRIPT}" = success
+          test "${BROWSER}" = success
+          test "${PHP}" = success
+          test "${INTEGRATION}" = success

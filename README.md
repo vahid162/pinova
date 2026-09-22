@@ -6,6 +6,7 @@
 - مخزن توسعه: [github.com/vahid162/pinova](https://github.com/vahid162/pinova)
 - تاریخچهٔ انتشار: [CHANGELOG.md](CHANGELOG.md)
 - راهنمای مشارکت: [CONTRIBUTING.md](CONTRIBUTING.md)
+- سیاست امنیتی: [SECURITY.md](SECURITY.md)
 - مجوز: GPL-3.0-or-later
 
 وضعیت جاری شاخه‌ها، نسخه‌های آزمایشی، CI و انتشارها باید مستقیماً از Git و [GitHub Releases](https://github.com/vahid162/pinova/releases) بررسی شود. این سند عمداً Snapshot عملیاتی، شناسهٔ اجرا، Checksum یا برنامهٔ نسخهٔ بعدی نگهداری نمی‌کند.
@@ -85,8 +86,8 @@ npm run test:js
 
 Pull Request باید دامنه تغییر، آزمون‌ها، اثر Schema، حریم خصوصی، Logging، Packaging و دستورالعمل AI را مشخص کند. تغییرهای مکانیکی، مستنداتی، Runtime، Schema و Release تا حد امکان در Commit و PRهای مستقل نگهداری شوند.
 
-آسیب‌پذیری‌ها را در Issue عمومی منتشر نکنید. تا زمان انتشار سیاست امنیتی مخزن، از قابلیت Private Vulnerability Reporting گیت‌هاب استفاده کنید.
+آسیب‌پذیری‌ها را در Issue عمومی منتشر نکنید. مسیر گزارش خصوصی و اطلاعات موردنیاز در [SECURITY.md](SECURITY.md) آمده است.
 
 ## مجوز
 
-پینوا تحت [GNU General Public License v3 or later](https://www.gnu.org/licenses/gpl-3.0.html) منتشر می‌شود.
+پینوا تحت [GNU General Public License v3 or later](LICENSE) منتشر می‌شود.

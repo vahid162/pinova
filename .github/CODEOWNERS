@@ -1,0 +1,9 @@
+# Repository-wide ownership. Add specialist owners here as the maintainer team grows.
+* @vahid162
+
+# Security, release, and repository-governance changes require explicit owner review.
+/SECURITY.md @vahid162
+/.github/ @vahid162
+/tools/build.sh @vahid162
+/src/Logging/ @vahid162
+/src/Integrations/Wordpress/NativeLoginGate.php @vahid162

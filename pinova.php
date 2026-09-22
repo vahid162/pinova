@@ -8,7 +8,7 @@
  * Author URI: https://woosupport.ir
  *
  * License URI:  https://www.gnu.org/licenses/gpl-3.0.html
- * License:      GPLv3
+ * License:      GPLv3 or later
  *
  * Requires at least: 6.8
  * Requires PHP: 8.1

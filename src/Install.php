@@ -135,8 +135,14 @@ class Install extends \Nabik\Utils\V1\Install {
 		self::clear_scheduled_hooks();
 
 		foreach ( self::table_names() as $table ) {
-			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Identifier is passed through the %i placeholder.
-			$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', $table ) );
+			if ( ! preg_match( '/\A[A-Za-z0-9_]+\z/', $table ) ) {
+				return false;
+			}
+
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- WordPress table names are internally generated and validated above.
+			if ( false === $wpdb->query( "DROP TABLE IF EXISTS `{$table}`" ) ) {
+				return false;
+			}
 		}
 
 		$patterns = [

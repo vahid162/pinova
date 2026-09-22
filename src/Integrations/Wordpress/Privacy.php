@@ -171,7 +171,8 @@ final class Privacy {
 		$identifiers      = self::erasure_identifiers( $user, $email_address, $mobile );
 		$otp_result       = self::delete_otp_records( $user->ID, $identifiers );
 		$fingerprints     = self::identifier_fingerprints( $identifiers );
-		$logs             = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE, $fingerprints, true );
+		$identifier_types = self::identifier_types( $identifiers );
+		$logs             = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE, $fingerprints, $identifier_types );
 		$mobile_result    = [
 			'removed' => 0,
 			'success' => true,
@@ -201,7 +202,7 @@ final class Privacy {
 		$identifiers  = self::email_variants( $email_address );
 		$otp_result   = self::delete_otp_records( 0, $identifiers );
 		$fingerprints = self::identifier_fingerprints( $identifiers );
-		$logs         = LogRepository::anonymize_user( 0, self::BATCH_SIZE, $fingerprints, (bool) $identifiers );
+		$logs         = LogRepository::anonymize_user( 0, self::BATCH_SIZE, $fingerprints, self::identifier_types( $identifiers ) );
 		$success      = $otp_result['success'] && $logs['success'];
 
 		return [
@@ -289,6 +290,23 @@ final class Privacy {
 		}
 
 		return array_values( array_unique( $fingerprints ) );
+	}
+
+	/**
+	 * @param string[] $identifiers
+	 * @return string[]
+	 */
+	private static function identifier_types( array $identifiers ): array {
+		$types = [];
+
+		foreach ( $identifiers as $value ) {
+			$identifier = new Identifier( $value );
+			if ( $identifier->is_valid() ) {
+				$types[] = $identifier->get_type();
+			}
+		}
+
+		return array_values( array_unique( $types ) );
 	}
 
 	/** @return array{user:?WP_User,success:bool} */

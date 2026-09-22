@@ -99,20 +99,26 @@ final class LogRepository {
 	 * Remove the user link and keyed fingerprints while retaining event facts.
 	 *
 	 * @param string[] $fingerprints
-	 * @param bool     $include_legacy_unowned_email
+	 * @param string[] $legacy_unowned_identifier_types
 	 * @return array{processed:int,done:bool,success:bool}
 	 */
 	public static function anonymize_user(
 		int $user_id,
 		int $limit = 100,
 		array $fingerprints = [],
-		bool $include_legacy_unowned_email = false
+		array $legacy_unowned_identifier_types = []
 	): array {
 		global $wpdb;
 
-		$limit        = max( 1, min( 100, $limit ) );
-		$fingerprints = array_values( array_unique( array_filter( array_map( 'strval', $fingerprints ) ) ) );
-		if ( $user_id <= 0 && ! $fingerprints && ! $include_legacy_unowned_email ) {
+		$limit                             = max( 1, min( 100, $limit ) );
+		$fingerprints                      = array_values( array_unique( array_filter( array_map( 'strval', $fingerprints ) ) ) );
+		$legacy_unowned_identifier_types = array_values(
+			array_intersect(
+				[ 'email', 'mobile', 'username' ],
+				array_unique( array_map( 'sanitize_key', $legacy_unowned_identifier_types ) )
+			)
+		);
+		if ( $user_id <= 0 && ! $fingerprints && ! $legacy_unowned_identifier_types ) {
 			return [
 				'processed' => 0,
 				'done'      => true,
@@ -149,9 +155,9 @@ final class LogRepository {
 			$matches[] = '`context` LIKE %s';
 			$values[]  = '%"' . $wpdb->esc_like( $fingerprint ) . '"%';
 		}
-		if ( $include_legacy_unowned_email ) {
+		foreach ( $legacy_unowned_identifier_types as $identifier_type ) {
 			$matches[] = '(`context` LIKE %s AND `context` LIKE %s)';
-			$values[]  = '%"identifier_type":"email"%';
+			$values[]  = '%"identifier_type":"' . $wpdb->esc_like( $identifier_type ) . '"%';
 			$values[]  = '%"identifier_fingerprint":"%';
 		}
 		if ( $matches ) {

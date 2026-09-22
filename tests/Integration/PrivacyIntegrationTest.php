@@ -233,6 +233,65 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertStringNotContainsString( 'identifier_fingerprint', $context );
 	}
 
+	public function test_eraser_anonymizes_an_unowned_mobile_fingerprint_after_key_rotation(): void {
+		global $wpdb;
+
+		$user_id = self::factory()->user->create(
+			[
+				'user_email' => 'rotated-mobile-key@example.test',
+				'user_login' => '09125554444',
+				'meta_input' => [ 'created_by' => 'pinova' ],
+			]
+		);
+		$other_user_id = self::factory()->user->create( [ 'user_email' => 'rotated-mobile-key-other@example.test' ] );
+		$old_fingerprint = substr( hash_hmac( 'sha256', 'mobile:+989125554444', 'retired-auth-salt' ), 0, 32 );
+
+		Logger::instance()->audit(
+			'info',
+			'privacy.rotated_mobile_key',
+			[
+				'identifier_type'        => 'mobile',
+				'identifier_fingerprint' => $old_fingerprint,
+			]
+		);
+		Logger::instance()->audit(
+			'info',
+			'privacy.rotated_mobile_key_other_owner',
+			[
+				'user_id'                => $other_user_id,
+				'identifier_type'        => 'mobile',
+				'identifier_fingerprint' => $old_fingerprint,
+			]
+		);
+
+		$result          = Privacy::erase_personal_data( 'rotated-mobile-key@example.test', 1 );
+		$unowned_context = (string) $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT `context` FROM %i WHERE `event` = %s',
+				$wpdb->prefix . 'pinova_logs',
+				'privacy.rotated_mobile_key'
+			)
+		);
+		$owned_row       = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT `user_id`, `context` FROM %i WHERE `event` = %s',
+				$wpdb->prefix . 'pinova_logs',
+				'privacy.rotated_mobile_key_other_owner'
+			),
+			ARRAY_A
+		);
+
+		self::assertGreaterThan( 0, $user_id );
+		self::assertTrue( $result['items_removed'] );
+		self::assertFalse( $result['items_retained'] );
+		self::assertTrue( $result['done'] );
+		self::assertStringNotContainsString( $old_fingerprint, $unowned_context );
+		self::assertStringNotContainsString( 'identifier_fingerprint', $unowned_context );
+		self::assertIsArray( $owned_row );
+		self::assertSame( (string) $other_user_id, (string) $owned_row['user_id'] );
+		self::assertStringContainsString( $old_fingerprint, (string) $owned_row['context'] );
+	}
+
 	public function test_eraser_uses_the_matched_accounts_stored_email_for_fingerprints(): void {
 		global $wpdb;
 

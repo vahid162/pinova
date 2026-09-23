@@ -103,4 +103,8 @@ class Version extends \Nabik\Utils\V1\Version {
 	public function update_126() {
 		Install::create_wordpress_tables();
 	}
+
+	public function update_130() {
+		// No schema changes are required for this version.
+	}
 }

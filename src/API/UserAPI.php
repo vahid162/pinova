@@ -429,7 +429,7 @@ class UserAPI extends RestAPI {
 		$valid_state      = false;
 		try {
 			[ $user_id, $flow_id ] = UserService::parse_jwt_with_flow( $jwt );
-			$valid_state            = true;
+			$valid_state           = true;
 		} catch ( Exception $e ) {
 			unset( $e );
 		}

@@ -57,7 +57,7 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 		$tables = [ $wpdb->prefix . 'pinova_otp', $wpdb->prefix . 'pinova_logs' ];
 		try {
 			foreach ( $tables as $table ) {
-				self::assertSame( 0, $wpdb->query( $wpdb->prepare( 'ALTER TABLE %i DROP INDEX flow_id, DROP COLUMN flow_id', $table ) ) );
+				self::assertNotFalse( $wpdb->query( $wpdb->prepare( 'ALTER TABLE %i DROP INDEX flow_id, DROP COLUMN flow_id', $table ) ) );
 			}
 			update_option( Install::SCHEMA_OPTION, 1, false );
 			$interrupt = static function (): void {

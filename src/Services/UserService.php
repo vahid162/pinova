@@ -143,6 +143,11 @@ class UserService {
 		return $matching_ids;
 	}
 
+	/**
+	 * Database calls mutate this global between checks.
+	 *
+	 * @phpstan-impure
+	 */
 	private static function mobile_lookup_failed(): bool {
 		global $wpdb;
 		return '' !== (string) $wpdb->last_error;

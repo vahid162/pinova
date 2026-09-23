@@ -19,6 +19,7 @@ use Pinova\Services\OTPService;
 use Pinova\Services\RateLimitService;
 use Pinova\Services\UserService;
 use Pinova\Services\ValidationService;
+use Throwable;
 use WP_REST_Request;
 use WP_REST_Response;
 use WP_Error;
@@ -178,6 +179,10 @@ class UserAPI extends RestAPI {
 				[ 'Retry-After' => $e->get_retry_after() ]
 			);
 		} catch ( RateLimitUnavailableException $e ) {
+			self::minimum_response_time( $started );
+			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 503 );
+		} catch ( Throwable $throwable ) {
+			EventThrottle::log( 'auth.request_failed', [ 'operation' => 'authenticate', 'reason' => 'initiation_error' ] );
 			self::minimum_response_time( $started );
 			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 503 );
 		}

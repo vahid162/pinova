@@ -398,6 +398,27 @@ final class SecurityRegressionTest extends WP_UnitTestCase {
 		self::assertSame( $responses[0]->get_data(), $responses[1]->get_data() );
 	}
 
+	public function test_scheduler_exception_is_not_exposed_in_an_otp_response(): void {
+		$throw = static function ( $result, $event ) {
+			if ( 'pinova_otp_delivery' === $event->hook ) {
+				throw new \RuntimeException( 'secret provider configuration must not appear in the response' );
+			}
+			return $result;
+		};
+		add_filter( 'pre_schedule_event', $throw, 10, 2 );
+		try {
+			$request = new WP_REST_Request( 'POST', '/pinova/user/authenticate' );
+			$request->set_param( 'identifier', new Identifier( 'scheduler-exception@example.test' ) );
+			$request->set_param( 'force_otp', true );
+			$response = ( new UserAPI() )->authenticate( $request );
+		} finally {
+			remove_filter( 'pre_schedule_event', $throw, 10 );
+		}
+
+		self::assertSame( 503, $response->get_status() );
+		self::assertStringNotContainsString( 'secret provider configuration', wp_json_encode( $response->get_data() ) );
+	}
+
 	public function test_email_case_cannot_rotate_the_queued_flow_or_otp_rate_limit(): void {
 		$upper = RateLimitService::decoy_flow( 'Mixed-Case@Example.test', 'authenticate', '192.0.2.44' );
 		$lower = RateLimitService::decoy_flow( 'mixed-case@example.test', 'authenticate', '192.0.2.44' );

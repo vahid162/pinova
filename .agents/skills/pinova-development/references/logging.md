@@ -17,7 +17,9 @@ Every record uses schema `pinova.event.v1` and contains:
 - a stable, machine-readable `event` code up to 100 characters;
 - one request/process `correlation_id`;
 - optional numeric `user_id` in its own column;
-- JSON `context` produced exclusively by `SafeContext`.
+- JSON `context` containing `SafeContext`-sanitized caller fields and trusted package metadata.
+
+Packaged builds add a validated, deterministic `build-info.json` at packaging time. Its commit, package identity, and optional release tag are appended to record context **after** caller context passes `SafeContext`; callers cannot supply or override them. A Git source checkout reports `package_identity=source` and does not invent a commit or tag. Release packaging verifies the manifest in the ZIP. No build identity is stored in `AGENTS.md` or `README.md`.
 
 Pinova REST responses expose the same value in `X-Pinova-Correlation-ID`. A scoped `rest_post_dispatch` filter also covers WordPress validation, permission, authentication, and missing-route failures under `/pinova/`, preserves an existing response header, and leaves unrelated namespaces untouched. The shared JavaScript client displays only a bounded, safe reference received in that header on failures, including unreadable response bodies. A network failure without a server response must never fabricate a reference. This is request-level correlation, not a multi-request flow identity. Never put identifiers or secrets in response headers.
 
@@ -34,6 +36,8 @@ Retention defaults to 14 days, is clamped to 1–90 days, and is deleted in boun
 ## Privacy and context allowlist
 
 Context is deny-by-default. `SafeContext` accepts only documented numeric IDs/counts, short code-like values, bounded code lists, approved keyed fingerprints, and exception class/code. It discards unknown keys.
+
+`changed_keys` accepts at most 20 names from the first-party settings field allowlist; it never contains values. Packaged `build_commit` (40 lowercase hexadecimal characters), `package_identity` (`pinova-release-zip`), and an optional validated `release_tag` are trusted package metadata, not arbitrary `SafeContext` input. Source checkouts carry only `package_identity=source`.
 
 Never persist any of the following, even at debug level:
 
@@ -70,6 +74,8 @@ Adding a context key requires all of:
 | `identity.resolved` | debug | Identifier resolution result during a diagnostic window |
 | `identity.mobile_conflict` | warning | One mobile matched multiple legacy User IDs; resolution failed closed |
 | `logging.cleared` | warning | An administrator manually cleared existing records |
+| `logging.incident_exported` | notice | An authorized administrator generated a bounded incident export; logs actor ID, count, scope, and result, never export content |
+| `settings.updated` | notice | An authorized persisted Pinova settings change; logs actor ID, first-party changed key names, section, and success only |
 | `otp.created` | info | OTP record was created and at least one channel succeeded |
 | `otp.delivery_failed` | error | No usable OTP delivery completed |
 | `otp.channel_send_failed` | warning | One configured channel threw or failed |
@@ -99,13 +105,16 @@ The two `admin.sms_test_*` events are bounded, capability-protected audit action
 
 Native-login arming and gate-state events are bounded control-plane records. Their context may contain the authorized administrator User ID plus short `status`, `reason`, or `operation` codes. Never include the private slug, route URL, slug HMAC, transient arm contents, authentication material, or a reversible derivative of the route. Do not emit an event for canonical-login probes; only a successful eligible private login and an actual activation/invalidation transition are catalogued.
 
+Settings audit observes successful WordPress option updates for first-party Pinova settings while a `manage_options` administrator is active. It compares persisted old and new values only to determine which allowed field names changed; those values are never handed to the logger. It skips no-ops and unauthorized/system-only writes, prevents recursion, and caps observations per request. This records a successful persistence result, not attempted or rejected settings submissions.
+
 `auth.redirect_failed` is emitted when WordPress rejects a validated safe redirect or when the header state is already committed before/while dispatch reports success. Its context is limited to the bounded operation, reason and header-state codes plus the intended HTTP fallback status. Never include the destination/return URL, query string, nonce, cookie, identifier, token, source file/line, exception message, or trace.
 
 ## Operational workflow
 
 1. Ask the reporter for the approximate time, operation, and `X-Pinova-Correlation-ID`; do not ask them to send OTPs, passwords, tokens, or full cookies.
-2. Review **Pinova → Logs** with the smallest necessary level filter. Access requires `manage_options`. The viewer reports whether its table exists and shows the effective minimum level. An empty table with minimum `error` may be expected because lower-severity events were never persisted; it is not by itself evidence of a rendering failure.
+2. Review **Pinova → Logs** with the smallest necessary level, exact event, correlation ID, User ID, and UTC date filters. Access requires `manage_options`; page size and page number are capped, and filters use prepared exact-match predicates. The viewer redacts even historical context before display. It reports effective minimum level and read-only health: `unavailable` when the table/connection is absent, `degraded` when the table cannot be queried or cleanup is unscheduled, `database-backed` when readable with cleanup scheduled, and `fallback` only if the current PHP request actually used WooCommerce/PHP fallback. A healthy read is not proof of future write success; no write probe is performed merely by opening the page. An empty table with minimum `error` may be expected because lower-severity events were never persisted; it is not by itself evidence of a rendering failure.
    Render pagination only when `paginate_links()` returns a string; a single result page returns no markup and must never be passed as `null` into WordPress escaping functions.
+   An administrator may download a nonce-protected JSON incident export for at most seven UTC calendar days, 1,000 events, and 2 MiB. Rows stream in bounded batches; incomplete/truncated output is marked. The export includes environment versions, current package metadata, selected range, and redacted event facts, but never raw identifiers, credentials, arbitrary legacy context, or keyed fingerprints. `logging.incident_exported` records the administrator User ID and count without storing the bundle. Treat the downloaded file as sensitive operational data and share it only with authorized responders.
 3. Enable a short diagnostic window only when default warning/notice information is insufficient. Reproduce once, then turn it off; automatic expiry is a safety backstop.
 4. Correlate by event, correlation ID, User ID, and keyed fingerprint. Treat an unmatched fingerprint as inconclusive because normalization/purpose may differ.
 5. Clear logs only when needed for privacy or a clean test boundary. Retention normally handles deletion.
@@ -119,5 +128,6 @@ Do not query or alter the production table during development. Production inspec
 - unit: valid PSR-3 levels, minimum threshold, debug expiry, event sanitization, fingerprint stability/purpose separation, and deny-by-default context;
 - integration: table creation/upgrade, persistence without raw PII/secrets, exception-message removal, retention boundary, correlation header, identity-conflict redaction, and rate-limit amplification protection;
 - UI/authorization: log viewer capability, output escaping, level filtering/pagination, clear capability and nonce;
+- incident tooling: exact filters, malformed-filter rejection, export capability/nonce, seven-day/row/byte caps, historical-secret redaction, settings-key-only audit, current-request fallback truthfulness, and deterministic package metadata;
 - compatibility: WordPress 6.8/latest and WooCommerce/HPOS pairs in the repository matrix;
 - packaging: production ZIP includes `psr/log` and runtime logger classes but excludes tests and agent documentation.

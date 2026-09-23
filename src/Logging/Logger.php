@@ -142,7 +142,7 @@ final class Logger extends AbstractLogger {
 				'level'          => $level,
 				'event'          => $event,
 				'correlation_id' => $this->correlation_id(),
-				'context'        => $this->safe_context->sanitize( $context ),
+				'context'        => array_merge( $this->safe_context->sanitize( $context ), BuildMetadata::info() ),
 			]
 		);
 	}

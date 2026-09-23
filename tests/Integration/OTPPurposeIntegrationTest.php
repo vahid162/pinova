@@ -282,7 +282,7 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		$context = json_decode( $rows[0]['context'], true );
 		self::assertSame( $reason, $context['reason'] );
 		self::assertArrayHasKey( 'exception_class', $context );
-		self::assertSame( [ 'reason', 'exception_class', 'exception_code' ], array_keys( $context ) );
+		self::assertSame( [ 'reason', 'exception_class', 'exception_code' ], array_values( array_diff( array_keys( $context ), [ 'build_commit', 'package_identity', 'release_tag' ] ) ) );
 		self::assertStringNotContainsString( 'untrusted-otp@example.test', $rows[0]['context'] );
 		self::assertStringNotContainsString( $jwt, $rows[0]['context'] );
 	}

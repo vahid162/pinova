@@ -6,6 +6,13 @@ use Throwable;
 
 final class DatabaseHandler implements HandlerInterface {
 
+	private static bool $fallback_used = false;
+
+	/** Whether a fallback actually succeeded in this PHP request. */
+	public static function did_fallback(): bool {
+		return self::$fallback_used;
+	}
+
 	/**
 	 * @param array<string, mixed> $record
 	 */
@@ -62,6 +69,7 @@ final class DatabaseHandler implements HandlerInterface {
 					$line,
 					[ 'source' => 'pinova' ]
 				);
+				self::$fallback_used = true;
 				return;
 			}
 		} catch ( Throwable $throwable ) {
@@ -69,7 +77,9 @@ final class DatabaseHandler implements HandlerInterface {
 		}
 
 		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate last-resort production logger.
-		error_log( '[pinova] ' . $line );
+		if ( error_log( '[pinova] ' . $line ) ) {
+			self::$fallback_used = true;
+		}
 	}
 
 	/** @param array<string, mixed> $value */

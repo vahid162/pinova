@@ -5,12 +5,44 @@ declare(strict_types=1);
 namespace Pinova\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
+use Pinova\Logging\BuildMetadata;
 use Pinova\Logging\HandlerInterface;
 use Pinova\Logging\InvalidLogLevelException;
 use Pinova\Logging\Logger;
 use Pinova\Logging\SafeContext;
 
 final class LoggingTest extends TestCase {
+
+	public function test_source_checkout_does_not_fabricate_build_metadata_or_accept_caller_spoofing(): void {
+		self::assertSame( [ 'package_identity' => 'source' ], BuildMetadata::info() );
+
+		$handler = new class() implements HandlerInterface {
+			/** @var array<string, mixed> */
+			public array $record = [];
+
+			public function write( array $record ): void {
+				$this->record = $record;
+			}
+		};
+		$logger  = new Logger(
+			$handler,
+			new SafeContext( static fn(): string => 'salt' ),
+			static fn(): array => [ 'minimum_level' => 'warning' ],
+			static fn(): string => 'build-test'
+		);
+
+		$logger->warning(
+			'logging.build_metadata_test',
+			[
+				'build_commit'     => str_repeat( 'f', 40 ),
+				'package_identity' => 'forged-package',
+				'release_tag'      => 'v9.9.9-rc1',
+				'password'         => 'do-not-log',
+			]
+		);
+
+		self::assertSame( [ 'package_identity' => 'source' ], $handler->record['context'] );
+	}
 
 	public function test_logger_keeps_only_safe_structured_context(): void {
 		$handler     = new class() implements HandlerInterface {

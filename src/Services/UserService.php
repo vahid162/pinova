@@ -106,7 +106,7 @@ class UserService {
 				)
 			)
 		);
-		if ( '' !== $wpdb->last_error ) {
+		if ( self::mobile_lookup_failed() ) {
 			return null;
 		}
 
@@ -125,7 +125,7 @@ class UserService {
 				)
 			)
 		);
-		if ( '' !== $wpdb->last_error ) {
+		if ( self::mobile_lookup_failed() ) {
 			return null;
 		}
 		$candidate_ids = array_values( array_unique( array_filter( array_merge( $login_user_ids, $meta_user_ids ) ) ) );
@@ -141,6 +141,11 @@ class UserService {
 		}
 
 		return $matching_ids;
+	}
+
+	private static function mobile_lookup_failed(): bool {
+		global $wpdb;
+		return '' !== (string) $wpdb->last_error;
 	}
 
 	public static function get_by_username( string $username ): ?int {

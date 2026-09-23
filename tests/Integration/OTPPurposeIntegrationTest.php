@@ -82,14 +82,20 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		$login_otp->save();
 		$forgot_otp->save();
 
-		$forgot_response = $this->authenticate( 'purpose-reuse@example.test', true, false );
-		$forgot_payload  = JWT::decode( $forgot_response->get_data()['data']['jwt'] );
+		$mail = static fn(): bool => true;
+		add_filter( 'pre_wp_mail', $mail );
+		try {
+			$forgot_response = $this->authenticate( 'purpose-reuse@example.test', true, false );
+			$login_response  = $this->authenticate( 'purpose-reuse@example.test', false, true );
+		} finally {
+			remove_filter( 'pre_wp_mail', $mail );
+		}
+		$forgot_payload = JWT::decode( $forgot_response->get_data()['data']['jwt'] );
 
 		self::assertNotSame( $forgot_otp->flow_id, $forgot_payload['flow_id'] );
 		self::assertSame( OTP::TYPE_FORGET, OTP::query()->where( 'flow_id', $forgot_payload['flow_id'] )->firstOrFail()->type );
 		self::assertArrayNotHasKey( 'otp_id', $forgot_payload );
 
-		$login_response = $this->authenticate( 'purpose-reuse@example.test', false, true );
 		$login_payload  = JWT::decode( $login_response->get_data()['data']['jwt'] );
 
 		self::assertNotSame( $login_otp->flow_id, $login_payload['flow_id'] );

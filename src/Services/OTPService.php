@@ -163,7 +163,6 @@ class OTPService {
 		}
 
 		try {
-			/** @var OTP $otp */
 			if ( array_key_exists( 'otp_id', $payload ) ) {
 				$otp = OTP::query()->findOrFail( absint( $payload['otp_id'] ) );
 			} else {
@@ -176,6 +175,9 @@ class OTPService {
 					throw new Exception( 'OTP state did not resolve uniquely.' );
 				}
 				$otp = $matches->first();
+			}
+			if ( ! $otp instanceof OTP ) {
+				throw new Exception( 'OTP state did not resolve to a record.' );
 			}
 		} catch ( \Throwable $e ) {
 			EventThrottle::log(

@@ -271,7 +271,7 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 			self::assertTrue( Install::purge_current_site_data() );
 			self::assertFalse( get_option( Install::PURGE_OPTION, false ) );
 			self::assertFalse( get_option( 'pinova_test_owned_option', false ) );
-			self::assertSame( '09120000000', get_user_meta( $user_id, 'pinova_mobile', true ) );
+			self::assertSame( '+989120000000', get_user_meta( $user_id, 'pinova_mobile', true ) );
 		} finally {
 			$wpdb->suppress_errors( $previous_suppression );
 			Install::create_tables();

@@ -243,6 +243,26 @@ jobs:
         run: composer audit
       - if: matrix.php == '8.1'
         run: composer build
+      - name: Generate the built-package SBOM
+        if: matrix.php == '8.1'
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        env:
+          SYFT_SELECT_CATALOGERS: '+php-composer-installed-cataloger'
+        with:
+          path: .build/pinova
+          format: spdx-json
+          output-file: .build/pinova-ci.spdx.json
+          syft-version: v1.52.0
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Compare the built ZIP with its SBOM
+        if: matrix.php == '8.1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip_path="$(find .build -maxdepth 1 -type f -name 'pinova-*.zip' -print -quit)"
+          test -n "${zip_path}"
+          bash tools/check-sbom-content.sh "${zip_path}" .build/pinova-ci.spdx.json
 
   integration:
     runs-on: ubuntu-latest

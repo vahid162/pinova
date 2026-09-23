@@ -70,6 +70,8 @@ Build with the Composer version pinned by `tools/build.sh`. The build exports a 
 
 The ZIP excludes repository metadata, GitHub and agent instructions, root development documentation, caches, `node_modules`, tests, tools, and development Composer packages. It retains WordPress `readme.txt` and all production runtime dependencies rebuilt from `composer.lock`.
 
+The pull-request Quality build must generate an SPDX SBOM from the staged production tree and compare its Composer inventory with the built ZIP, so cataloger drift fails before release publication.
+
 The build must confirm that Composer eagerly requires `utils/class-database.php`; classmap presence alone is insufficient. Build twice from the exact release tree under deliberately different environment inputs and require identical hashes. Validate ZIP integrity, file allowlists, executable modes, and the single top-level directory.
 
 ## Pull-request and release sequence

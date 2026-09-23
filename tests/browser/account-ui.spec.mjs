@@ -586,16 +586,6 @@ test('checkout modal remains dismissible while an authentication request is pend
         }
     });
 
-    await page.addInitScript(() => {
-        window.pinovaFocusEvents = [];
-        document.addEventListener('focusin', event => {
-            window.pinovaFocusEvents.push({
-                login: event.target.matches('.showlogin'),
-                modal: Boolean(event.target.closest('#pinovaLoginModal')),
-                connected: event.target.isConnected,
-            });
-        }, true);
-    });
     await openCheckout(page);
     await installThemeButtonPosition(page, 'after-account');
     const opener = page.locator('.showlogin').first();
@@ -619,21 +609,7 @@ test('checkout modal remains dismissible while an authentication request is pend
         await closeButton.click();
 
         await expect(modalViewport).toBeHidden();
-        try {
-            await expect(opener).toBeFocused();
-        } catch (error) {
-            const diagnostics = await page.evaluate(() => {
-                const state = document.querySelector('#pinovaLoginModal')._x_dataStack[0];
-                return {
-                    focusEvents: window.pinovaFocusEvents.slice(-10),
-                    focusSequence: state.focusSequence,
-                    modalIsOpen: state.modalIsOpen,
-                    activeIsOpener: document.activeElement === document.querySelector('.showlogin'),
-                    openerInert: Boolean(document.querySelector('.showlogin')?.closest('[inert]')),
-                };
-            });
-            throw new Error(`${error.message}\nFocus diagnostics: ${JSON.stringify(diagnostics)}`);
-        }
+        await expect(opener).toBeFocused();
 
         const closedState = await page.evaluate(() => {
             const modal = document.querySelector('#pinovaLoginModal');

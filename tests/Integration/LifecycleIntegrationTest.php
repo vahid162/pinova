@@ -102,6 +102,16 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( PINOVA_VERSION, get_option( 'pinova_version' ) );
 	}
 
+	public function test_upgrade_from_126_advances_version_without_schema_change(): void {
+		$schema_version = (int) get_option( Install::SCHEMA_OPTION );
+		update_option( 'pinova_version', '1.2.6', false );
+
+		self::assertTrue( ( new Version() )->migrate() );
+		self::assertSame( PINOVA_VERSION, get_option( 'pinova_version' ) );
+		self::assertSame( $schema_version, (int) get_option( Install::SCHEMA_OPTION ) );
+		self::assertTrue( ( new Version() )->migrate() );
+	}
+
 	public function test_deactivation_clears_pinova_schedules(): void {
 		foreach ( Install::scheduled_hooks() as $hook ) {
 			wp_schedule_single_event( time() + HOUR_IN_SECONDS, $hook );

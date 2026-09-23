@@ -37,6 +37,12 @@ npm run test:js
 
 Use the quality reference for the proportional PHP, integration, browser, HPOS, and packaging gates. Never run heavy suites on a host that shares resources with production.
 
+## Locked dependencies and supply chain
+
+Git does not track `vendor/`. On an isolated development host, recreate PHP dependencies from `composer.lock` with `composer install --no-interaction --prefer-dist`. Use the Node and npm versions declared by `package.json`, and recreate JavaScript dependencies from `package-lock.json` with `npm ci --ignore-scripts`; do not use `npm install` in CI or release preparation.
+
+The required supply-chain gate validates and audits both lockfiles, compares a production-only Composer install with `composer.lock`, rejects unapproved production licenses, and runs Dependency Review for pull requests. GitHub Actions and the actionlint container must use immutable revisions. The release workflow builds from the Composer lockfile and publishes a checksummed SPDX SBOM with a signed SBOM attestation alongside the ZIP and ZIP checksum.
+
 ## Pull requests
 
 Describe the requirement, implementation, tests, unresolved risk, and rollback implications. Explicitly classify impacts on runtime code, database schema, authentication, privacy, logging, dependencies, packaging, public documentation, and AI instructions.

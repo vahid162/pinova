@@ -8,14 +8,19 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   project-guidance:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.1'
           coverage: none
@@ -32,25 +37,77 @@ jobs:
 
   javascript:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          node-version: '24.21.0'
       - run: npm run lint:js
       - run: npm run test:js
 
   repository-lint:
     name: Workflow and shell lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Lint GitHub Actions workflows
-        uses: docker://rhysd/actionlint:1.7.12
+        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
         with:
           args: -color
       - name: Lint shell scripts
         run: git ls-files -z -- '*.sh' | xargs -0 -r shellcheck
+
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          fail-on-scopes: runtime, development, unknown
+
+  supply-chain:
+    name: Supply Chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.1'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:2.10.3
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: npm
+      - name: Validate Composer manifests and lockfile
+        run: composer validate --strict --check-lock
+      - name: Audit locked production dependencies
+        run: composer audit --locked --no-dev
+      - name: Install production dependencies from composer.lock
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+      - name: Verify installed production tree and licenses
+        run: php tools/check-production-dependencies.php
+      - name: Generate production license inventory
+        run: composer licenses --no-dev --format=json > "${RUNNER_TEMP}/composer-production-licenses.json"
+      - name: Upload production license inventory
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: composer-production-licenses-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/composer-production-licenses.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Recreate npm dependencies from package-lock.json
+        run: npm ci --ignore-scripts
+      - name: Audit locked npm dependencies
+        run: npm audit --audit-level=low
 
   plugin-check:
     name: WordPress Plugin Check
@@ -62,18 +119,18 @@ jobs:
       WP_ENV_PORT: '8892'
       WP_ENV_TESTS_PORT: '8893'
     steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.1'
           coverage: none
           extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
           tools: composer:2.10.3
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
-      - run: composer install --no-interaction --prefer-dist
-      - run: npm install --ignore-scripts
+          node-version: '24.21.0'
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: npm ci --ignore-scripts
       - run: npm run env:configure
         env:
           WP_VERSION: '7.1'
@@ -104,18 +161,18 @@ jobs:
       WP_ENV_PORT: '8890'
       WP_ENV_TESTS_PORT: '8891'
     steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.1'
           coverage: none
           extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
           tools: composer:2.10.3
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
-      - run: composer install --no-interaction --prefer-dist
-      - run: npm install --ignore-scripts
+          node-version: '24.21.0'
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: npm ci --ignore-scripts
       - run: npm run env:configure
         env:
           WP_VERSION: '7.1'
@@ -147,7 +204,7 @@ jobs:
           bash tools/cleanup-browser-env.sh 2>&1 | tee test-results/browser-cleanup.log
       - name: Upload browser acceptance and sensitivity evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: account-ui-browser-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -160,19 +217,20 @@ jobs:
 
   php:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         php: ['8.1', '8.2', '8.3', '8.4', '8.5']
     steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: ${{ matrix.php }}
           coverage: none
           extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
           tools: composer:2.10.3
-      - run: composer install --no-interaction --prefer-dist
+      - run: composer install --no-interaction --no-progress --prefer-dist
       - run: composer test
       - run: composer phpstan
       - if: matrix.php == '8.1'
@@ -184,6 +242,7 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -213,18 +272,18 @@ jobs:
             wc: '11.1.0'
             hpos: 'no'
     steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.1'
           coverage: none
           extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
           tools: composer:2.10.3
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
-      - run: composer install --no-interaction --prefer-dist
-      - run: npm install --ignore-scripts
+          node-version: '24.21.0'
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: npm ci --ignore-scripts
       - run: npm run env:configure
         env:
           WP_VERSION: ${{ matrix.wp }}
@@ -243,25 +302,37 @@ jobs:
       - project-guidance
       - javascript
       - repository-lint
+      - dependency-review
+      - supply-chain
       - plugin-check
       - browser-account-ui
       - php
       - integration
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Require every quality job
         env:
           PROJECT_GUIDANCE: ${{ needs.project-guidance.result }}
           JAVASCRIPT: ${{ needs.javascript.result }}
           REPOSITORY_LINT: ${{ needs.repository-lint.result }}
+          DEPENDENCY_REVIEW: ${{ needs.dependency-review.result }}
+          SUPPLY_CHAIN: ${{ needs.supply-chain.result }}
           PLUGIN_CHECK: ${{ needs.plugin-check.result }}
           BROWSER: ${{ needs.browser-account-ui.result }}
           PHP: ${{ needs.php.result }}
           INTEGRATION: ${{ needs.integration.result }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           test "${PROJECT_GUIDANCE}" = success
           test "${JAVASCRIPT}" = success
           test "${REPOSITORY_LINT}" = success
+          test "${SUPPLY_CHAIN}" = success
+          if [[ "${EVENT_NAME}" == pull_request ]]; then
+            test "${DEPENDENCY_REVIEW}" = success
+          else
+            test "${DEPENDENCY_REVIEW}" = skipped
+          fi
           test "${PLUGIN_CHECK}" = success
           test "${BROWSER}" = success
           test "${PHP}" = success

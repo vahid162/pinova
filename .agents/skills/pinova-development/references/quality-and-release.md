@@ -8,7 +8,7 @@ Before installing dependencies or running quality tools, determine whether the c
 
 ## Quality suite
 
-Install dependencies using the repository lockfiles and commands documented by the active package manifests. Run lightweight gates before pushing:
+Git source checkouts intentionally exclude `vendor/`. On a resource-isolated development host, recreate PHP dependencies with `composer install --no-interaction --prefer-dist` from `composer.lock`. Use the Node and npm versions declared by `package.json`, and recreate JavaScript dependencies with `npm ci --ignore-scripts` from `package-lock.json`. Do not use `npm install` in CI or release preparation. Run lightweight gates before pushing:
 
 ```bash
 php tools/check-ai-governance.php
@@ -24,7 +24,7 @@ composer phpcs
 composer audit
 ```
 
-GitHub Actions additionally runs WordPress Plugin Check against a disposable site, `actionlint` against every workflow, and ShellCheck against repository shell scripts. The readme/metadata gate keeps the WordPress readme below 10 KiB, aligns stable version, license, WordPress, and PHP requirements with the plugin header and Composer metadata, and requires `readme.txt` to carry only the current release notes while `CHANGELOG.md` retains full history.
+GitHub Actions additionally runs WordPress Plugin Check against a disposable site, `actionlint` against every workflow, ShellCheck against repository shell scripts, Dependency Review on pull requests, and a supply-chain job that validates and audits the lockfiles. The supply-chain job must compare the production-only Composer install with `composer.lock`, reject unapproved production licenses, and use `npm ci --ignore-scripts`. The readme/metadata gate keeps the WordPress readme below 10 KiB, aligns stable version, license, WordPress, and PHP requirements with the plugin header and Composer metadata, and requires `readme.txt` to carry only the current release notes while `CHANGELOG.md` retains full history.
 
 Run only the subset that is safe on the current host. GitHub Actions remains authoritative for the complete compatibility matrix.
 
@@ -66,7 +66,7 @@ The CI cleanup script is restricted to the exact run-owned Compose project and w
 
 Build with the Composer version pinned by `tools/build.sh`. The build exports a fixed timezone, stages one top-level `pinova/` directory, installs production dependencies from `composer.lock`, removes development-only files, normalizes permissions and timestamps, sorts entries, and writes the versioned ZIP.
 
-The ZIP excludes repository metadata, GitHub and agent instructions, root development documentation, caches, `node_modules`, tests, tools, and development Composer packages. It retains WordPress `readme.txt` and all production runtime dependencies.
+The ZIP excludes repository metadata, GitHub and agent instructions, root development documentation, caches, `node_modules`, tests, tools, and development Composer packages. It retains WordPress `readme.txt` and all production runtime dependencies rebuilt from `composer.lock`.
 
 The build must confirm that Composer eagerly requires `utils/class-database.php`; classmap presence alone is insufficient. Build twice from the exact release tree under deliberately different environment inputs and require identical hashes. Validate ZIP integrity, file allowlists, executable modes, and the single top-level directory.
 
@@ -76,13 +76,13 @@ The build must confirm that Composer eagerly requires `utils/class-database.php`
 2. Open a focused pull request and require the complete applicable GitHub Actions suite on its exact head.
 3. Merge only after review and required checks. Reconfirm the merge commit and its separate default-branch run.
 4. Select a new unused release-candidate version only after the intended commit is merged and green. Never reuse or move a published tag.
-5. Create the controlled publish branch from that exact commit. The publisher verifies reachability and version metadata, builds twice, creates an annotated tag, and uses an explicit draft/upload/publish sequence.
-6. Require native Release immutability, release and asset attestations, independent redownload, checksum agreement, ZIP integrity, and exact package content. Preserve any failed published candidate unchanged and correct the issue in a new candidate.
+5. Create the controlled publish branch from that exact commit. Its successful `Quality` run dispatches the publisher on that same branch ref; the publisher must revalidate the authorizing run, branch, and exact source SHA before it builds twice, creates an annotated tag, and uses an explicit draft/upload/publish sequence.
+6. Publish a checksummed SPDX SBOM beside the ZIP and ZIP checksum, attest the ZIP with that SBOM from a workflow context bound to the release SHA, and verify that exact source digest together with native Release immutability, release and asset attestations, independent redownload, checksum agreement, ZIP integrity, and exact package content. Preserve any failed published candidate unchanged and correct the issue in a new candidate.
 7. Record exact publication evidence under `.agents/reviews/` in a follow-up documentation pull request. Evidence never changes durable instructions or grants installation authority.
 8. Test the published ZIP on production-like staging before production. Keep risk-increasing gates disabled until their private recovery path and protected WordPress actions pass acceptance.
 9. Mark a release stable/latest only after the agreed canary and explicit authorization.
 
-A local ZIP is intermediate evidence, never the installation handoff. A package is ready for installation only when its branch, commits, pull request, exact-head CI, merge, merged-main CI, immutable GitHub release, ZIP, checksum, attestations, and fresh-download verification are all present.
+A local ZIP is intermediate evidence, never the installation handoff. A package is ready for installation only when its branch, commits, pull request, exact-head CI, merge, merged-main CI, immutable GitHub release, ZIP, ZIP checksum, SBOM, SBOM checksum, attestations, and fresh-download verification are all present.
 
 ## Production acceptance boundary
 

@@ -20,11 +20,11 @@ Apply an active ruleset named `main-protection` to `refs/heads/main`:
 - dismiss stale approvals after new commits;
 - require approval of the most recent reviewable push;
 - require all review conversations to be resolved;
-- require the `Required Quality Gate` status check and require the branch to be current before merge;
+- require the `Required Quality Gate` status check, and require the branch to be current before merge;
 - do not permit force pushes;
 - permit bypass only for a narrowly assigned repository administrator in an emergency, with an audit record and follow-up pull request.
 
-Do not make individual matrix job names required. The stable `Required Quality Gate` aggregates the complete workflow and avoids settings drift when matrix entries change.
+Do not make individual matrix job names required. The stable `Required Quality Gate` aggregates the complete workflow, including `Dependency Review` on pull requests, and must fail if any applicable check fails. Requiring the aggregate check enforces Dependency Review without a duplicate ruleset entry and avoids settings drift when matrix entries change. Enable GitHub Dependency Graph so Dependency Review can run.
 
 ## Release tag ruleset
 

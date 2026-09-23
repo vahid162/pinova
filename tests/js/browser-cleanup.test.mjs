@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, access } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, mkdir, writeFile, readFile, rename, rm, symlink, access } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +57,41 @@ test('browser cleanup removes only the exact run project and verifies all resour
             ['network', 'ls', '--quiet', '--filter', `label=com.docker.compose.project=${project}`],
         ]);
         await assert.rejects(access(home));
+    });
+});
+
+test('browser cleanup accepts the exact descriptive wp-env cache directory', async () => {
+    await fixture(async ({ home, config, project, sandbox, execute, calls }) => {
+        const workspace = path.join(sandbox, 'pinova');
+        const configPath = path.join(workspace, '.wp-env.json');
+        const shortHash = createHash('md5').update(configPath).digest('hex').slice(0, 8);
+        const descriptiveConfig = path.join(home, `wp-env-pinova-${shortHash}`, 'docker-compose.yml');
+        await mkdir(workspace);
+        await writeFile(configPath, '{}\n');
+        await rename(path.dirname(config), path.dirname(descriptiveConfig));
+
+        const result = execute({ GITHUB_WORKSPACE: workspace });
+        assert.equal(result.status, 0, result.stderr);
+        assert.deepEqual(await calls(), [
+            ['compose', '--project-name', project, '--file', descriptiveConfig, 'down', '--volumes', '--remove-orphans'],
+            ['container', 'ls', '--all', '--quiet', '--filter', `label=com.docker.compose.project=${project}`],
+            ['volume', 'ls', '--quiet', '--filter', `label=com.docker.compose.project=${project}`],
+            ['network', 'ls', '--quiet', '--filter', `label=com.docker.compose.project=${project}`],
+        ]);
+        await assert.rejects(access(home));
+    });
+});
+
+test('browser cleanup rejects a descriptive directory not derived from this workspace', async () => {
+    await fixture(async ({ home, config, sandbox, execute, calls }) => {
+        const workspace = path.join(sandbox, 'pinova');
+        const foreignConfig = path.join(home, 'wp-env-pinova-deadbeef', 'docker-compose.yml');
+        await mkdir(workspace);
+        await rename(path.dirname(config), path.dirname(foreignConfig));
+
+        assert.notEqual(execute({ GITHUB_WORKSPACE: workspace }).status, 0);
+        assert.deepEqual(await calls(), []);
+        await access(foreignConfig);
     });
 });
 

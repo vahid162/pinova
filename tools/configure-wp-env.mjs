@@ -11,7 +11,7 @@ if (wordpress === 'latest') {
 }
 
 const wooPackage = woocommerce === 'latest'
-    ? 'https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip'
+    ? 'https://downloads.wordpress.org/plugin/woocommerce.zip'
     : `https://downloads.wordpress.org/plugin/woocommerce.${woocommerce}.zip`;
 
 config.plugins = ['.', wooPackage];

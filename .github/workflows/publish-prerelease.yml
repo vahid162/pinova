@@ -6,32 +6,78 @@ on:
     types: [completed]
     branches:
       - 'publish/v*'
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact successful Quality-run commit to publish
+        required: true
+        type: string
+      quality_run_id:
+        description: Successful Quality workflow run that authorized publication
+        required: true
+        type: string
 
-permissions:
-  attestations: read
-  contents: write
+permissions: {}
 
 concurrency:
-  group: pinova-prerelease-${{ github.event.workflow_run.head_branch }}
+  group: pinova-prerelease-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  publish:
+  dispatch:
     if: >-
+      github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
     env:
       RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
       RELEASE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      QUALITY_RUN_ID: ${{ github.event.workflow_run.id }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Dispatch the publisher on the exact release ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ||
+                ! "${QUALITY_RUN_ID}" =~ ^[0-9]+$ ||
+                ! "${RELEASE_BRANCH}" =~ ^publish/v[0-9]+\.[0-9]+\.[0-9]+-rc[1-9][0-9]*$ ]]; then
+            echo "Invalid release dispatch identity" >&2
+            exit 1
+          fi
+
+          gh workflow run publish-prerelease.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${RELEASE_BRANCH}" \
+            --field "release_sha=${RELEASE_SHA}" \
+            --field "quality_run_id=${QUALITY_RUN_ID}"
+
+  publish:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      RELEASE_BRANCH: ${{ github.ref_name }}
+      QUALITY_RUN_ID: ${{ inputs.quality_run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.RELEASE_SHA }}
           fetch-depth: 0
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.1'
           coverage: none
@@ -43,13 +89,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ || ! "${QUALITY_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "Invalid release SHA or Quality run identity" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF}" != "refs/heads/${RELEASE_BRANCH}" || "${GITHUB_SHA}" != "${RELEASE_SHA}" ]]; then
+            echo "Publisher context ${GITHUB_REF}@${GITHUB_SHA} is not the authorized release ${RELEASE_BRANCH}@${RELEASE_SHA}" >&2
+            exit 1
+          fi
+
           tag="${RELEASE_BRANCH#publish/}"
           if [[ "${tag}" == "${RELEASE_BRANCH}" || ! "${tag}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-rc([1-9][0-9]*)$ ]]; then
             echo "Release branch must match publish/vX.Y.Z-rcN" >&2
             exit 1
           fi
-
           version="${BASH_REMATCH[1]}"
+
+          quality_state="$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${QUALITY_RUN_ID}" \
+            --jq '[.name, .event, .status, .conclusion, .head_sha, .head_branch, .head_repository.full_name] | @tsv')"
+          IFS=$'\t' read -r quality_name quality_event quality_status quality_conclusion quality_sha quality_branch quality_repo <<< "${quality_state}"
+          if [[ "${quality_name}" != "Quality" ||
+                "${quality_event}" != "push" ||
+                "${quality_status}" != "completed" ||
+                "${quality_conclusion}" != "success" ||
+                "${quality_sha}" != "${RELEASE_SHA}" ||
+                "${quality_branch}" != "${RELEASE_BRANCH}" ||
+                "${quality_repo}" != "${GITHUB_REPOSITORY}" ]]; then
+            echo "Quality run ${QUALITY_RUN_ID} does not authorize ${RELEASE_BRANCH}@${RELEASE_SHA}" >&2
+            exit 1
+          fi
+
           plugin_version="$(php -r "\$s=file_get_contents('pinova.php'); preg_match('/Version:\\s*([0-9.]+)/', \$s, \$m); echo \$m[1] ?? '';")"
           if [[ "${plugin_version}" != "${version}" ]]; then
             echo "Tag version ${version} does not match plugin version ${plugin_version}" >&2
@@ -92,6 +163,41 @@ jobs:
             sha256sum "pinova-${version}.zip" > "pinova-${version}.zip.sha256"
           )
 
+      - name: Generate the release SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: .build/pinova
+          format: spdx-json
+          output-file: .build/pinova-${{ steps.release.outputs.version }}.spdx.json
+          syft-version: v1.52.0
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Validate and checksum the release SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release.outputs.tag }}"
+          version="${{ steps.release.outputs.version }}"
+          sbom_path=".build/pinova-${version}.spdx.json"
+          normalized_sbom="${RUNNER_TEMP}/pinova-${version}.spdx.json"
+          jq --sort-keys \
+            --arg namespace "https://github.com/${GITHUB_REPOSITORY}/releases/${tag}/pinova-${version}.spdx.json" \
+            '.creationInfo.created = "2000-01-01T00:00:00Z" | .documentNamespace = $namespace' \
+            "${sbom_path}" > "${normalized_sbom}"
+          mv "${normalized_sbom}" "${sbom_path}"
+          jq -e '.spdxVersion == "SPDX-2.3" and .SPDXID == "SPDXRef-DOCUMENT"' "${sbom_path}" >/dev/null
+          (
+            cd .build
+            sha256sum "pinova-${version}.spdx.json" > "pinova-${version}.spdx.json.sha256"
+          )
+
+      - name: Attest the release ZIP with its SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: .build/pinova-${{ steps.release.outputs.version }}.zip
+          sbom-path: .build/pinova-${{ steps.release.outputs.version }}.spdx.json
+
       - name: Create immutable annotated tag
         shell: bash
         run: |
@@ -128,9 +234,10 @@ jobs:
             "" \
             "- Exact commit: \`${RELEASE_SHA}\`" \
             "- Required installation gate: Release API \`immutable: true\` and a successful publisher workflow" \
-            "- Publisher identity: \`pinova-prerelease-v2\`" \
+            "- Publisher identity: \`pinova-prerelease-v4\`" \
             "- Installable asset: \`pinova-${version}.zip\`" \
             "- SHA-256: \`${checksum}\`" \
+            "- SBOM: \`pinova-${version}.spdx.json\` with a separate checksum and signed SBOM attestation" \
             "" \
             "این یادداشت به‌تنهایی تأیید انتشار نیست. فقط پس از موفقیت کامل workflow از asset بالا برای staging/canary استفاده کنید؛ فایل خودکار Source code بستهٔ نصب افزونه نیست." \
             > "${notes}"
@@ -162,7 +269,9 @@ jobs:
               while IFS= read -r asset_name; do
                 if [[ -n "${asset_name}" && \
                       "${asset_name}" != "pinova-${version}.zip" && \
-                      "${asset_name}" != "pinova-${version}.zip.sha256" ]]; then
+                      "${asset_name}" != "pinova-${version}.zip.sha256" && \
+                      "${asset_name}" != "pinova-${version}.spdx.json" && \
+                      "${asset_name}" != "pinova-${version}.spdx.json.sha256" ]]; then
                   echo "Existing draft ${tag} contains unexpected asset ${asset_name}; refusing to alter it." >&2
                   exit 1
                 fi
@@ -191,6 +300,8 @@ jobs:
             gh release upload "${tag}" \
               ".build/pinova-${version}.zip#Pinova ${version} installable ZIP" \
               ".build/pinova-${version}.zip.sha256#SHA-256 checksum" \
+              ".build/pinova-${version}.spdx.json#SPDX 2.3 software bill of materials" \
+              ".build/pinova-${version}.spdx.json.sha256#SBOM SHA-256 checksum" \
               --repo "${GITHUB_REPOSITORY}" \
               --clobber
             gh release edit "${tag}" \
@@ -227,21 +338,33 @@ jobs:
           gh release download "${tag}" \
             --repo "${GITHUB_REPOSITORY}" \
             --pattern "pinova-${version}.zip*" \
+            --pattern "pinova-${version}.spdx.json*" \
             --dir "${verify_dir}"
           (
             cd "${verify_dir}"
             sha256sum -c "pinova-${version}.zip.sha256"
+            sha256sum -c "pinova-${version}.spdx.json.sha256"
             unzip -tq "pinova-${version}.zip"
             unzip -Z1 "pinova-${version}.zip" | awk 'index($0, "pinova/") != 1 { bad = 1 } END { exit bad }'
+            jq -e '.spdxVersion == "SPDX-2.3" and .SPDXID == "SPDXRef-DOCUMENT"' "pinova-${version}.spdx.json" >/dev/null
           )
           cmp ".build/pinova-${version}.zip" "${verify_dir}/pinova-${version}.zip"
           cmp ".build/pinova-${version}.zip.sha256" "${verify_dir}/pinova-${version}.zip.sha256"
+          cmp ".build/pinova-${version}.spdx.json" "${verify_dir}/pinova-${version}.spdx.json"
+          cmp ".build/pinova-${version}.spdx.json.sha256" "${verify_dir}/pinova-${version}.spdx.json.sha256"
 
           verified=false
           for _ in 1 2 3 4 5; do
             if gh release verify "${tag}" --repo "${GITHUB_REPOSITORY}" && \
                gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.zip" --repo "${GITHUB_REPOSITORY}" && \
-               gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.zip.sha256" --repo "${GITHUB_REPOSITORY}"; then
+               gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.zip.sha256" --repo "${GITHUB_REPOSITORY}" && \
+               gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.spdx.json" --repo "${GITHUB_REPOSITORY}" && \
+               gh release verify-asset "${tag}" "${verify_dir}/pinova-${version}.spdx.json.sha256" --repo "${GITHUB_REPOSITORY}" && \
+               gh attestation verify "${verify_dir}/pinova-${version}.zip" \
+                 --repo "${GITHUB_REPOSITORY}" \
+                 --source-digest "${RELEASE_SHA}" \
+                 --source-ref "refs/heads/${RELEASE_BRANCH}" \
+                 --predicate-type 'https://spdx.dev/Document/v2.3'; then
               verified=true
               break
             fi

@@ -624,8 +624,8 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             this.setStatus(result && result.message ? result.message : 'خطایی رخ داده است!');
         },
 
-        handleRequestException(){
-            this.setStatus('ارتباط با سرور برقرار نشد. لطفاً دوباره تلاش کنید.');
+        handleRequestException(error){
+            this.setStatus(error?.pinovaMessage || 'ارتباط با سرور برقرار نشد. لطفاً دوباره تلاش کنید.');
         },
 
         clearStepSecrets(stepName){

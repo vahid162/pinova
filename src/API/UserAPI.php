@@ -11,6 +11,7 @@ use Pinova\Exceptions\SendOTPException;
 use Pinova\Helper;
 use Pinova\Helpers\IP;
 use Pinova\Helpers\JWT;
+use Pinova\Logging\EventThrottle;
 use Pinova\Logging\Logger;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
@@ -348,13 +349,41 @@ class UserAPI extends RestAPI {
 		}
 
 		if ( UserService::is_native_only( $user ) ) {
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_verify',
+					'reason'    => 'native_only_policy',
+					'user_id'   => $user->ID,
+				]
+			);
 			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
 		clean_user_cache( $user->ID );
-		$reset_key = get_password_reset_key( $user );
+		try {
+			$reset_key = get_password_reset_key( $user );
+		} catch ( \Throwable $throwable ) {
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_verify',
+					'reason'    => 'reset_key_generation_failed',
+					'user_id'   => $user->ID,
+				]
+			);
+			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
+		}
 
 		if ( is_wp_error( $reset_key ) ) {
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_verify',
+					'reason'    => 'reset_key_rejected',
+					'user_id'   => $user->ID,
+				]
+			);
 			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
 		}
 
@@ -381,28 +410,89 @@ class UserAPI extends RestAPI {
 		$password_confirm = $request->get_param( 'password_2' );
 
 		if ( ! hash_equals( (string) $password, (string) $password_confirm ) ) {
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_change',
+					'reason'    => 'password_mismatch',
+				]
+			);
 			return self::response( false, __( 'رمز عبور و تکرار رمز عبور یکسان نیستند.', 'pinova' ), [], 400 );
 		}
 
 		try {
 			$user_id = UserService::parse_jwt( $jwt );
 		} catch ( Exception $e ) {
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_change',
+					'reason'    => 'invalid_token',
+				]
+			);
 			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
 		$user = get_user_by( 'id', $user_id );
 
-		if ( ! $user instanceof WP_User || UserService::is_native_only( $user ) ) {
+		if ( ! $user instanceof WP_User ) {
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_change',
+					'reason'    => 'user_not_found',
+				]
+			);
+			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+		}
+
+		if ( UserService::is_native_only( $user ) ) {
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_change',
+					'reason'    => 'native_only_policy',
+					'user_id'   => $user->ID,
+				]
+			);
 			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
 		$user = check_password_reset_key( $reset_key, $user->user_login );
 
 		if ( is_wp_error( $user ) ) {
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_change',
+					'reason'    => 'invalid_reset_key',
+					'user_id'   => $user_id,
+				]
+			);
 			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
-		reset_password( $user, $password );
+		try {
+			reset_password( $user, $password );
+		} catch ( \Throwable $throwable ) {
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_change',
+					'reason'    => 'reset_pipeline_failed',
+					'user_id'   => $user_id,
+				]
+			);
+			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
+		}
+
+		EventThrottle::log(
+			'auth.password_reset_succeeded',
+			[
+				'operation' => 'forgot_change',
+				'user_id'   => $user_id,
+			]
+		);
 
 		UserService::login( $user_id, 'password' );
 

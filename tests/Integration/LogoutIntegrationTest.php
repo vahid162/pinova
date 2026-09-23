@@ -63,6 +63,8 @@ final class LogoutIntegrationTest extends WP_UnitTestCase {
 
 		$this->original_get = $_GET;
 		$_GET              = [];
+		global $wpdb;
+		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope = 'log_logout_rejected'" );
 		LogRepository::delete_all();
 		update_option(
 			'pinova_logging',
@@ -109,6 +111,7 @@ final class LogoutIntegrationTest extends WP_UnitTestCase {
 		$user_id = self::factory()->user->create( [ 'role' => 'subscriber' ] );
 		wp_set_current_user( $user_id );
 		$_GET['_pinova_nonce'] = 'invalid-logout-nonce';
+		$_GET['back_url']      = home_url( '/private-return/?token=private-return-token' );
 
 		$exception = $this->capture_wp_die(
 			static function (): void {
@@ -118,6 +121,38 @@ final class LogoutIntegrationTest extends WP_UnitTestCase {
 
 		self::assertSame( 403, $exception->die_args['response'] ?? null );
 		self::assertSame( site_url(), $exception->die_args['link_url'] ?? null );
+		self::assertSame( $user_id, get_current_user_id() );
+		$records = LogRepository::paginate()['rows'];
+		self::assertCount( 1, $records );
+		self::assertSame( 'auth.logout_rejected', $records[0]['event'] );
+		self::assertSame( 'notice', $records[0]['level'] );
+		self::assertStringContainsString( 'invalid_nonce', $records[0]['context'] );
+		self::assertStringNotContainsString( 'invalid-logout-nonce', $records[0]['context'] );
+		self::assertStringNotContainsString( 'private-return', $records[0]['context'] );
+
+		$_GET['_pinova_nonce'] = 'different-invalid-nonce';
+		$this->capture_wp_die( static function (): void { Pinova::logout(); } );
+		self::assertSame( 1, LogRepository::paginate()['total'] );
+		self::assertSame( $user_id, get_current_user_id() );
+	}
+
+	public function test_unavailable_throttle_keeps_invalid_logout_nonce_failure_and_session_intact(): void {
+		$user_id = self::factory()->user->create( [ 'role' => 'subscriber' ] );
+		wp_set_current_user( $user_id );
+		$_GET['_pinova_nonce'] = 'unavailable-throttle-secret';
+		$fail_throttle = static function ( string $query ): string {
+			if ( str_contains( $query, 'INSERT IGNORE INTO' ) && str_contains( $query, 'pinova_rate_limits' ) ) {
+				throw new \RuntimeException( 'throttle-backend-secret' );
+			}
+			return $query;
+		};
+		add_filter( 'query', $fail_throttle );
+		try {
+			$exception = $this->capture_wp_die( static function (): void { Pinova::logout(); } );
+		} finally {
+			remove_filter( 'query', $fail_throttle );
+		}
+		self::assertSame( 403, $exception->die_args['response'] ?? null );
 		self::assertSame( $user_id, get_current_user_id() );
 		self::assertSame( 0, LogRepository::paginate()['total'] );
 	}

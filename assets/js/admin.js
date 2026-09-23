@@ -16,30 +16,16 @@
             return
         }
 
-        fetch(pinova.root + 'pinova/admin/gateway/get-options', {
+        pinovaApiRequest('pinova/admin/gateway/get-options', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-WP-Nonce': pinova.nonce
-            },
-            body: JSON.stringify({
+            data: {
                 gateway: selected_gateway
-            })
+            }
         })
-            .then(async (response) => {
-                const data = await response.json().catch(() => null);
-
-                if (!response.ok) {
-                    const message = data?.message || response.statusText || 'خطای نامشخصی رخ داده است.';
-                    throw new Error(message);
-                }
-
-                return data;
-            })
             .then((response) => {
 
                 if (!response || response.success === false) {
-                    console.error(response?.message || 'خطای اتصال به API رخ داده است.');
+                    pinovaNotyf.error(response?.message || 'خطای اتصال به API رخ داده است.');
                     return;
                 }
 
@@ -56,8 +42,8 @@
                 });
 
             })
-            .catch((error) => {
-                console.error('خطای اتصال به API:', error.message);
+            .catch(() => {
+                // The shared client already reports a safe error and server reference.
             });
     }
 
@@ -84,7 +70,7 @@
         const description = test_mobile_field.closest('td').find('p.description');
         description.after(message_box);
 
-        button.on('click', function () {
+        button.on('click', async function () {
             const identifier = test_mobile_field.val();
 
             if (!identifier) {
@@ -95,59 +81,23 @@
             button.prop('disabled', true).text('در حال ارسال...');
             message_box.text('').css('color', 'inherit');
 
-            fetch(pinova.root + 'pinova/admin/test/sms', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-WP-Nonce': pinova.nonce
-                },
-                body: JSON.stringify({
-                    identifier: identifier
-                })
-            })
-                .then(async (response) => {
-                    let data = null;
-
-                    try {
-                        data = await response.json();
-                    } catch (e) {
-                        data = null;
-                    }
-
-                    button.prop('disabled', false).text('ارسال');
-
-                    if (!response.ok) {
-                        const errorMessage =
-                            data?.message ||
-                            'خطای اتصال به وبسرویس.';
-
-                        message_box
-                            .css('color', 'red')
-                            .text(errorMessage);
-
-                        return;
-                    }
-
-                    if (data?.success) {
-                        message_box
-                            .css('color', 'green')
-                            .text(data.message);
-                    } else {
-                        message_box
-                            .css('color', 'red')
-                            .text(data?.message || 'خطایی رخ داده است.');
-                    }
-                })
-                .catch((error) => {
-                    button.prop('disabled', false).text('ارسال');
-
-                    message_box
-                        .css('color', 'red')
-                        .text('خطای اتصال به وبسرویس.');
-
-                    console.error(error);
+            try {
+                const result = await pinovaApiRequest('pinova/admin/test/sms', {
+                    method: 'POST',
+                    notifyOnError: false,
+                    data: { identifier }
                 });
+
+                message_box
+                    .css('color', result.success ? 'green' : 'red')
+                    .text(result.message || 'خطایی رخ داده است.');
+            } catch (error) {
+                message_box
+                    .css('color', 'red')
+                    .text(error?.pinovaMessage || 'خطای اتصال به وبسرویس.');
+            } finally {
+                button.prop('disabled', false).text('ارسال');
+            }
         });
     }
 

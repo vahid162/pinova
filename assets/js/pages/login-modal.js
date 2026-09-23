@@ -319,7 +319,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 return;
             }
             console.error('Pinova authentication request failed:', error);
-            this.handleRequestException();
+            this.handleRequestException(error);
         } finally {
             this.endRequest(request);
         }
@@ -373,7 +373,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 return;
             }
             console.error('Pinova OTP login request failed:', error);
-            this.handleRequestException();
+            this.handleRequestException(error);
         } finally {
             this.endRequest(request);
         }
@@ -423,7 +423,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 return;
             }
             console.error('Pinova password login request failed:', error);
-            this.handleRequestException();
+            this.handleRequestException(error);
         } finally {
             this.endRequest(request);
         }
@@ -473,7 +473,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 return;
             }
             console.error('Pinova password recovery request failed:', error);
-            this.handleRequestException();
+            this.handleRequestException(error);
         } finally {
             this.endRequest(request);
         }
@@ -519,7 +519,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 return;
             }
             console.error('Pinova password change request failed:', error);
-            this.handleRequestException();
+            this.handleRequestException(error);
         } finally {
             this.endRequest(request);
         }
@@ -663,8 +663,8 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
         this.setStatus(result && result.message ? result.message : 'خطایی رخ داده است!');
     },
 
-    handleRequestException() {
-        this.setStatus('ارتباط با سرور برقرار نشد. لطفاً دوباره تلاش کنید.');
+    handleRequestException(error) {
+        this.setStatus(error?.pinovaMessage || 'ارتباط با سرور برقرار نشد. لطفاً دوباره تلاش کنید.');
     },
 
     clearStepSecrets(stepName) {

@@ -70,6 +70,16 @@ final class PasswordResetLoggingIntegrationTest extends WP_UnitTestCase {
 		];
 	}
 
+	public function test_signed_recovery_flow_is_kept_on_password_mismatch_without_logging_secrets(): void {
+		$user    = self::factory()->user->create_and_get( [ 'role' => 'subscriber' ] );
+		$flow_id = str_repeat( 'f', 32 );
+		$jwt     = UserService::generate_jwt( $user->ID, $flow_id );
+		$response = $this->change( $jwt, 'private-reset-key', 'different-password' );
+		self::assertSame( 400, $response->get_status() );
+		self::assertSame( $flow_id, $this->assert_reset_event( 'auth.password_reset_failed', 'password_mismatch' )['flow_id'] );
+		$this->assert_no_secrets( [ $jwt, 'private-reset-key', 'different-password' ] );
+	}
+
 	public function test_repeated_failures_with_changing_tokens_and_reasons_emit_one_event(): void {
 		$this->change( 'private-invalid-jwt-a', 'private-reset-key-a' );
 		$this->change( 'private-invalid-jwt-b', 'private-reset-key-b', 'mismatch-password' );
@@ -150,6 +160,7 @@ final class PasswordResetLoggingIntegrationTest extends WP_UnitTestCase {
 
 	public function test_success_uses_native_reset_hooks_preserves_identity_and_logs_after_reset(): void {
 		$user = self::factory()->user->create_and_get( [ 'role' => 'subscriber' ] );
+		$flow_id = str_repeat( 'e', 32 );
 		$key = get_password_reset_key( $user );
 		self::assertIsString( $key );
 		$seen = [];
@@ -161,7 +172,7 @@ final class PasswordResetLoggingIntegrationTest extends WP_UnitTestCase {
 		add_action( 'password_reset', $before );
 		add_action( 'after_password_reset', $after );
 		try {
-			$response = $this->change( UserService::generate_jwt( $user->ID ), $key );
+			$response = $this->change( UserService::generate_jwt( $user->ID, $flow_id ), $key );
 		} finally {
 			remove_action( 'password_reset', $before );
 			remove_action( 'after_password_reset', $after );
@@ -175,6 +186,9 @@ final class PasswordResetLoggingIntegrationTest extends WP_UnitTestCase {
 		$record = $this->assert_reset_event( 'auth.password_reset_succeeded' );
 		self::assertSame( 'info', $record['level'] );
 		self::assertSame( $user->ID, (int) $record['user_id'] );
+		self::assertSame( $flow_id, $record['flow_id'] );
+		$session = array_values( array_filter( LogRepository::paginate( 1, 100 )['rows'], static fn( array $row ): bool => 'auth.session_created' === $row['event'] ) );
+		self::assertSame( $flow_id, $session[0]['flow_id'] );
 		$this->assert_no_secrets( [ $user->user_login, $user->user_email, $key ] );
 	}
 

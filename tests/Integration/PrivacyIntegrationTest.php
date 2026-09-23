@@ -540,6 +540,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 			'privacy.erase_test',
 			[
 				'user_id'                => $user_id,
+				'flow_id'                => str_repeat( 'a', 32 ),
 				'identifier_fingerprint' => $fingerprint,
 				'operation'              => 'privacy_erasure',
 			]
@@ -549,6 +550,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 			'privacy.other_owner',
 			[
 				'user_id'                => $other_user_id,
+				'flow_id'                => str_repeat( 'b', 32 ),
 				'identifier_fingerprint' => $fingerprint,
 				'operation'              => 'privacy_erasure',
 			]
@@ -599,7 +601,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		$result = Privacy::erase_personal_data( 'erase@example.test', 1 );
 		$row    = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT `event`, `correlation_id`, `user_id`, `context` FROM %i WHERE `event` = %s',
+				'SELECT `event`, `correlation_id`, `flow_id`, `user_id`, `context` FROM %i WHERE `event` = %s',
 				$wpdb->prefix . 'pinova_logs',
 				'privacy.erase_test'
 			),
@@ -607,7 +609,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		);
 		$other_log = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT `user_id`, `context` FROM %i WHERE `event` = %s',
+				'SELECT `flow_id`, `user_id`, `context` FROM %i WHERE `event` = %s',
 				$wpdb->prefix . 'pinova_logs',
 				'privacy.other_owner'
 			),
@@ -662,10 +664,12 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertIsArray( $row );
 		self::assertSame( 'privacy.erase_test', $row['event'] );
 		self::assertNull( $row['user_id'] );
+		self::assertNull( $row['flow_id'] );
 		self::assertStringContainsString( 'privacy_erasure', $row['context'] );
 		self::assertStringNotContainsString( 'fingerprint', $row['context'] );
 		self::assertIsArray( $other_log );
 		self::assertSame( (string) $other_user_id, (string) $other_log['user_id'] );
+		self::assertSame( str_repeat( 'b', 32 ), $other_log['flow_id'] );
 		self::assertStringContainsString( $fingerprint, $other_log['context'] );
 	}
 }

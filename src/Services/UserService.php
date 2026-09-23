@@ -197,7 +197,7 @@ class UserService {
 		return false;
 	}
 
-	public static function login( int $user_id, ?string $login_method = null ) {
+	public static function login( int $user_id, ?string $login_method = null, ?string $flow_id = null ) {
 		clean_user_cache( $user_id );
 		wp_clear_auth_cookie();
 		wp_set_auth_cookie( $user_id, true );
@@ -219,6 +219,7 @@ class UserService {
 			[
 				'user_id'     => $user_id,
 				'auth_method' => $login_method ?: 'unknown',
+				'flow_id'     => $flow_id,
 			]
 		);
 	}
@@ -262,11 +263,12 @@ class UserService {
 	 * @param string|Mobile $mobile
 	 * @param string        $email
 	 * @param array         $userdata
+	 * @param string|null   $flow_id
 	 *
 	 * @return int
 	 * @throws Exception
 	 */
-	public static function create( $mobile, string $email = '', array $userdata = [] ): int {
+	public static function create( $mobile, string $email = '', array $userdata = [], ?string $flow_id = null ): int {
 		global $wpdb;
 
 		if ( ! is_a( $mobile, Mobile::class ) ) {
@@ -336,6 +338,7 @@ class UserService {
 				'user_id'         => $user_id,
 				'identifier_type' => 'mobile',
 				'auth_method'     => 'otp',
+				'flow_id'         => $flow_id,
 			]
 		);
 
@@ -458,7 +461,7 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function create_by_otp( OTP $otp ): int {
-		return self::create( $otp->identifier );
+		return self::create( $otp->identifier, '', [], $otp->flow_id );
 	}
 
 	/**
@@ -480,13 +483,13 @@ class UserService {
 	 *
 	 * @return string
 	 */
-	public static function generate_jwt( int $user_id ): string {
-		return JWT::encode(
-			[
-				'user_id' => $user_id,
-			],
-			HOUR_IN_SECONDS
-		);
+	public static function generate_jwt( int $user_id, ?string $flow_id = null ): string {
+		$payload = [ 'user_id' => $user_id ];
+		if ( null !== $flow_id ) {
+			$payload['flow_id'] = $flow_id;
+		}
+
+		return JWT::encode( $payload, HOUR_IN_SECONDS );
 	}
 
 	/**
@@ -496,6 +499,12 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function parse_jwt( string $jwt ): int {
+		[ $user_id ] = self::parse_jwt_with_flow( $jwt );
+		return $user_id;
+	}
+
+	/** @return array{0:int,1:?string} */
+	public static function parse_jwt_with_flow( string $jwt ): array {
 
 		try {
 			$payload = JWT::decode( $jwt );
@@ -504,7 +513,10 @@ class UserService {
 		}
 
 		if ( isset( $payload['user_id'] ) ) {
-			return intval( $payload['user_id'] );
+			$flow_id = $payload['flow_id'] ?? null;
+			if ( null === $flow_id || ( is_string( $flow_id ) && preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) ) {
+				return [ intval( $payload['user_id'] ), $flow_id ];
+			}
 		}
 
 		throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );

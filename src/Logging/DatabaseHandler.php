@@ -38,10 +38,11 @@ final class DatabaseHandler implements HandlerInterface {
 					'level'          => (string) $record['level'],
 					'event'          => (string) $record['event'],
 					'correlation_id' => (string) $record['correlation_id'],
+					'flow_id'        => $record['flow_id'] ?? null,
 					'user_id'        => $user_id ?: null,
 					'context'        => '' !== $encoded ? $encoded : '{}',
 				],
-				[ '%s', '%s', '%s', '%s', '%d', '%s' ]
+				[ '%s', '%s', '%s', '%s', '%s', '%d', '%s' ]
 			);
 
 			if ( false === $result ) {

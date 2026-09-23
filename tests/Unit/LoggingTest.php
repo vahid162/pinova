@@ -100,6 +100,24 @@ final class LoggingTest extends TestCase {
 		self::assertStringNotContainsString( 'secret-token', (string) $encoded );
 	}
 
+	public function test_flow_id_is_a_strict_top_level_field_not_arbitrary_context(): void {
+		$handler = new class() implements HandlerInterface {
+			public array $records = [];
+
+			public function write( array $record ): void {
+				$this->records[] = $record;
+			}
+		};
+		$logger = new Logger( $handler, new SafeContext(), static fn(): array => [ 'minimum_level' => 'info' ] );
+		$logger->info( 'otp.verified', [ 'flow_id' => str_repeat( 'a', 32 ), 'jwt' => 'secret-token' ] );
+		$logger->info( 'otp.verify_failed', [ 'flow_id' => 'unsafe-flow-id' ] );
+
+		self::assertSame( str_repeat( 'a', 32 ), $handler->records[0]['flow_id'] );
+		self::assertArrayNotHasKey( 'flow_id', $handler->records[0]['context'] );
+		self::assertArrayNotHasKey( 'jwt', $handler->records[0]['context'] );
+		self::assertNull( $handler->records[1]['flow_id'] );
+	}
+
 	public function test_threshold_and_diagnostic_expiry_are_enforced(): void {
 		$handler  = new class() implements HandlerInterface {
 			/** @var array<int, array<string, mixed>> */

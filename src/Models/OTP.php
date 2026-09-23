@@ -14,6 +14,7 @@ use Pinova\Helpers\IP;
  *
  * @property int         $id
  * @property int|null    $user_id
+ * @property string|null $flow_id
  * @property string      $identifier
  * @property string      $code
  * @property string      $ip_address
@@ -33,6 +34,7 @@ class OTP extends Model {
 
 	protected $fillable = [
 		'user_id',
+		'flow_id',
 		'identifier',
 		'code',
 		'ip_address',

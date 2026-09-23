@@ -16,12 +16,15 @@ Every record uses schema `pinova.event.v1` and contains:
 - a valid PSR-3 `level`;
 - a stable, machine-readable `event` code up to 100 characters;
 - one request/process `correlation_id`;
+- optional indexed `flow_id` in its own nullable column;
 - optional numeric `user_id` in its own column;
 - JSON `context` containing `SafeContext`-sanitized caller fields and trusted package metadata.
 
 Packaged builds add a validated, deterministic `build-info.json` at packaging time. Its commit, package identity, and optional release tag are appended to record context **after** caller context passes `SafeContext`; callers cannot supply or override them. A Git source checkout reports `package_identity=source` and does not invent a commit or tag. Release packaging verifies the manifest in the ZIP. No build identity is stored in `AGENTS.md` or `README.md`.
 
 Pinova REST responses expose the same value in `X-Pinova-Correlation-ID`. A scoped `rest_post_dispatch` filter also covers WordPress validation, permission, authentication, and missing-route failures under `/pinova/`, preserves an existing response header, and leaves unrelated namespaces untouched. The shared JavaScript client displays only a bounded, safe reference received in that header on failures, including unreadable response bodies. A network failure without a server response must never fabricate a reference. This is request-level correlation, not a multi-request flow identity. Never put identifiers or secrets in response headers.
+
+An OTP flow ID is 16 cryptographically random bytes represented as 32 lowercase hexadecimal characters. It is stored on the OTP record and carried between requests only in Pinova-signed JWT state. A signed flow ID must match the loaded OTP row before any verification mutation; unsigned `flow_id` request parameters are rejected. Legacy OTP rows and logs keep a null flow ID and remain valid. Record-backed issuance, reuse, delivery failure, verification, registration, session creation, and password-recovery logs retain the same ID where applicable. The flow ID is a pseudonymous linkage value subject to log retention, not an authentication secret or a replacement for the request correlation ID; never put it in a response header.
 
 ## Levels and noise control
 
@@ -37,7 +40,7 @@ Retention defaults to 14 days, is clamped to 1–90 days, and is deleted in boun
 
 Context is deny-by-default. `SafeContext` accepts only documented numeric IDs/counts, short code-like values, bounded code lists, approved keyed fingerprints, and exception class/code. It discards unknown keys.
 
-`changed_keys` accepts at most 20 names from the first-party settings field allowlist; it never contains values. Packaged `build_commit` (40 lowercase hexadecimal characters), `package_identity` (`pinova-release-zip`), and an optional validated `release_tag` are trusted package metadata, not arbitrary `SafeContext` input. Source checkouts carry only `package_identity=source`.
+`changed_keys` accepts at most 20 names from the first-party settings field allowlist; it never contains values. Only strict 32-character lowercase hexadecimal `flow_id` values pass `SafeContext`, and `Logger` moves them into the dedicated column before JSON persistence. Packaged `build_commit` (40 lowercase hexadecimal characters), `package_identity` (`pinova-release-zip`), and an optional validated `release_tag` are trusted package metadata, not arbitrary `SafeContext` input. Source checkouts carry only `package_identity=source`.
 
 Never persist any of the following, even at debug level:
 
@@ -124,6 +127,8 @@ Settings audit observes successful WordPress option updates for first-party Pino
 Do not query or alter the production table during development. Production inspection or deletion needs explicit authority for that environment.
 
 ## Required tests for logging changes
+
+The administrator viewer and bounded incident export accept an exact flow-ID filter. The export includes only a strictly validated flow ID; approved privacy erasure clears the flow ID from rows it anonymizes. Legacy rows with null flow IDs remain queryable by their original request correlation IDs.
 
 - unit: valid PSR-3 levels, minimum threshold, debug expiry, event sanitization, fingerprint stability/purpose separation, and deny-by-default context;
 - integration: table creation/upgrade, persistence without raw PII/secrets, exception-message removal, retention boundary, correlation header, identity-conflict redaction, and rate-limit amplification protection;

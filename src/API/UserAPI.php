@@ -137,6 +137,10 @@ class UserAPI extends RestAPI {
 	 * @return WP_REST_Response
 	 */
 	public function authenticate( WP_REST_Request $request ): WP_REST_Response {
+		if ( self::has_unsigned_flow_override( $request ) ) {
+			return self::response( false, __( 'درخواست معتبر نمی‌باشد.', 'pinova' ), [], 400 );
+		}
+
 		$started = microtime( true );
 
 		/** @var Identifier $identifier */
@@ -195,7 +199,7 @@ class UserAPI extends RestAPI {
 		if ( $current_otp ) {
 			$ttl         = max( 1, $current_otp->expires_at->diffInSeconds() );
 			$data['ttl'] = $ttl;
-			$data['jwt'] = JWT::encode( [ 'otp_id' => $current_otp->id ], $ttl );
+			$data['jwt'] = OTPService::signed_state( $current_otp, $ttl );
 
 			return self::response( true, ChannelService::get_message( $current_otp->channels, $identifier ), $data );
 		}
@@ -309,12 +313,15 @@ class UserAPI extends RestAPI {
 	 * @return WP_REST_Response
 	 */
 	public function login_otp( WP_REST_Request $request ): WP_REST_Response {
+		if ( self::has_unsigned_flow_override( $request ) ) {
+			return self::response( false, __( 'درخواست معتبر نمی‌باشد.', 'pinova' ), [], 400 );
+		}
 
 		$jwt  = $request->get_param( 'jwt' );
 		$code = $request->get_param( 'code' );
 
 		try {
-			$user = OTPService::verify( $jwt, $code, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ] );
+			[ $user, $flow_id ] = OTPService::verify_with_flow( $jwt, $code, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ] );
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
@@ -325,7 +332,7 @@ class UserAPI extends RestAPI {
 			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
-		UserService::login( $user->ID, 'otp' );
+		UserService::login( $user->ID, 'otp', $flow_id );
 
 		return self::response( true, __( 'ورود با موفقیت انجام شد.', 'pinova' ) );
 	}
@@ -336,12 +343,15 @@ class UserAPI extends RestAPI {
 	 * @return WP_REST_Response
 	 */
 	public function forgot_verify( WP_REST_Request $request ): WP_REST_Response {
+		if ( self::has_unsigned_flow_override( $request ) ) {
+			return self::response( false, __( 'درخواست معتبر نمی‌باشد.', 'pinova' ), [], 400 );
+		}
 
 		$jwt  = $request->get_param( 'jwt' );
 		$code = $request->get_param( 'code' );
 
 		try {
-			$user = OTPService::verify( $jwt, $code, [ OTP::TYPE_FORGET ] );
+			[ $user, $flow_id ] = OTPService::verify_with_flow( $jwt, $code, [ OTP::TYPE_FORGET ] );
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
@@ -355,6 +365,7 @@ class UserAPI extends RestAPI {
 					'operation' => 'forgot_verify',
 					'reason'    => 'native_only_policy',
 					'user_id'   => $user->ID,
+					'flow_id'   => $flow_id,
 				]
 			);
 			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
@@ -370,6 +381,7 @@ class UserAPI extends RestAPI {
 					'operation' => 'forgot_verify',
 					'reason'    => 'reset_key_generation_failed',
 					'user_id'   => $user->ID,
+					'flow_id'   => $flow_id,
 				]
 			);
 			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
@@ -382,6 +394,7 @@ class UserAPI extends RestAPI {
 					'operation' => 'forgot_verify',
 					'reason'    => 'reset_key_rejected',
 					'user_id'   => $user->ID,
+					'flow_id'   => $flow_id,
 				]
 			);
 			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
@@ -391,7 +404,7 @@ class UserAPI extends RestAPI {
 			true,
 			null,
 			[
-				'jwt'       => UserService::generate_jwt( $user->ID ),
+				'jwt'       => UserService::generate_jwt( $user->ID, $flow_id ),
 				'reset_key' => $reset_key,
 			]
 		);
@@ -403,11 +416,23 @@ class UserAPI extends RestAPI {
 	 * @return WP_REST_Response
 	 */
 	public function forgot_change( WP_REST_Request $request ): WP_REST_Response {
+		if ( self::has_unsigned_flow_override( $request ) ) {
+			return self::response( false, __( 'درخواست معتبر نمی‌باشد.', 'pinova' ), [], 400 );
+		}
 
 		$jwt              = $request->get_param( 'jwt' );
 		$reset_key        = $request->get_param( 'reset_key' );
 		$password         = $request->get_param( 'password_1' );
 		$password_confirm = $request->get_param( 'password_2' );
+		$user_id          = 0;
+		$flow_id          = null;
+		$valid_state      = false;
+		try {
+			[ $user_id, $flow_id ] = UserService::parse_jwt_with_flow( $jwt );
+			$valid_state            = true;
+		} catch ( Exception $e ) {
+			unset( $e );
+		}
 
 		if ( ! hash_equals( (string) $password, (string) $password_confirm ) ) {
 			EventThrottle::log(
@@ -415,14 +440,13 @@ class UserAPI extends RestAPI {
 				[
 					'operation' => 'forgot_change',
 					'reason'    => 'password_mismatch',
+					'flow_id'   => $flow_id,
 				]
 			);
 			return self::response( false, __( 'رمز عبور و تکرار رمز عبور یکسان نیستند.', 'pinova' ), [], 400 );
 		}
 
-		try {
-			$user_id = UserService::parse_jwt( $jwt );
-		} catch ( Exception $e ) {
+		if ( ! $valid_state ) {
 			EventThrottle::log(
 				'auth.password_reset_failed',
 				[
@@ -441,6 +465,7 @@ class UserAPI extends RestAPI {
 				[
 					'operation' => 'forgot_change',
 					'reason'    => 'user_not_found',
+					'flow_id'   => $flow_id,
 				]
 			);
 			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
@@ -453,6 +478,7 @@ class UserAPI extends RestAPI {
 					'operation' => 'forgot_change',
 					'reason'    => 'native_only_policy',
 					'user_id'   => $user->ID,
+					'flow_id'   => $flow_id,
 				]
 			);
 			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
@@ -467,6 +493,7 @@ class UserAPI extends RestAPI {
 					'operation' => 'forgot_change',
 					'reason'    => 'invalid_reset_key',
 					'user_id'   => $user_id,
+					'flow_id'   => $flow_id,
 				]
 			);
 			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
@@ -481,6 +508,7 @@ class UserAPI extends RestAPI {
 					'operation' => 'forgot_change',
 					'reason'    => 'reset_pipeline_failed',
 					'user_id'   => $user_id,
+					'flow_id'   => $flow_id,
 				]
 			);
 			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
@@ -491,12 +519,17 @@ class UserAPI extends RestAPI {
 			[
 				'operation' => 'forgot_change',
 				'user_id'   => $user_id,
+				'flow_id'   => $flow_id,
 			]
 		);
 
-		UserService::login( $user_id, 'password' );
+		UserService::login( $user_id, 'password', $flow_id );
 
 		return self::response( true, __( 'رمزعبور با موفقیت بازنشانی شد و به سیستم وارد شدید.', 'pinova' ) );
+	}
+
+	private static function has_unsigned_flow_override( WP_REST_Request $request ): bool {
+		return array_key_exists( 'flow_id', $request->get_params() );
 	}
 
 	/**

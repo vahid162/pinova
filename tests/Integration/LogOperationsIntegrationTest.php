@@ -41,6 +41,7 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 			$base + [
 				'event'          => 'auth.one',
 				'correlation_id' => 'abc-1',
+				'flow_id'        => str_repeat( 'a', 32 ),
 			]
 		);
 		$wpdb->insert(
@@ -48,6 +49,7 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 			$base + [
 				'event'          => 'auth.two',
 				'correlation_id' => 'abc-2',
+				'flow_id'        => str_repeat( 'b', 32 ),
 			]
 		);
 
@@ -62,6 +64,8 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 		);
 		self::assertSame( 1, $filtered['total'] );
 		self::assertSame( 'abc-1', $filtered['rows'][0]['correlation_id'] );
+		self::assertSame( 1, LogRepository::paginate( 1, 50, '', [ 'flow_id' => str_repeat( 'b', 32 ) ] )['total'] );
+		self::assertFalse( LogRepository::valid_filters( [ 'flow_id' => 'not-a-flow' ] ) );
 		self::assertSame( 0, LogRepository::paginate( 1, 50, '', [ 'event' => 'auth.%' ] )['total'] );
 		self::assertFalse( LogRepository::valid_filters( [ 'created_from' => '2026-01-01' ] ) );
 		self::assertFalse(
@@ -88,6 +92,7 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 			'level'          => 'warning',
 			'event'          => 'auth.request_failed',
 			'correlation_id' => 'abc-1',
+			'flow_id'        => 'secret-legacy-value',
 			'user_id'        => 17,
 			'context'        => '{"http_status":403,"attempts":"123","count":"09120000000","duration_ms":9123456789,"identifier_type":"email","identifier_fingerprint":"deadbeef","password":"secret-password","reason":"secret-token"}',
 		];
@@ -96,6 +101,7 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 
 		self::assertSame( 403, $exported['context']['http_status'] );
 		self::assertSame( 'email', $exported['context']['identifier_type'] );
+		self::assertSame( '', $exported['flow_id'] );
 		self::assertArrayNotHasKey( 'attempts', $exported['context'] );
 		self::assertArrayNotHasKey( 'count', $exported['context'] );
 		self::assertArrayNotHasKey( 'duration_ms', $exported['context'] );
@@ -125,6 +131,7 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 			'created_at'     => $today . ' 12:00:00',
 			'level'          => 'warning',
 			'correlation_id' => 'incident-123',
+			'flow_id'        => str_repeat( 'c', 32 ),
 			'user_id'        => $administrator,
 			'context'        => '{"http_status":403,"attempts":"123","count":"09120000000","duration_ms":9123456789,"identifier_fingerprint":"secret-fingerprint","password":"secret-password"}',
 		];
@@ -148,6 +155,7 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 'warning', $data['level_filter'] );
 		self::assertCount( 1, $data['events'] );
 		self::assertSame( 'auth.selected', $data['events'][0]['event'] );
+		self::assertSame( str_repeat( 'c', 32 ), $data['events'][0]['flow_id'] );
 		self::assertSame( 403, $data['events'][0]['context']['http_status'] );
 		self::assertArrayNotHasKey( 'attempts', $data['events'][0]['context'] );
 		self::assertArrayNotHasKey( 'count', $data['events'][0]['context'] );

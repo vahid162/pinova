@@ -38,6 +38,8 @@ Resolution returns a User ID only when the candidate is unambiguous. Multiple le
 - `pinova_rate_limits`: atomic hashed rate-limit buckets.
 - `pinova_logs` (1.2.4+): temporary structured operational events, correlation IDs, optional User IDs, and allowlisted JSON context.
 
+The additive flow schema gives `pinova_otp` and `pinova_logs` nullable indexed `flow_id` columns. New OTP records generate the ID server-side and bind it to signed JWT state; existing rows remain valid with null. The database migration coordinator advances its per-site option only after both columns and indexes exist, so an interrupted upgrade can retry and previous code ignores the added fields.
+
 Schema changes must be additive and `dbDelta()` compatible. Never alter/drop columns or indexes in `wp_users` or other core tables.
 
 Lifecycle setup is database-coordinated through `pinova_db_schema_version`; runtime code never writes activation sentinels into the plugin directory. Activation and normal startup call the same idempotent migration coordinator before services boot. Initial table creation uses WordPress `dbDelta()` so activation does not depend on PDO/Eloquent being available before the host finishes provisioning PHP extensions. Only an installation with no Pinova tables, options, or version metadata is stamped at the current version; an existing installation whose version option is missing runs legacy migrations from the baseline. A failed migration leaves the version unchanged for retry and keeps Pinova runtime integrations unloaded so native WordPress access remains available. Network-wide activation is unsupported and must fail with an administrator-facing explanation.

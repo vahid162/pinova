@@ -196,10 +196,11 @@ final class LogRepository {
 				self::table_name(),
 				[
 					'user_id' => null,
+					'flow_id' => null,
 					'context' => is_string( $encoded ) ? $encoded : '{}',
 				],
 				[ 'id' => (int) $row['id'] ],
-				[ '%d', '%s' ],
+				[ '%d', '%s', '%s' ],
 				[ '%d' ]
 			);
 
@@ -255,7 +256,7 @@ final class LogRepository {
 			// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Dynamic fixed-clause WHERE values are assembled together.
 			$wpdb->prepare(
 				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The WHERE fragment contains only fixed clauses and placeholders.
-				'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `user_id`, `context` FROM %i' . $where . ' ORDER BY `id` DESC LIMIT %d OFFSET %d',
+				'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `flow_id`, `user_id`, `context` FROM %i' . $where . ' ORDER BY `id` DESC LIMIT %d OFFSET %d',
 				array_merge( [ self::table_name() ], $values, [ $per_page, $offset ] )
 			),
 			ARRAY_A
@@ -299,7 +300,7 @@ final class LogRepository {
 			// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Dynamic fixed-clause WHERE values are assembled together.
 			$wpdb->prepare(
 				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The WHERE fragment contains only fixed clauses and placeholders.
-				'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `user_id`, `context` FROM %i' . $where . ' ORDER BY `id` DESC LIMIT %d',
+				'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `flow_id`, `user_id`, `context` FROM %i' . $where . ' ORDER BY `id` DESC LIMIT %d',
 				array_merge( [ self::table_name() ], $values )
 			),
 			ARRAY_A
@@ -360,13 +361,14 @@ final class LogRepository {
 
 	/**
 	 * @param array<string,mixed> $input
-	 * @return array{valid:bool,event:string,correlation_id:string,user_id:int,created_from:string,created_to:string}
+	 * @return array{valid:bool,event:string,correlation_id:string,flow_id:string,user_id:int,created_from:string,created_to:string}
 	 */
 	private static function filter_values( array $input ): array {
 		$filters = [
 			'valid'          => true,
 			'event'          => '',
 			'correlation_id' => '',
+			'flow_id'        => '',
 			'user_id'        => 0,
 			'created_from'   => '',
 			'created_to'     => '',
@@ -374,6 +376,7 @@ final class LogRepository {
 		foreach ( [
 			'event'          => '/\A[a-z0-9_.-]{1,100}\z/',
 			'correlation_id' => '/\A[A-Za-z0-9-]{1,64}\z/',
+			'flow_id'        => '/\A[a-f0-9]{32}\z/',
 		] as $key => $pattern ) {
 			$value = $input[ $key ] ?? '';
 			if ( '' === $value ) {
@@ -415,7 +418,7 @@ final class LogRepository {
 	}
 
 	/**
-	 * @param array{valid:bool,event:string,correlation_id:string,user_id:int,created_from:string,created_to:string} $filters
+	 * @param array{valid:bool,event:string,correlation_id:string,flow_id:string,user_id:int,created_from:string,created_to:string} $filters
 	 * @return array{string,array<int,int|string>}
 	 */
 	private static function where_clause( array $filters, string $level ): array {
@@ -425,6 +428,7 @@ final class LogRepository {
 			'level'          => $level,
 			'event'          => $filters['event'],
 			'correlation_id' => $filters['correlation_id'],
+			'flow_id'        => $filters['flow_id'],
 		] as $column => $value ) {
 			if ( '' !== $value ) {
 				$clauses[] = '`' . $column . '` = %s';

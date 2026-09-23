@@ -8,7 +8,7 @@ use Throwable;
 class Install extends \Nabik\Utils\V1\Install {
 
 	public const SCHEMA_OPTION  = 'pinova_db_schema_version';
-	public const SCHEMA_VERSION = 1;
+	public const SCHEMA_VERSION = 2;
 	public const PURGE_OPTION   = 'pinova_delete_data_on_uninstall';
 
 	/**
@@ -241,11 +241,11 @@ class Install extends \Nabik\Utils\V1\Install {
 		$rate_limits     = $wpdb->prefix . 'pinova_rate_limits';
 		$logs            = $wpdb->prefix . 'pinova_logs';
 
-		if ( ! self::database_table_exists( $otp ) ) {
-			dbDelta(
-				"CREATE TABLE {$otp} (
+		dbDelta(
+			"CREATE TABLE {$otp} (
 				id bigint unsigned NOT NULL AUTO_INCREMENT,
 				user_id bigint unsigned NULL,
+				flow_id char(32) NULL,
 				identifier varchar(255) NOT NULL,
 				code varchar(255) NOT NULL,
 				ip_address varchar(45) NOT NULL,
@@ -255,11 +255,11 @@ class Install extends \Nabik\Utils\V1\Install {
 				expires_at timestamp NULL DEFAULT NULL,
 				verified_at timestamp NULL DEFAULT NULL,
 				PRIMARY KEY  (id),
+				KEY flow_id (flow_id),
 				KEY ip_address (ip_address),
 				KEY identifier_expires (identifier(191), expires_at)
 			) {$charset_collate};"
-			);
-		}
+		);
 
 		if ( ! self::database_table_exists( $blocks ) ) {
 			dbDelta(
@@ -294,19 +294,27 @@ class Install extends \Nabik\Utils\V1\Install {
 				level varchar(12) NOT NULL,
 				event varchar(100) NOT NULL,
 				correlation_id varchar(64) NOT NULL,
+				flow_id char(32) NULL,
 				user_id bigint unsigned NULL,
 				context longtext NOT NULL,
 				PRIMARY KEY  (id),
 				KEY created_at (created_at),
 				KEY level_created (level, created_at),
 				KEY event_created (event, created_at),
-				KEY correlation_id (correlation_id)
+				KEY correlation_id (correlation_id),
+				KEY flow_id (flow_id)
 			) {$charset_collate};"
 		);
 
 		foreach ( self::table_names() as $table ) {
 			if ( ! self::database_table_exists( $table ) ) {
 				throw new RuntimeException( 'Pinova database schema is incomplete.' );
+			}
+		}
+
+		foreach ( [ $otp, $logs ] as $table ) {
+			if ( ! self::database_column_exists( $table, 'flow_id' ) || ! self::database_index_exists( $table, 'flow_id' ) ) {
+				throw new RuntimeException( 'Pinova flow schema is incomplete.' );
 			}
 		}
 	}
@@ -329,6 +337,18 @@ class Install extends \Nabik\Utils\V1\Install {
 		global $wpdb;
 
 		return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) === $table;
+	}
+
+	private static function database_column_exists( string $table, string $column ): bool {
+		global $wpdb;
+
+		return null !== $wpdb->get_row( $wpdb->prepare( 'SHOW COLUMNS FROM %i LIKE %s', $table, $column ) );
+	}
+
+	private static function database_index_exists( string $table, string $index ): bool {
+		global $wpdb;
+
+		return null !== $wpdb->get_row( $wpdb->prepare( 'SHOW INDEX FROM %i WHERE Key_name = %s', $table, $index ) );
 	}
 
 	private static function is_fresh_installation(): bool {

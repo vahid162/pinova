@@ -95,6 +95,8 @@ fi
 
 rm "${stage_dir}/composer.json" "${stage_dir}/composer.lock"
 
+# The single-quoted argument is PHP source and must not be shell-expanded.
+# shellcheck disable=SC2016
 PINOVA_BUILD_COMMIT="${build_commit}" PINOVA_RELEASE_TAG="${release_tag}" php -r '
   $metadata = [
     "build_commit" => getenv("PINOVA_BUILD_COMMIT"),

@@ -8,6 +8,7 @@ use Carbon\Carbon;
 use Pinova\API\UserAPI;
 use Pinova\Helpers\JWT;
 use Pinova\Install;
+use Pinova\Logging\BuildMetadata;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
 use Pinova\Models\OTP;
@@ -316,6 +317,7 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 			'identifier_type'        => $identifier->get_type(),
 			'identifier_fingerprint' => $fingerprint,
 		];
+		$expected    = array_merge( $expected, BuildMetadata::info() );
 		$context = json_decode( $rows[0]['context'], true );
 		self::assertIsArray( $context );
 		ksort( $expected );

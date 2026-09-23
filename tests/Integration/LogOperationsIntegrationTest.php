@@ -280,7 +280,7 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 		$buffer_level = ob_get_level();
 		ob_start();
 		try {
-			( new \ReflectionMethod( Logs::class, 'export_incident_response' ) )->invoke( new Logs() );
+			( new \ReflectionMethod( Logs::class, 'export_incident_response' ) )->invoke( new Logs(), false );
 			return (string) ob_get_clean();
 		} finally {
 			while ( ob_get_level() > $buffer_level ) {

@@ -35,7 +35,10 @@ final class Logs {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only list filters do not change state.
 		$filters          = self::request_filters( $_GET );
 		$data             = '' !== $level && ! in_array( $level, self::LEVELS, true )
-			? [ 'rows' => [], 'total' => 0 ]
+			? [
+				'rows'  => [],
+				'total' => 0,
+			]
 			: LogRepository::paginate( $page, 50, $level, $filters );
 		$pages            = max( 1, (int) ceil( $data['total'] / 50 ) );
 		$minimum_level    = (string) Pinova::get_option( 'logging.minimum_level', LogLevel::WARNING );
@@ -190,7 +193,13 @@ final class Logs {
 	 */
 	private static function request_filters( array $input ): array {
 		$filters = [];
-		foreach ( [ 'event' => 100, 'correlation_id' => 64, 'user_id' => 20, 'created_from' => 10, 'created_to' => 10 ] as $key => $max_length ) {
+		foreach ( [
+			'event'          => 100,
+			'correlation_id' => 64,
+			'user_id'        => 20,
+			'created_from'   => 10,
+			'created_to'     => 10,
+		] as $key => $max_length ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Filters are read-only; export checks its nonce separately.
 			$value           = wp_unslash( array_key_exists( $key, $input ) ? $input[ $key ] : '' );
 			$filters[ $key ] = ( is_string( $value ) || is_int( $value ) ) && $max_length >= strlen( (string) $value )
@@ -275,7 +284,7 @@ final class Logs {
 	}
 
 	/** Emit the response separately so integration tests can inspect it without terminating PHPUnit. */
-	private function export_incident_response(): void {
+	private function export_incident_response( bool $send_headers = true ): void {
 		if ( ! current_user_can( self::CAPABILITY ) ) {
 			wp_die( esc_html__( 'شما اجازه خروجی‌گرفتن از گزارش‌های پینوا را ندارید.', 'pinova' ), '', [ 'response' => 403 ] );
 		}
@@ -289,8 +298,8 @@ final class Logs {
 		if ( ! LogRepository::valid_filters( $filters ) ) {
 			wp_die( esc_html__( 'فیلترهای خروجی نامعتبر هستند.', 'pinova' ), '', [ 'response' => 400 ] );
 		}
-		$from                    = strtotime( $filters['created_from'] . ' UTC' );
-		$to                      = strtotime( $filters['created_to'] . ' UTC' );
+		$from = strtotime( $filters['created_from'] . ' UTC' );
+		$to   = strtotime( $filters['created_to'] . ' UTC' );
 		if ( false === $from || false === $to || gmdate( 'Y-m-d', $from ) !== $filters['created_from'] || gmdate( 'Y-m-d', $to ) !== $filters['created_to'] || $from > $to || $to - $from >= 7 * DAY_IN_SECONDS || $to > time() ) {
 			wp_die( esc_html__( 'بازهٔ خروجی باید معتبر و حداکثر هفت روز باشد.', 'pinova' ), '', [ 'response' => 400 ] );
 		}
@@ -316,10 +325,12 @@ final class Logs {
 			'retention_days'      => LogRepository::retention_days(),
 			'selected_range'      => [ $filters['created_from'], $filters['created_to'] ],
 		];
-		nocache_headers();
-		header( 'Content-Type: application/json; charset=utf-8' );
-		header( 'Content-Disposition: attachment; filename="pinova-incident-' . $today . '.json"' );
-		header( 'X-Content-Type-Options: nosniff' );
+		if ( $send_headers ) {
+			nocache_headers();
+			header( 'Content-Type: application/json; charset=utf-8' );
+			header( 'Content-Disposition: attachment; filename="pinova-incident-' . $today . '.json"' );
+			header( 'X-Content-Type-Options: nosniff' );
+		}
 		$prefix = wp_json_encode( $metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 		$prefix = is_string( $prefix ) ? substr( $prefix, 0, -1 ) . ',"events":[' : '{"events":[';
 		echo $prefix; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON encoded above.

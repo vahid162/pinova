@@ -83,6 +83,22 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_queued_delivery_column_migrates_additively_from_schema_two(): void {
+		global $wpdb;
+
+		$table = $wpdb->prefix . 'pinova_rate_limits';
+		try {
+			self::assertNotFalse( $wpdb->query( $wpdb->prepare( 'ALTER TABLE %i DROP COLUMN payload', $table ) ) );
+			update_option( Install::SCHEMA_OPTION, 2, false );
+			self::assertTrue( Install::migrate() );
+			self::assertSame( Install::SCHEMA_VERSION, (int) get_option( Install::SCHEMA_OPTION ) );
+			self::assertNotNull( $wpdb->get_row( $wpdb->prepare( 'SHOW COLUMNS FROM %i LIKE %s', $table, 'payload' ) ) );
+		} finally {
+			Install::create_tables();
+			update_option( Install::SCHEMA_OPTION, Install::SCHEMA_VERSION, false );
+		}
+	}
+
 	public function test_activation_does_not_write_to_plugin_directory(): void {
 		$sentinel = PINOVA_DIR . '/.activated';
 		self::assertFileDoesNotExist( $sentinel );
@@ -182,6 +198,110 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 			add_filter( 'query', [ $this, '_create_temporary_tables' ] );
 			add_filter( 'query', [ $this, '_drop_temporary_tables' ] );
 		}
+	}
+
+	public function test_opt_in_uninstall_stops_before_dropping_tables_when_option_discovery_fails(): void {
+		global $wpdb;
+
+		update_option( Install::PURGE_OPTION, 1, false );
+		update_option( 'pinova_test_owned_option', 'keep-for-retry', false );
+		$fail_option_read = static function ( string $query ) use ( $wpdb ): string {
+			if ( str_starts_with( $query, 'SELECT option_name FROM ' ) && str_contains( $query, 'option_name LIKE' ) ) {
+				return "SELECT pinova_missing_column FROM {$wpdb->options} LIMIT 1";
+			}
+
+			return $query;
+		};
+
+		remove_filter( 'query', [ $this, '_create_temporary_tables' ] );
+		remove_filter( 'query', [ $this, '_drop_temporary_tables' ] );
+		$previous_suppression = $wpdb->suppress_errors( true );
+		try {
+			add_filter( 'query', $fail_option_read );
+			try {
+				$this->assert_purge_fails();
+			} finally {
+				remove_filter( 'query', $fail_option_read );
+			}
+
+			$this->assert_tables_exist();
+			self::assertSame( 'keep-for-retry', get_option( 'pinova_test_owned_option' ) );
+			self::assertTrue( (bool) get_option( Install::PURGE_OPTION, false ) );
+		} finally {
+			$wpdb->suppress_errors( $previous_suppression );
+			Install::create_tables();
+			update_option( Install::SCHEMA_OPTION, Install::SCHEMA_VERSION, false );
+			delete_option( 'pinova_test_owned_option' );
+			delete_option( Install::PURGE_OPTION );
+			add_filter( 'query', [ $this, '_create_temporary_tables' ] );
+			add_filter( 'query', [ $this, '_drop_temporary_tables' ] );
+		}
+	}
+
+	/** @dataProvider failed_option_deletions */
+	public function test_opt_in_uninstall_recovers_and_retries_after_option_deletion_fails( string $failed_option ): void {
+		global $wpdb;
+
+		$user_id = self::factory()->user->create();
+		update_user_meta( $user_id, 'pinova_mobile', '09120000000' );
+		update_option( Install::PURGE_OPTION, 1, false );
+		update_option( 'pinova_test_owned_option', 'delete-on-retry', false );
+		$fail_option_delete = static function ( string $query ) use ( $wpdb, $failed_option ): string {
+			if ( str_starts_with( $query, 'DELETE FROM ' ) && str_contains( $query, "'{$failed_option}'" ) ) {
+				return "DELETE FROM {$wpdb->options} WHERE pinova_missing_column = 1";
+			}
+
+			return $query;
+		};
+
+		remove_filter( 'query', [ $this, '_create_temporary_tables' ] );
+		remove_filter( 'query', [ $this, '_drop_temporary_tables' ] );
+		$previous_suppression = $wpdb->suppress_errors( true );
+		try {
+			add_filter( 'query', $fail_option_delete );
+			try {
+				$this->assert_purge_fails();
+			} finally {
+				remove_filter( 'query', $fail_option_delete );
+			}
+
+			self::assertTrue( (bool) get_option( Install::PURGE_OPTION, false ) );
+			self::assertTrue( Install::migrate() );
+			$this->assert_tables_exist();
+			self::assertTrue( Install::purge_current_site_data() );
+			self::assertFalse( get_option( Install::PURGE_OPTION, false ) );
+			self::assertFalse( get_option( 'pinova_test_owned_option', false ) );
+			self::assertSame( '09120000000', get_user_meta( $user_id, 'pinova_mobile', true ) );
+		} finally {
+			$wpdb->suppress_errors( $previous_suppression );
+			Install::create_tables();
+			update_option( Install::SCHEMA_OPTION, Install::SCHEMA_VERSION, false );
+			delete_option( 'pinova_test_owned_option' );
+			delete_option( Install::PURGE_OPTION );
+			wp_delete_user( $user_id );
+			add_filter( 'query', [ $this, '_create_temporary_tables' ] );
+			add_filter( 'query', [ $this, '_drop_temporary_tables' ] );
+		}
+	}
+
+	/** @return array<string, array{string}> */
+	public function failed_option_deletions(): array {
+		return [
+			'migration checkpoint' => [ Install::SCHEMA_OPTION ],
+			'ordinary option' => [ 'pinova_test_owned_option' ],
+			'purge option' => [ Install::PURGE_OPTION ],
+		];
+	}
+
+	private function assert_purge_fails(): void {
+		$failure = null;
+		try {
+			Install::purge_current_site_data();
+		} catch ( \RuntimeException $exception ) {
+			$failure = $exception;
+		}
+
+		self::assertInstanceOf( \RuntimeException::class, $failure );
 	}
 
 	private function assert_tables_exist(): void {

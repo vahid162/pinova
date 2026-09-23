@@ -8,7 +8,7 @@ use Throwable;
 class Install extends \Nabik\Utils\V1\Install {
 
 	public const SCHEMA_OPTION  = 'pinova_db_schema_version';
-	public const SCHEMA_VERSION = 2;
+	public const SCHEMA_VERSION = 3;
 	public const PURGE_OPTION   = 'pinova_delete_data_on_uninstall';
 
 	/**
@@ -141,19 +141,6 @@ class Install extends \Nabik\Utils\V1\Install {
 
 		global $wpdb;
 
-		self::clear_scheduled_hooks();
-
-		foreach ( self::table_names() as $table ) {
-			if ( ! preg_match( '/\A[A-Za-z0-9_]+\z/', $table ) ) {
-				throw new RuntimeException( 'Pinova generated an invalid database table name.' );
-			}
-
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- WordPress table names are internally generated and validated above.
-			if ( false === $wpdb->query( "DROP TABLE IF EXISTS `{$table}`" ) ) {
-				throw new RuntimeException( 'Pinova could not remove its operational database tables.' );
-			}
-		}
-
 		$patterns = [
 			$wpdb->esc_like( 'pinova_' ) . '%',
 			$wpdb->esc_like( '_transient_pinova_' ) . '%',
@@ -167,9 +154,36 @@ class Install extends \Nabik\Utils\V1\Install {
 			array_merge( [ $wpdb->options ], $patterns )
 		);
 		$options  = $wpdb->get_col( $query ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Prepared immediately above.
+		if ( $wpdb->last_error || ! in_array( self::PURGE_OPTION, $options, true ) ) {
+			throw new RuntimeException( 'Pinova could not inspect its operational options.' );
+		}
+
+		// Clear the migration checkpoint before any DROP. An interrupted purge then
+		// takes the ordinary idempotent install path on the next plugin startup.
+		if ( in_array( self::SCHEMA_OPTION, $options, true ) ) {
+			self::delete_option_verified( self::SCHEMA_OPTION );
+			$options = array_values( array_diff( $options, [ self::SCHEMA_OPTION ] ) );
+		}
+
+		self::clear_scheduled_hooks();
+
+		foreach ( self::table_names() as $table ) {
+			if ( ! preg_match( '/\A[A-Za-z0-9_]+\z/', $table ) ) {
+				throw new RuntimeException( 'Pinova generated an invalid database table name.' );
+			}
+
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- WordPress table names are internally generated and validated above.
+			if ( false === $wpdb->query( "DROP TABLE IF EXISTS `{$table}`" ) ) {
+				throw new RuntimeException( 'Pinova could not remove its operational database tables.' );
+			}
+		}
+
+		// Keep the opt-in until every other deletion succeeds, so an interrupted purge can be retried.
+		$options = array_values( array_diff( $options, [ self::PURGE_OPTION ] ) );
+		$options[] = self::PURGE_OPTION;
 
 		foreach ( $options as $option ) {
-			delete_option( (string) $option );
+			self::delete_option_verified( (string) $option );
 		}
 
 		return true;
@@ -182,6 +196,7 @@ class Install extends \Nabik\Utils\V1\Install {
 		$hooks = [
 			'pinova_rate_limit_cleanup',
 			'pinova_logging_cleanup',
+			'pinova_otp_delivery',
 		];
 
 		return array_values( array_unique( array_filter( (array) apply_filters( 'pinova_scheduled_hooks', $hooks ), 'is_string' ) ) );
@@ -281,6 +296,7 @@ class Install extends \Nabik\Utils\V1\Install {
 				hits int unsigned NOT NULL DEFAULT 0,
 				reset_at datetime NOT NULL,
 				updated_at datetime NOT NULL,
+				payload longtext NULL,
 				PRIMARY KEY  (bucket_key),
 				KEY reset_at (reset_at),
 				KEY scope_reset (scope, reset_at)
@@ -316,6 +332,9 @@ class Install extends \Nabik\Utils\V1\Install {
 			if ( ! self::database_column_exists( $table, 'flow_id' ) || ! self::database_index_exists( $table, 'flow_id' ) ) {
 				throw new RuntimeException( 'Pinova flow schema is incomplete.' );
 			}
+		}
+		if ( ! self::database_column_exists( $rate_limits, 'payload' ) ) {
+			throw new RuntimeException( 'Pinova queued-delivery schema is incomplete.' );
 		}
 	}
 
@@ -385,5 +404,17 @@ class Install extends \Nabik\Utils\V1\Install {
 		}
 
 		throw new RuntimeException( 'Pinova migration state could not be persisted.' );
+	}
+
+	private static function delete_option_verified( string $option ): void {
+		if ( delete_option( $option ) ) {
+			return;
+		}
+
+		// WordPress may cache a missing option even when its database deletion failed.
+		wp_cache_delete( $option, 'options' );
+		wp_cache_delete( 'notoptions', 'options' );
+		wp_cache_delete( 'alloptions', 'options' );
+		throw new RuntimeException( 'Pinova could not remove its operational options.' );
 	}
 }

@@ -3,11 +3,10 @@
 
 namespace Pinova\API;
 
-use Carbon\Carbon;
 use Exception;
 use Pinova\Exceptions\BlockedException;
 use Pinova\Exceptions\RateLimitException;
-use Pinova\Exceptions\SendOTPException;
+use Pinova\Exceptions\RateLimitUnavailableException;
 use Pinova\Helper;
 use Pinova\Helpers\IP;
 use Pinova\Helpers\JWT;
@@ -15,8 +14,6 @@ use Pinova\Logging\EventThrottle;
 use Pinova\Logging\Logger;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
-use Pinova\Pinova;
-use Pinova\Services\ChannelService;
 use Pinova\Services\FirewallService;
 use Pinova\Services\OTPService;
 use Pinova\Services\RateLimitService;
@@ -148,11 +145,7 @@ class UserAPI extends RestAPI {
 		$force_otp  = boolval( $request->get_param( 'force_otp' ) );
 		$forget     = boolval( $request->get_param( 'forget' ) );
 
-		$user_id      = UserService::match( $identifier );
-		$user         = $user_id ? get_userdata( $user_id ) : false;
-		$native_only  = $user instanceof WP_User && UserService::is_native_only( $user );
 		$login_method = ( $identifier->is_mobile() || $force_otp || $forget ) ? 'otp' : 'password';
-		$otp_type     = $forget ? OTP::TYPE_FORGET : ( $user_id ? OTP::TYPE_LOGIN : OTP::TYPE_REGISTER );
 		$data         = [
 			'login_method' => $login_method,
 			'ttl'          => JWT::DEFAULT_TTL,
@@ -165,54 +158,18 @@ class UserAPI extends RestAPI {
 		if ( $identifier->is_username() ) {
 			return self::uniform_failure( $started );
 		}
-
-		if ( $native_only ) {
-			$data['jwt'] = self::decoy_otp_jwt();
-			self::minimum_response_time( $started );
-
-			return self::response(
-				true,
-				__( 'اگر حسابی با این شناسه وجود داشته باشد، کد تأیید ارسال می‌شود.', 'pinova' ),
-				$data
-			);
-		}
-
-		if ( ! $user_id && ( $forget || ! Pinova::users_can_register() || $identifier->is_email() ) ) {
-			$data['jwt'] = self::decoy_otp_jwt();
-			self::minimum_response_time( $started );
-
-			return self::response(
-				true,
-				__( 'اگر حسابی با این شناسه وجود داشته باشد، کد تأیید ارسال می‌شود.', 'pinova' ),
-				$data
-			);
-		}
-
-		/** @var OTP|null $current_otp */
-		$current_otp = OTP::query()
-			->where( 'identifier', $identifier->get_value() )
-			->where( 'type', $otp_type )
-			->whereNull( 'verified_at' )
-			->where( 'expires_at', '>', Carbon::now() )
-			->first();
-
-		if ( $current_otp ) {
-			$ttl         = max( 1, $current_otp->expires_at->diffInSeconds() );
-			$data['ttl'] = $ttl;
-			$data['jwt'] = OTPService::signed_state( $current_otp, $ttl );
-
-			return self::response( true, ChannelService::get_message( $current_otp->channels, $identifier ), $data );
-		}
-
+		$message = __( 'اگر ادامه با این شناسه مجاز باشد، کد تأیید ارسال می‌شود.', 'pinova' );
 		try {
-			[ $data['jwt'], $successful_channels ] = OTPService::create(
-				$identifier,
-				ChannelService::get_channels( $identifier ),
-				$otp_type,
-				$user_id
-			);
-			$message                               = ChannelService::get_message( $successful_channels, $identifier );
+			RateLimitService::otp( IP::get(), $identifier->get_value() );
+			$decoy_flow = RateLimitService::decoy_flow( $identifier->get_value(), $forget ? 'forget' : 'authenticate', IP::get() );
+			$flow_args  = [ $decoy_flow[0] ];
+			if ( ! wp_next_scheduled( 'pinova_otp_delivery', $flow_args )
+				&& true !== wp_schedule_single_event( time(), 'pinova_otp_delivery', $flow_args ) ) {
+				throw new RateLimitUnavailableException( 'OTP delivery could not be scheduled.' );
+			}
+			add_action( 'shutdown', [ OTPService::class, 'spawn_queued_delivery' ], 100 );
 		} catch ( RateLimitException $e ) {
+			self::minimum_response_time( $started );
 			return self::response(
 				false,
 				__( 'تعداد درخواست‌ها بیش از حد مجاز است. کمی بعد دوباره تلاش کنید.', 'pinova' ),
@@ -220,21 +177,13 @@ class UserAPI extends RestAPI {
 				429,
 				[ 'Retry-After' => $e->get_retry_after() ]
 			);
-		} catch ( SendOTPException $e ) {
-			return self::response( false, $e->getMessage(), [], 503 );
-		} catch ( Exception $e ) {
-			Logger::instance()->error(
-				'auth.request_failed',
-				[
-					'identifier_type'        => $identifier->get_type(),
-					'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
-					'operation'              => 'authenticate',
-					'exception'              => $e,
-				]
-			);
-			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 500 );
+		} catch ( RateLimitUnavailableException $e ) {
+			self::minimum_response_time( $started );
+			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 503 );
 		}
 
+		[ $data['jwt'], $data['ttl'] ] = self::decoy_otp_state( $decoy_flow );
+		self::minimum_response_time( $started );
 		return self::response( true, $message, $data );
 	}
 
@@ -260,6 +209,8 @@ class UserAPI extends RestAPI {
 				429,
 				[ 'Retry-After' => $e->get_retry_after() ]
 			);
+		} catch ( RateLimitUnavailableException $e ) {
+			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 503 );
 		}
 
 		$user_id = UserService::match( $identifier );
@@ -313,6 +264,7 @@ class UserAPI extends RestAPI {
 	 * @return WP_REST_Response
 	 */
 	public function login_otp( WP_REST_Request $request ): WP_REST_Response {
+		$started = microtime( true );
 		if ( self::has_unsigned_flow_override( $request ) ) {
 			return self::response( false, __( 'درخواست معتبر نمی‌باشد.', 'pinova' ), [], 400 );
 		}
@@ -325,6 +277,7 @@ class UserAPI extends RestAPI {
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
+			self::minimum_response_time( $started );
 			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
@@ -343,6 +296,7 @@ class UserAPI extends RestAPI {
 	 * @return WP_REST_Response
 	 */
 	public function forgot_verify( WP_REST_Request $request ): WP_REST_Response {
+		$started = microtime( true );
 		if ( self::has_unsigned_flow_override( $request ) ) {
 			return self::response( false, __( 'درخواست معتبر نمی‌باشد.', 'pinova' ), [], 400 );
 		}
@@ -355,6 +309,7 @@ class UserAPI extends RestAPI {
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
+			self::minimum_response_time( $started );
 			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
@@ -595,13 +550,13 @@ class UserAPI extends RestAPI {
 		return parent::response( $success, $message, $data, $status, $headers );
 	}
 
-	private static function decoy_otp_jwt(): string {
-		return JWT::encode(
-			[
-				'otp_id' => 0,
-				'nonce'  => wp_generate_password( 20, false ),
-			]
-		);
+	/**
+	 * @param array{0:string,1:int} $decoy_flow
+	 * @return array{0:string,1:int}
+	 */
+	private static function decoy_otp_state( array $decoy_flow ): array {
+		$ttl = max( 1, $decoy_flow[1] - time() );
+		return [ JWT::encode( [ 'flow_id' => $decoy_flow[0] ], $ttl ), $ttl ];
 	}
 
 	private static function uniform_failure( float $started ): WP_REST_Response {

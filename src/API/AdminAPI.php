@@ -9,6 +9,7 @@ use Pinova\Objects\Identifier;
 use Pinova\Services\OTPService;
 use Pinova\Services\UserService;
 use Pinova\Services\ValidationService;
+use RuntimeException;
 use Throwable;
 use WP_REST_Request;
 use WP_REST_Response;
@@ -54,9 +55,11 @@ class AdminAPI extends RestAPI {
 
 		try {
 
-			SMS::send_code( $identifier->get_value(), $code );
+			if ( ! SMS::send_code( $identifier->get_value(), $code ) ) {
+				throw new RuntimeException( 'The SMS provider did not accept the test message.' );
+			}
 
-			$message = sprintf( 'کد تایید «%d» با موفقیت پیامک شد.', $code );
+			$message = __( 'کد تأیید با موفقیت پیامک شد.', 'pinova' );
 			$success = true;
 			Logger::instance()->audit(
 				'notice',
@@ -69,9 +72,7 @@ class AdminAPI extends RestAPI {
 			);
 
 		} catch ( Throwable $e ) {
-			$message = $e instanceof \Exception
-				? $e->getMessage()
-				: __( 'خطای داخلی هنگام ارسال پیامک رخ داده است.', 'pinova' );
+			$message = __( 'خطای داخلی هنگام ارسال پیامک رخ داده است.', 'pinova' );
 			$success = false;
 			Logger::instance()->audit(
 				'error',

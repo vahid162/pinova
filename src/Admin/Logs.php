@@ -108,7 +108,7 @@ final class Logs {
 
 			<?php // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Informational redirect flag only. ?>
 			<?php if ( isset( $_GET['cleared'] ) ) : ?>
-				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'گزارش‌های قبلی پاک شدند و رخداد مدیریتی پاک‌سازی ثبت شد.', 'pinova' ); ?></p></div>
+				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'گزارش‌های قبلی پاک شدند.', 'pinova' ); ?></p></div>
 			<?php endif; ?>
 
 			<form method="get">
@@ -162,16 +162,16 @@ final class Logs {
 				<?php else : ?>
 					<?php foreach ( $data['rows'] as $row ) : ?>
 						<?php
-						$context = self::redact_incident_row( $row )['context'];
-						$pretty  = wp_json_encode( $context, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+						$display = self::redact_incident_row( $row );
+						$pretty  = wp_json_encode( $display['context'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 						?>
 						<tr>
-							<td><?php echo esc_html( get_date_from_gmt( (string) $row['created_at'], 'Y-m-d H:i:s' ) ); ?></td>
-							<td><code><?php echo esc_html( (string) $row['level'] ); ?></code></td>
-							<td><code><?php echo esc_html( (string) $row['event'] ); ?></code></td>
-							<td><code><?php echo esc_html( (string) $row['correlation_id'] ); ?></code></td>
-							<td><code><?php echo esc_html( (string) ( $row['flow_id'] ?? '' ) ); ?></code></td>
-							<td><?php echo $row['user_id'] ? esc_html( (string) $row['user_id'] ) : '&mdash;'; ?></td>
+							<td><?php echo esc_html( get_date_from_gmt( $display['created_at'], 'Y-m-d H:i:s' ) ); ?></td>
+							<td><code><?php echo esc_html( $display['level'] ); ?></code></td>
+							<td><code><?php echo esc_html( $display['event'] ); ?></code></td>
+							<td><code><?php echo esc_html( $display['correlation_id'] ); ?></code></td>
+							<td><code><?php echo esc_html( $display['flow_id'] ); ?></code></td>
+							<td><?php echo $display['user_id'] ? esc_html( (string) $display['user_id'] ) : '&mdash;'; ?></td>
 							<td><code dir="ltr"><?php echo esc_html( is_string( $pretty ) ? $pretty : '{}' ); ?></code></td>
 						</tr>
 					<?php endforeach; ?>
@@ -291,8 +291,8 @@ final class Logs {
 		return [
 			'created_at'     => preg_match( '/\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\z/', (string) ( $row['created_at'] ?? '' ) ) ? $row['created_at'] : '',
 			'level'          => in_array( $row['level'] ?? '', [ 'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency' ], true ) ? $row['level'] : 'unknown',
-			'event'          => preg_match( '/\A[a-z0-9_.-]{1,100}\z/', (string) ( $row['event'] ?? '' ) ) ? $row['event'] : 'logging.unknown_event',
-			'correlation_id' => preg_match( '/\A[A-Za-z0-9-]{1,64}\z/', (string) ( $row['correlation_id'] ?? '' ) ) ? $row['correlation_id'] : '',
+			'event'          => LogRepository::redact_event( $row['event'] ?? null ),
+			'correlation_id' => LogRepository::redact_correlation_id( $row['correlation_id'] ?? null ),
 			'flow_id'        => preg_match( '/\A[a-f0-9]{32}\z/', (string) ( $row['flow_id'] ?? '' ) ) ? $row['flow_id'] : '',
 			'user_id'        => max( 0, (int) ( $row['user_id'] ?? 0 ) ),
 			'context'        => $safe,
@@ -405,7 +405,9 @@ final class Logs {
 		}
 
 		check_admin_referer( 'pinova_clear_logs' );
-		LogRepository::delete_all();
+		if ( false === LogRepository::delete_all() ) {
+			wp_die( esc_html__( 'پاک‌سازی گزارش‌های پینوا انجام نشد. پایگاه‌داده را بررسی کنید و دوباره تلاش کنید.', 'pinova' ), '', [ 'response' => 503 ] );
+		}
 		Logger::instance()->audit(
 			'warning',
 			'logging.cleared',

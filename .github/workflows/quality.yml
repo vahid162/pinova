@@ -32,6 +32,8 @@ jobs:
         run: php tools/check-ai-governance.php
       - name: Verify release package content policy
         run: bash tests/check-package-content.sh
+      - name: Verify release SBOM inventory policy
+        run: bash tests/check-sbom-content.sh
       - name: Require Pinova skill synchronization
         env:
           PINOVA_SKILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}

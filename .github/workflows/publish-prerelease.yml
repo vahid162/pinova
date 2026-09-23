@@ -171,6 +171,9 @@ jobs:
 
       - name: Generate the release SBOM
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        env:
+          # A directory scan otherwise misses Composer's installed.json in this package.
+          SYFT_SELECT_CATALOGERS: '+php-composer-installed-cataloger'
         with:
           path: .build/pinova
           format: spdx-json
@@ -192,7 +195,7 @@ jobs:
             '.creationInfo.created = "2000-01-01T00:00:00Z" | .documentNamespace = $namespace' \
             "${sbom_path}" > "${normalized_sbom}"
           mv "${normalized_sbom}" "${sbom_path}"
-          jq -e '.spdxVersion == "SPDX-2.3" and .SPDXID == "SPDXRef-DOCUMENT"' "${sbom_path}" >/dev/null
+          bash tools/check-sbom-content.sh ".build/pinova-${version}.zip" "${sbom_path}"
           (
             cd .build
             sha256sum "pinova-${version}.spdx.json" > "pinova-${version}.spdx.json.sha256"
@@ -352,7 +355,7 @@ jobs:
             sha256sum -c "pinova-${version}.spdx.json.sha256"
             unzip -tq "pinova-${version}.zip"
             unzip -Z1 "pinova-${version}.zip" | awk 'index($0, "pinova/") != 1 { bad = 1 } END { exit bad }'
-            jq -e '.spdxVersion == "SPDX-2.3" and .SPDXID == "SPDXRef-DOCUMENT"' "pinova-${version}.spdx.json" >/dev/null
+            bash "${GITHUB_WORKSPACE}/tools/check-sbom-content.sh" "pinova-${version}.zip" "pinova-${version}.spdx.json"
           )
           cmp ".build/pinova-${version}.zip" "${verify_dir}/pinova-${version}.zip"
           cmp ".build/pinova-${version}.zip.sha256" "${verify_dir}/pinova-${version}.zip.sha256"

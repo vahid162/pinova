@@ -5,11 +5,14 @@ project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fixture_dir="$(mktemp -d)"
 trap 'rm -rf -- "${fixture_dir}"' EXIT
 
-mkdir -p "${fixture_dir}/pinova/vendor/composer" "${fixture_dir}/pinova/src"
+mkdir -p "${fixture_dir}/pinova/vendor/composer" "${fixture_dir}/pinova/vendor/package/src" "${fixture_dir}/pinova/src"
 touch "${fixture_dir}/pinova/pinova.php" "${fixture_dir}/pinova/readme.txt" \
   "${fixture_dir}/pinova/LICENSE" "${fixture_dir}/pinova/uninstall.php" \
   "${fixture_dir}/pinova/build-info.json" "${fixture_dir}/pinova/vendor/autoload.php" \
   "${fixture_dir}/pinova/vendor/composer/autoload_files.php" \
+  "${fixture_dir}/pinova/vendor/package/LICENSE" \
+  "${fixture_dir}/pinova/vendor/package/composer.json" \
+  "${fixture_dir}/pinova/vendor/package/src/Runtime.php" \
   "${fixture_dir}/pinova/src/Plugin.php"
 
 make_zip() {
@@ -34,7 +37,15 @@ for forbidden in \
   pinova/assets/css/index.scss \
   pinova/assets/css/index.css.map \
   pinova/vendor/package/.github/workflows/ci.yml \
-  pinova/vendor/package/tests/fixture.php; do
+  pinova/vendor/package/tests/fixture.php \
+  pinova/vendor/.gitignore \
+  pinova/vendor/package/.gitignore \
+  pinova/vendor/package/.gitattributes \
+  pinova/vendor/package/.editorconfig \
+  pinova/vendor/package/CONTRIBUTING.md \
+  pinova/vendor/package/phpunit.xml.dist \
+  pinova/vendor/package/phpstan.neon \
+  pinova/vendor/package/psalm.xml; do
   mkdir -p "${fixture_dir}/$(dirname "${forbidden}")"
   touch "${fixture_dir}/${forbidden}"
   make_zip

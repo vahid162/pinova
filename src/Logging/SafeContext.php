@@ -107,6 +107,13 @@ final class SafeContext {
 			}
 		}
 
+		if ( isset( $context['changed_keys'] ) && is_array( $context['changed_keys'] ) ) {
+			$keys = SettingsAudit::safe_keys( $context['changed_keys'] );
+			if ( $keys ) {
+				$safe['changed_keys'] = $keys;
+			}
+		}
+
 		if ( isset( $context['exception'] ) && $context['exception'] instanceof Throwable ) {
 			$safe['exception_class'] = get_class( $context['exception'] );
 			$code                    = $this->sanitize_exception_code( $context['exception']->getCode() );

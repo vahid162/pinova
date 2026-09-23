@@ -138,6 +138,8 @@ jobs:
 
       - name: Build twice and verify reproducibility
         shell: bash
+        env:
+          PINOVA_RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
           version="${{ steps.release.outputs.version }}"
@@ -151,6 +153,10 @@ jobs:
           TZ=America/Adak composer build
           cmp "${first_zip}" "${zip_path}"
           unzip -tq "${zip_path}"
+          unzip -p "${zip_path}" pinova/build-info.json | jq -e \
+            --arg commit "${RELEASE_SHA}" \
+            --arg tag "${PINOVA_RELEASE_TAG}" \
+            '.build_commit == $commit and .package_identity == "pinova-release-zip" and .release_tag == $tag' >/dev/null
           if unzip -Z1 "${zip_path}" | awk 'index($0, "pinova/") != 1 { bad = 1 } END { exit bad }'; then
             :
           else

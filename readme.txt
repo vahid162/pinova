@@ -37,6 +37,7 @@ License URI: https://www.gnu.org/licenses/gpl-3.0.html
 * پیامک ووکامرس فارسی: شماره مقصد و پیام را به درگاه منتخب مدیر می‌سپارد. [صفحه افزونه](https://wordpress.org/plugins/persian-woocommerce-sms/)
 
 خروجی حریم خصوصی فقط موبایل پروفایل و کد رخداد، زمان و Correlation ID مجاز را شامل می‌شود. OTP، رمز، Token، API Key، Fingerprint و Context لاگ صادر نمی‌شوند. Eraser متای موبایل و OTPهای موقت را حذف و پیوند شخصی گزارش را ناشناس می‌کند؛ واقعیت غیرهویتی رخداد باقی می‌ماند.
+خروجی رخداد مدیر از Exporter حریم خصوصی جداست؛ با Nonce، سقف محدود و حذف دادهٔ حساس ارائه می‌شود.
 
 == Installation ==
 

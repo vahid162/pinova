@@ -8,6 +8,7 @@ use Carbon\Carbon;
 use Pinova\API\UserAPI;
 use Pinova\Helpers\JWT;
 use Pinova\Install;
+use Pinova\Logging\BuildMetadata;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
 use Pinova\Models\OTP;
@@ -282,7 +283,7 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		$context = json_decode( $rows[0]['context'], true );
 		self::assertSame( $reason, $context['reason'] );
 		self::assertArrayHasKey( 'exception_class', $context );
-		self::assertSame( [ 'reason', 'exception_class', 'exception_code' ], array_keys( $context ) );
+		self::assertSame( [ 'reason', 'exception_class', 'exception_code' ], array_values( array_diff( array_keys( $context ), [ 'build_commit', 'package_identity', 'release_tag' ] ) ) );
 		self::assertStringNotContainsString( 'untrusted-otp@example.test', $rows[0]['context'] );
 		self::assertStringNotContainsString( $jwt, $rows[0]['context'] );
 	}
@@ -316,6 +317,7 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 			'identifier_type'        => $identifier->get_type(),
 			'identifier_fingerprint' => $fingerprint,
 		];
+		$expected    = array_merge( $expected, BuildMetadata::info() );
 		$context = json_decode( $rows[0]['context'], true );
 		self::assertIsArray( $context );
 		ksort( $expected );

@@ -606,10 +606,55 @@ test('checkout modal remains dismissible while an authentication request is pend
         // WooCommerce may replace the login-toggle fragment while the request is pending.
         // Focus restoration must resolve the live replacement rather than the detached opener.
         await opener.evaluate(element => element.replaceWith(element.cloneNode(true)));
+        await page.evaluate(() => {
+            const modal = document.querySelector('#pinovaLoginModal');
+            const state = modal._x_dataStack[0];
+            const originalFocus = HTMLElement.prototype.focus;
+            window.pinovaFocusProbe = {
+                originalFocus,
+                returnFocusMatches: state.returnFocusElement?.matches('.showlogin') || false,
+                returnFocusConnected: state.returnFocusElement?.isConnected ?? null,
+                attempted: [],
+            };
+            HTMLElement.prototype.focus = function (...args) {
+                if (this.matches('.showlogin')) {
+                    const result = originalFocus.apply(this, args);
+                    window.pinovaFocusProbe.attempted.push({
+                        connected: this.isConnected,
+                        inertAncestor: Boolean(this.closest('[inert]')),
+                        focused: document.activeElement === this,
+                    });
+                    return result;
+                }
+                return originalFocus.apply(this, args);
+            };
+        });
         await closeButton.click();
 
         await expect(modalViewport).toBeHidden();
-        await expect(opener).toBeFocused();
+        try {
+            await expect(opener).toBeFocused();
+        } catch (error) {
+            const diagnostics = await page.evaluate(() => {
+                const state = document.querySelector('#pinovaLoginModal')._x_dataStack[0];
+                const probe = window.pinovaFocusProbe;
+                return {
+                    returnFocusMatches: probe.returnFocusMatches,
+                    returnFocusConnected: probe.returnFocusConnected,
+                    attempted: probe.attempted,
+                    focusSequence: state.focusSequence,
+                    modalIsOpen: state.modalIsOpen,
+                    activeIsOpener: document.activeElement === document.querySelector('.showlogin'),
+                    openerInert: Boolean(document.querySelector('.showlogin')?.closest('[inert]')),
+                };
+            });
+            throw new Error(`${error.message}\nFocus diagnostics: ${JSON.stringify(diagnostics)}`);
+        } finally {
+            await page.evaluate(() => {
+                HTMLElement.prototype.focus = window.pinovaFocusProbe.originalFocus;
+                delete window.pinovaFocusProbe;
+            });
+        }
 
         const closedState = await page.evaluate(() => {
             const modal = document.querySelector('#pinovaLoginModal');

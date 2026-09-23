@@ -30,32 +30,9 @@ fi
 rm -rf "${build_dir}"
 mkdir -p "${stage_dir}"
 
-git -C "${project_dir}" archive --format=tar "${build_commit}" | tar -C "${stage_dir}" \
-  --exclude='.git' \
-  --exclude='.github' \
-  --exclude='.agents' \
-  --exclude='.gitignore' \
-  --exclude='.build' \
-  --exclude='build-info.json' \
-  --exclude='.phpstan.cache' \
-  --exclude='.phpunit.result.cache' \
-  --exclude='node_modules' \
-  --exclude='playwright-report' \
-  --exclude='test-results' \
-  --exclude='vendor' \
-  --exclude='tests' \
-  --exclude='tools' \
-  --exclude='package.json' \
-  --exclude='package-lock.json' \
-  --exclude='AGENTS.md' \
-  --exclude='README.md' \
-  --exclude='CHANGELOG.md' \
-  --exclude='phpunit.xml.dist' \
-  --exclude='phpunit.integration.xml.dist' \
-  --exclude='phpstan.neon.dist' \
-  --exclude='phpcs.xml.dist' \
-  --exclude='.wp-env.json' \
-  -xf -
+git -C "${project_dir}" archive --format=tar "${build_commit}" -- \
+  pinova.php readme.txt LICENSE uninstall.php composer.json composer.lock \
+  assets src templates utils | tar -C "${stage_dir}" --exclude='*.scss' --exclude='*.map' -xf -
 
 version="$(php -r "\$s=file_get_contents(\$argv[1]); preg_match('/Version:\\s*([0-9.]+)/', \$s, \$m); echo \$m[1] ?? 'dev';" "${stage_dir}/pinova.php")"
 if [[ -n "${release_tag}" ]]; then
@@ -87,6 +64,14 @@ if [[ "${PINOVA_IGNORE_GD:-0}" == "1" ]]; then
 fi
 
 COMPOSER_ROOT_VERSION="${COMPOSER_ROOT_VERSION:-${version}}" "${composer_command[@]}" install "${install_args[@]}"
+
+# Composer distributions can include their own CI, examples, and tests. None
+# are needed by Pinova at runtime, so keep those out of the installable ZIP.
+find "${stage_dir}/vendor" -type d \( \
+  -name .github -o -name .agents -o -name .cursor -o -name .codex -o \
+  -name test -o -name tests -o -name Test -o -name Tests -o \
+  -name docs -o -name examples -o -name bin \
+\) -prune -exec rm -rf -- '{}' +
 
 if ! grep -Fq "utils/class-database.php" "${stage_dir}/vendor/composer/autoload_files.php"; then
 	echo "Pinova database bootstrap is missing from Composer's eager autoload files." >&2
@@ -121,4 +106,5 @@ find "${stage_dir}" -exec touch -d "@${source_date_epoch}" {} +
   cd "${build_dir}"
   LC_ALL=C find pinova -type f -print | LC_ALL=C sort | zip -Xq "pinova-${version}.zip" -@
 )
+bash "${project_dir}/tools/check-package-content.sh" "${build_dir}/pinova-${version}.zip"
 echo "Built ${build_dir}/pinova-${version}.zip"

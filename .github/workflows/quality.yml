@@ -30,6 +30,8 @@ jobs:
         run: php tools/check-plugin-metadata.php
       - name: Verify AI and durable-document governance
         run: php tools/check-ai-governance.php
+      - name: Verify release package content policy
+        run: bash tests/check-package-content.sh
       - name: Require Pinova skill synchronization
         env:
           PINOVA_SKILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}

@@ -593,6 +593,29 @@ test('checkout modal remains dismissible while an authentication request is pend
     const modalMain = page.locator('#pinovaLoginModal .pinova-auth-main');
     const closeButton = page.locator('#pinovaLoginModal .pinova-auth-close-button');
 
+    await page.evaluate(() => {
+            const modal = document.querySelector('#pinovaLoginModal');
+            const state = modal._x_dataStack[0];
+            const originalFocus = HTMLElement.prototype.focus;
+            window.pinovaFocusProbe = {
+                originalFocus,
+                attempted: [],
+            };
+            HTMLElement.prototype.focus = function (...args) {
+                if (this.matches('.showlogin')) {
+                    const result = originalFocus.apply(this, args);
+                    window.pinovaFocusProbe.attempted.push({
+                        connected: this.isConnected,
+                        inertAncestor: Boolean(this.closest('[inert]')),
+                        focused: document.activeElement === this,
+                        focusSequence: state.focusSequence,
+                    });
+                    return result;
+                }
+                return originalFocus.apply(this, args);
+            };
+    });
+
     try {
         await opener.click();
         await page.locator('#pinova-modal-identifier').fill('buyer@example.test');
@@ -606,29 +629,6 @@ test('checkout modal remains dismissible while an authentication request is pend
         // WooCommerce may replace the login-toggle fragment while the request is pending.
         // Focus restoration must resolve the live replacement rather than the detached opener.
         await opener.evaluate(element => element.replaceWith(element.cloneNode(true)));
-        await page.evaluate(() => {
-            const modal = document.querySelector('#pinovaLoginModal');
-            const state = modal._x_dataStack[0];
-            const originalFocus = HTMLElement.prototype.focus;
-            window.pinovaFocusProbe = {
-                originalFocus,
-                returnFocusMatches: state.returnFocusElement?.matches('.showlogin') || false,
-                returnFocusConnected: state.returnFocusElement?.isConnected ?? null,
-                attempted: [],
-            };
-            HTMLElement.prototype.focus = function (...args) {
-                if (this.matches('.showlogin')) {
-                    const result = originalFocus.apply(this, args);
-                    window.pinovaFocusProbe.attempted.push({
-                        connected: this.isConnected,
-                        inertAncestor: Boolean(this.closest('[inert]')),
-                        focused: document.activeElement === this,
-                    });
-                    return result;
-                }
-                return originalFocus.apply(this, args);
-            };
-        });
         await closeButton.click();
 
         await expect(modalViewport).toBeHidden();
@@ -639,8 +639,6 @@ test('checkout modal remains dismissible while an authentication request is pend
                 const state = document.querySelector('#pinovaLoginModal')._x_dataStack[0];
                 const probe = window.pinovaFocusProbe;
                 return {
-                    returnFocusMatches: probe.returnFocusMatches,
-                    returnFocusConnected: probe.returnFocusConnected,
                     attempted: probe.attempted,
                     focusSequence: state.focusSequence,
                     modalIsOpen: state.modalIsOpen,

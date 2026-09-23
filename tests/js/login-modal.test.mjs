@@ -373,3 +373,13 @@ test('safe REST failures appear in the modal live status', async () => {
     assert.equal(state.status.tone, 'error');
     assert.equal(state.pageLoaderIsActive, false);
 });
+
+test('server-backed transport failures retain their safe reference in the modal', async () => {
+    const error = new Error('private parser detail');
+    error.pinovaMessage = 'خطا کد پیگیری: server-reference-123';
+    const { state } = harness(async () => { throw error; });
+    state.modalIsOpen = true;
+    await state.authenticate();
+    assert.equal(state.status.message, error.pinovaMessage);
+    assert.doesNotMatch(state.status.message, /private parser detail/);
+});

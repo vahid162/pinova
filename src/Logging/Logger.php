@@ -147,7 +147,21 @@ final class Logger extends AbstractLogger {
 		);
 	}
 
-	private function is_enabled( string $level ): bool {
+	public function is_enabled( string $level ): bool {
+		$level = strtolower( $level );
+		if ( ! isset( self::LEVEL_WEIGHT[ $level ] ) ) {
+			return false;
+		}
+
+		try {
+			return $this->meets_threshold( $level );
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+			return false;
+		}
+	}
+
+	private function meets_threshold( string $level ): bool {
 		$config = call_user_func( $this->config_provider );
 		$config = is_array( $config ) ? $config : [];
 		$until  = isset( $config['diagnostic_until'] ) ? (int) $config['diagnostic_until'] : 0;

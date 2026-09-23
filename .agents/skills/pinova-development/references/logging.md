@@ -4,7 +4,7 @@ Read this reference before adding, changing, reviewing, testing, or operating Pi
 
 ## Purpose and scope
 
-Pinova 1.2.4 adds permanent logging infrastructure for temporary operational records. It follows PSR-3 levels and interfaces, OWASP privacy guidance, and WordPress/WooCommerce operational conventions. Logs support diagnosis and correlation; they are not a source of truth for identity, billing, security decisions, or migration state.
+Pinova uses permanent logging infrastructure for temporary operational records. It follows PSR-3 levels and interfaces, OWASP privacy guidance, and WordPress/WooCommerce operational conventions. Logs support diagnosis and correlation; they are not a source of truth for identity, billing, security decisions, or migration state.
 
 The default handler writes to `{$wpdb->prefix}pinova_logs`. If that table is unavailable or an insert fails, it sends the already-sanitized record to WooCommerce's logger with source `pinova`, then to PHP `error_log` as a last resort. A logging failure must not interrupt the request that caused it.
 
@@ -19,7 +19,7 @@ Every record uses schema `pinova.event.v1` and contains:
 - optional numeric `user_id` in its own column;
 - JSON `context` produced exclusively by `SafeContext`.
 
-REST responses created through `RestAPI::response()` expose the same value in `X-Pinova-Correlation-ID`. Never put identifiers or secrets in response headers.
+Pinova REST responses expose the same value in `X-Pinova-Correlation-ID`. A scoped `rest_post_dispatch` filter also covers WordPress validation, permission, authentication, and missing-route failures under `/pinova/`, preserves an existing response header, and leaves unrelated namespaces untouched. The shared JavaScript client displays only a bounded, safe reference received in that header on failures, including unreadable response bodies. A network failure without a server response must never fabricate a reference. This is request-level correlation, not a multi-request flow identity. Never put identifiers or secrets in response headers.
 
 ## Levels and noise control
 
@@ -61,6 +61,9 @@ Adding a context key requires all of:
 | `auth.request_failed` | error | Unexpected authentication request failure |
 | `auth.password_failed` | notice | Native pipeline rejected password or role policy |
 | `auth.password_succeeded` | info | Password login completed |
+| `auth.logout_rejected` | notice | A logout nonce was invalid; session preserved and observation throttled |
+| `auth.password_reset_failed` | notice | Password-reset token, account/policy, confirmation, key generation, key validation, or reset operation failed; observation throttled |
+| `auth.password_reset_succeeded` | info | Password reset completed; observation throttled |
 | `auth.redirect_failed` | warning | A validated authentication/logout redirect was rejected or headers were already committed before a Location response could be emitted |
 | `auth.session_created` | info | Pinova created an authenticated session |
 | `auth.session_destroyed` | info | Pinova logout completed |
@@ -83,6 +86,12 @@ Adding a context key requires all of:
 | `user.registered` | notice | Pinova created a WordPress user |
 
 Event names are API-like identifiers, not translated prose. Renaming an event is a compatibility change for monitoring consumers. Add a new event rather than inserting dynamic data into the event name.
+
+The logout-rejection and password-reset events use `EventThrottle`, not the administrator-only threshold bypass. The existing rate-limit table admits at most one observation per HMAC-derived source slot and 100 observations site-wide per event in a 15-minute window. Each event has 1,024 fixed source slots plus one site bucket, so missing cleanup cannot grow throttle storage without bound. Slot collisions conservatively suppress observations; they never affect authentication. Conditional database writes determine admission atomically. A missing/failing throttle backend suppresses these observations without blocking the user operation. These sampled events are not complete request counters. Their contexts contain only fixed reasons/statuses, optional trusted User ID, and keyed IP fingerprint, never a nonce, reset key, password, token, or return URL.
+
+Disabled event levels skip throttle database writes entirely. Failure to read the logging configuration suppresses the observation without affecting authentication.
+
+After `OTPService::verify()` loads a trusted OTP record, verification success and known-record failure events include `otp_type`, `identifier_type`, and the same purpose-separated identifier HMAC used at creation. Invalid-token and missing-record events must not fabricate those fields. Never fingerprint the OTP code itself. Adding metadata must not move purpose checks after verification, attempt mutation, or user/session creation.
 
 The `security.block_added` and `security.block_removed` contexts may contain the selected identifier type, keyed identifier fingerprint, block status, authorized administrator User ID, and block resource ID. They must never contain the raw mobile, email, username, or IP. Do not emit a new persistent event for every attacker-controlled blocked login attempt; the administrator mutation events provide the bounded audit trail without log amplification.
 

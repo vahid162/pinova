@@ -1,6 +1,9 @@
 //variables
 let pinovaNotyf = null;
-window.addEventListener('load', function () {
+function pinovaInitNotifications() {
+    if (pinovaNotyf) {
+        return;
+    }
     pinovaNotyf = new Notyf({
         duration: 3000,
         position: {
@@ -45,7 +48,13 @@ window.addEventListener('load', function () {
         }
     `;
     document.head.appendChild(style);
-})
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', pinovaInitNotifications);
+} else {
+    pinovaInitNotifications();
+}
 
 //functions
 function pinovaGetQueryParam(key) {
@@ -62,6 +71,15 @@ function pinovaApiGetHeader(response, name) {
 
     const value = response.headers.get(name);
     return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function pinovaApiCorrelationId(response) {
+    const value = pinovaApiGetHeader(response, 'X-Pinova-Correlation-ID');
+    return value && /^[a-zA-Z0-9-]{1,64}$/.test(value) ? value : null;
+}
+
+function pinovaApiWithReference(message, correlationId) {
+    return correlationId ? `${message} کد پیگیری: ${correlationId}` : message;
 }
 
 function pinovaApiRetryAfterSeconds(value) {
@@ -119,7 +137,7 @@ function pinovaApiNormalizeResponse(response, responseData) {
         status: response.status,
         retryAfter,
         retryAfterSeconds: pinovaApiRetryAfterSeconds(retryAfter),
-        correlationId: pinovaApiGetHeader(response, 'X-Pinova-Correlation-ID'),
+        correlationId: pinovaApiCorrelationId(response),
     };
     const result = {
         ...responseData,
@@ -138,6 +156,13 @@ function pinovaApiNormalizeResponse(response, responseData) {
         if (response.status === 429 && http.retryAfterSeconds > 0) {
             result.message += ` امکان تلاش مجدد تا ${http.retryAfterSeconds} ثانیهٔ دیگر وجود دارد.`;
         }
+    }
+
+    if (result.success === false) {
+        result.message = pinovaApiWithReference(
+            pinovaApiSafeMessage(result.message) || PINOVA_API_GENERIC_ERROR,
+            http.correlationId
+        );
     }
 
     return result;
@@ -174,6 +199,7 @@ async function pinovaApiRequest(url, options = {}) {
     const timeoutId = timeout > 0
         ? setTimeout(() => controller.abort(), timeout)
         : null;
+    let serverCorrelationId = null;
 
     try {
         const fetchOptions = {
@@ -207,6 +233,7 @@ async function pinovaApiRequest(url, options = {}) {
         }
 
         const response = await fetch(pinova.root + url, fetchOptions);
+        serverCorrelationId = pinovaApiCorrelationId(response);
 
         const contentType = response.headers.get('content-type');
         const responseData = contentType?.includes('application/json')
@@ -216,9 +243,14 @@ async function pinovaApiRequest(url, options = {}) {
         return pinovaApiNormalizeResponse(response, responseData);
 
     } catch (err) {
-        console.error('API error:', err.message);
+        const message = pinovaApiWithReference(PINOVA_API_GENERIC_ERROR, serverCorrelationId);
+        // Only a received server header may create a user-facing reference.
+        if (serverCorrelationId && err && typeof err === 'object') {
+            err.pinovaMessage = message;
+        }
+        console.error('Pinova API request failed.');
         if (notifyOnError && pinovaNotyf) {
-            pinovaNotyf.error(PINOVA_API_GENERIC_ERROR);
+            pinovaNotyf.error(message);
         }
         throw err;
     } finally {

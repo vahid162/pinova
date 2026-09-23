@@ -4,6 +4,7 @@ namespace Pinova;
 
 use Pinova\Admin\Menu;
 use Pinova\Admin\Settings;
+use Pinova\Logging\EventThrottle;
 use Pinova\Logging\LogRepository;
 use Pinova\Services\APIService;
 use Pinova\Services\RateLimitService;
@@ -118,6 +119,15 @@ class Pinova {
 			: '';
 
 		if ( ! wp_verify_nonce( $nonce, 'logout' ) ) {
+			EventThrottle::log(
+				'auth.logout_rejected',
+				[
+					'operation'   => 'logout',
+					'reason'      => 'invalid_nonce',
+					'http_status' => 403,
+					'user_id'     => get_current_user_id(),
+				]
+			);
 			wp_die(
 				esc_html__( 'توکن امنیتی شما معتبر نمی‌باشد.', 'pinova' ),
 				esc_html__( 'درخواست خروج نامعتبر است', 'pinova' ),
@@ -154,14 +164,18 @@ class Pinova {
 		}
 
 		wp_enqueue_style( 'pinova-admin', PINOVA_URL . 'assets/css/admin.css', [], PINOVA_VERSION );
+		wp_enqueue_style( 'pinova-notyf', PINOVA_URL . 'assets/css/notyf.min.css', [], PINOVA_VERSION );
 
-		wp_enqueue_script( 'pinova-admin', PINOVA_URL . 'assets/js/admin.js', [ 'jquery' ], PINOVA_VERSION, true );
+		wp_enqueue_script( 'pinova-notyf', PINOVA_URL . 'assets/js/notyf.min.js', [], PINOVA_VERSION, true );
+		wp_enqueue_script( 'pinova-global', PINOVA_URL . 'assets/js/global.js', [ 'pinova-notyf' ], PINOVA_VERSION, true );
+		wp_enqueue_script( 'pinova-admin', PINOVA_URL . 'assets/js/admin.js', [ 'jquery', 'pinova-global' ], PINOVA_VERSION, true );
 		wp_localize_script(
-			'pinova-admin',
+			'pinova-global',
 			'pinova',
 			[
-				'root'  => esc_url_raw( rest_url() ),
-				'nonce' => wp_create_nonce( 'wp_rest' ),
+				'root'      => esc_url_raw( rest_url() ),
+				'nonce'     => wp_create_nonce( 'wp_rest' ),
+				'adminPage' => true,
 			]
 		);
 	}

@@ -88,6 +88,9 @@ final class LoggingTest extends TestCase {
 		);
 		$standard->info( 'auth.succeeded' );
 		$standard->warning( 'auth.rate_limited' );
+		self::assertFalse( $standard->is_enabled( 'notice' ) );
+		self::assertTrue( $standard->is_enabled( 'WARNING' ) );
+		self::assertFalse( $standard->is_enabled( 'unknown' ) );
 
 		self::assertCount( 1, $handler->records );
 		self::assertSame( 'auth.rate_limited', $handler->records[0]['event'] );
@@ -102,9 +105,22 @@ final class LoggingTest extends TestCase {
 			static fn(): string => 'diagnostic'
 		);
 		$diagnostic->debug( 'auth.trace' );
+		self::assertTrue( $diagnostic->is_enabled( 'debug' ) );
 
 		self::assertCount( 2, $handler->records );
 		self::assertSame( 'auth.trace', $handler->records[1]['event'] );
+	}
+
+	public function test_enabled_check_fails_closed_when_configuration_throws(): void {
+		$logger = new Logger(
+			null,
+			null,
+			static function (): array {
+				throw new \RuntimeException( 'configuration failed' );
+			}
+		);
+
+		self::assertFalse( $logger->is_enabled( 'warning' ) );
 	}
 
 	public function test_fingerprint_is_keyed_stable_and_purpose_scoped(): void {

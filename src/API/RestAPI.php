@@ -15,6 +15,22 @@ abstract class RestAPI {
 
 	abstract public function register_routes();
 
+	/** Attach the request reference even when WordPress rejects before our callback. */
+	public static function correlation_header( \WP_HTTP_Response $response, \WP_REST_Server $server, WP_REST_Request $request ): \WP_HTTP_Response {
+		// WordPress matches REST routes case-insensitively.
+		$route = strtolower( $request->get_route() );
+		if ( '/pinova' !== $route && 0 !== strpos( $route, '/pinova/' ) ) {
+			return $response;
+		}
+
+		$headers = array_change_key_case( $response->get_headers(), CASE_LOWER );
+		if ( ! array_key_exists( 'x-pinova-correlation-id', $headers ) ) {
+			$response->header( 'X-Pinova-Correlation-ID', Logger::instance()->correlation_id() );
+		}
+
+		return $response;
+	}
+
 	/** @return bool|WP_Error */
 	public function permission_callback( WP_REST_Request $request ) {
 		return true;

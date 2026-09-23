@@ -333,3 +333,12 @@ test('safe REST failures are exposed through the inline live status', async () =
     assert.equal(state.status.tone, 'error');
     assert.equal(state.pageLoaderIsActive, false);
 });
+
+test('server-backed transport failures retain their safe reference in the live status', async () => {
+    const error = new Error('private parser detail');
+    error.pinovaMessage = 'خطا کد پیگیری: server-reference-123';
+    const { state } = harness(async () => { throw error; });
+    await state.authenticate();
+    assert.equal(state.status.message, error.pinovaMessage);
+    assert.doesNotMatch(state.status.message, /private parser detail/);
+});

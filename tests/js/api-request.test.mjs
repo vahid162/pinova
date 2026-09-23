@@ -35,13 +35,13 @@ function response(status, payload, extraHeaders = {}) {
     };
 }
 
-function textResponse(status, body) {
+function textResponse(status, body, extraHeaders = {}) {
     return {
         ok: status >= 200 && status < 300,
         status,
         headers: {
             get(name) {
-                return name.toLowerCase() === 'content-type' ? 'text/html' : null;
+                return name.toLowerCase() === 'content-type' ? 'text/html' : extraHeaders[name] ?? null;
             },
         },
         async json() {
@@ -53,9 +53,9 @@ function textResponse(status, body) {
     };
 }
 
-function harness(fetchImpl) {
+function harness(fetchImpl, readyState = 'loading') {
     const notifications = [];
-    const loadHandlers = [];
+    const readyHandlers = [];
 
     class Notyf {
         error(message) {
@@ -75,6 +75,12 @@ function harness(fetchImpl) {
         AbortController,
         clearTimeout,
         document: {
+            readyState,
+            addEventListener(name, callback) {
+                if (name === 'DOMContentLoaded') {
+                    readyHandlers.push(callback);
+                }
+            },
             createElement() {
                 return { innerHTML: '' };
             },
@@ -93,11 +99,6 @@ function harness(fetchImpl) {
         URLSearchParams,
         setTimeout,
         window: {
-            addEventListener(name, callback) {
-                if (name === 'load') {
-                    loadHandlers.push(callback);
-                }
-            },
             location: {
                 search: '',
             },
@@ -105,7 +106,7 @@ function harness(fetchImpl) {
     });
 
     vm.runInContext(globalScript, context, { filename: 'assets/js/global.js' });
-    loadHandlers.forEach((callback) => callback());
+    readyHandlers.forEach((callback) => callback());
 
     return {
         context,
@@ -113,6 +114,15 @@ function harness(fetchImpl) {
         request: context.pinovaApiRequest,
     };
 }
+
+test('initializes notifications when the script runs after DOM readiness', async () => {
+    const { request, notifications } = harness(async () => {
+        throw new TypeError('Failed to fetch');
+    }, 'complete');
+
+    await assert.rejects(() => request('pinova/user/authenticate'), TypeError);
+    assert.deepEqual(notifications, [{ type: 'error', message: GENERIC_ERROR }]);
+});
 
 test('returns a successful Pinova envelope with HTTP correlation metadata', async () => {
     const { notifications, request } = harness(async () => response(
@@ -236,6 +246,46 @@ test('uses one generic notification for a network failure', async () => {
 
     await assert.rejects(() => request('pinova/user/authenticate'), TypeError);
     assert.deepEqual(notifications, [{ type: 'error', message: GENERIC_ERROR }]);
+});
+
+for (const status of [200, 400, 401, 403, 429, 500, 503]) {
+    test(`shows the exact server reference on an application failure (${status})`, async () => {
+        const reference = '4b3e97ad-6845-4d82-a381-237af90cb5f1';
+        const { request } = harness(async () => response(status,
+            { success: false, message: 'خطا', data: {} },
+            { 'X-Pinova-Correlation-ID': reference }
+        ));
+
+        const result = await request('pinova/user/authenticate');
+
+        assert.equal(result.message, `خطا کد پیگیری: ${reference}`);
+        assert.equal(result.http.correlationId, reference);
+    });
+}
+
+test('retains the server reference when the response body cannot be parsed', async () => {
+    const reference = 'server-reference-123';
+    const { request, notifications } = harness(async () => textResponse(502, '<html>bad gateway</html>', {
+        'X-Pinova-Correlation-ID': reference,
+    }));
+
+    await assert.rejects(() => request('pinova/user/authenticate'), error => {
+        assert.equal(error.pinovaMessage, `${GENERIC_ERROR} کد پیگیری: ${reference}`);
+        return true;
+    });
+    assert.deepEqual(notifications, [{ type: 'error', message: `${GENERIC_ERROR} کد پیگیری: ${reference}` }]);
+});
+
+test('never displays unsafe or oversized reference headers', async () => {
+    for (const reference of ['<img src=x onerror=alert(1)>', 'x'.repeat(65), 'x\ny']) {
+        const { request } = harness(async () => response(500,
+            { success: false, message: 'خطا', data: {} },
+            { 'X-Pinova-Correlation-ID': reference }
+        ));
+        const result = await request('pinova/user/authenticate');
+        assert.equal(result.http.correlationId, null);
+        assert.equal(result.message, 'خطا');
+    }
 });
 
 test('allows an inline-status caller to suppress the duplicate generic notification', async () => {

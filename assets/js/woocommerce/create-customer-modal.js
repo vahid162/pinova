@@ -159,7 +159,7 @@ pinovaAlpine.data("pinovaCreateCustomer", () => ({
 
         } catch (error) {
 
-            pinovaNotyf.error('در ایجاد حساب کاربری مشتری، خطایی رخ داده است.');
+            pinovaNotyf.error(error?.pinovaMessage || 'در ایجاد حساب کاربری مشتری، خطایی رخ داده است.');
             console.error('PIONVA: Error creating customer : ', error);
 
             if (error.message) {

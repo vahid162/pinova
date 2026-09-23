@@ -105,14 +105,18 @@ class OTPService {
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
+		$identifier  = new Identifier( (string) $otp->identifier );
+		$log_context = [
+			'user_id'                => $otp->user_id,
+			'otp_type'               => $otp->type,
+			'identifier_type'        => $identifier->get_type(),
+			'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
+		];
+
 		if ( ! $otp->hasType( $expected_types ) ) {
 			Logger::instance()->notice(
 				'otp.verify_failed',
-				[
-					'user_id'  => $otp->user_id,
-					'otp_type' => $otp->type,
-					'reason'   => 'purpose_mismatch',
-				]
+				$log_context + [ 'reason' => 'purpose_mismatch' ]
 			);
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
@@ -121,7 +125,6 @@ class OTPService {
 			throw new BlockedException( 'ip' );
 		}
 
-		$identifier = new Identifier( (string) $otp->identifier );
 		if ( $identifier->is_valid() && FirewallService::is_blocked( $identifier->get_value() ) ) {
 			throw new BlockedException( $identifier->get_type() );
 		}
@@ -129,9 +132,7 @@ class OTPService {
 		if ( $otp->isExpired() || $otp->isVerified() || $otp->attempts >= 5 ) {
 			Logger::instance()->notice(
 				'otp.verify_failed',
-				[
-					'user_id'  => $otp->user_id,
-					'otp_type' => $otp->type,
+				$log_context + [
 					'attempts' => $otp->attempts,
 					'reason'   => $otp->isExpired() ? 'expired' : ( $otp->isVerified() ? 'already_verified' : 'attempt_limit' ),
 				]
@@ -142,9 +143,7 @@ class OTPService {
 		if ( IP::get() !== $otp->ip_address ) {
 			Logger::instance()->warning(
 				'otp.verify_failed',
-				[
-					'user_id'        => $otp->user_id,
-					'otp_type'       => $otp->type,
+				$log_context + [
 					'ip_fingerprint' => Logger::instance()->fingerprint( IP::get(), 'ip' ),
 					'reason'         => 'ip_mismatch',
 				]
@@ -157,9 +156,7 @@ class OTPService {
 			$otp->incrementAttempts();
 			Logger::instance()->notice(
 				'otp.verify_failed',
-				[
-					'user_id'  => $otp->user_id,
-					'otp_type' => $otp->type,
+				$log_context + [
 					'attempts' => $otp->attempts,
 					'reason'   => 'invalid_code',
 				]
@@ -171,10 +168,7 @@ class OTPService {
 		$otp->markVerified();
 		Logger::instance()->info(
 			'otp.verified',
-			[
-				'user_id'  => $otp->user_id,
-				'otp_type' => $otp->type,
-			]
+			$log_context
 		);
 
 		return UserService::get_or_create( $otp );

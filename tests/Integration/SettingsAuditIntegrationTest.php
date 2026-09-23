@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pinova\Tests\Integration;
 
+use Pinova\Admin\Logs;
 use Pinova\Install;
 use Pinova\Logging\LogRepository;
 use Pinova\Logging\SettingsAudit;
@@ -29,6 +30,7 @@ final class SettingsAuditIntegrationTest extends WP_UnitTestCase {
 		LogRepository::delete_all();
 		delete_option( 'pinova_sms' );
 		delete_option( 'pinova_logging' );
+		delete_option( 'pinova_gateway_melipayamak' );
 		$this->reset_request_audit_count();
 		parent::tear_down();
 	}
@@ -83,6 +85,49 @@ final class SettingsAuditIntegrationTest extends WP_UnitTestCase {
 
 		$count = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE `event` = %s', $wpdb->prefix . 'pinova_logs', 'settings.updated' ) );
 		self::assertSame( 0, (int) $count );
+	}
+
+	public function test_authorized_provider_credential_update_records_names_not_values(): void {
+		global $wpdb;
+
+		update_option( 'pinova_gateway_melipayamak', [ 'username' => 'old-username' ] );
+		LogRepository::delete_all();
+		$actor = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $actor );
+		update_option(
+			'pinova_gateway_melipayamak',
+			[
+				'username'       => 'PRIVATE_USERNAME_VALUE',
+				'password'       => 'PRIVATE_PASSWORD_VALUE',
+				'sender'         => 'PRIVATE_SENDER_VALUE',
+				'unknown_secret' => 'PRIVATE_UNKNOWN_VALUE',
+			]
+		);
+
+		$row = $wpdb->get_row(
+			$wpdb->prepare( 'SELECT `event`, `user_id`, `context` FROM %i ORDER BY `id` DESC LIMIT 1', $wpdb->prefix . 'pinova_logs' ),
+			ARRAY_A
+		);
+		self::assertIsArray( $row );
+		self::assertSame( 'settings.updated', $row['event'] );
+		self::assertSame( (string) $actor, $row['user_id'] );
+		self::assertStringNotContainsString( 'PRIVATE_', $row['context'] );
+		$context = json_decode( $row['context'], true );
+		self::assertIsArray( $context );
+		self::assertSame( 'pinova_gateway_melipayamak', $context['operation'] );
+		self::assertSame( 'success', $context['result'] );
+		self::assertSame( [ 'username', 'password', 'sender' ], $context['changed_keys'] );
+
+		$exported = Logs::redact_incident_row(
+			$row + [
+				'created_at'     => '2026-01-01 00:00:00',
+				'level'          => 'notice',
+				'correlation_id' => 'provider-audit',
+			]
+		);
+		self::assertSame( 'pinova_gateway_melipayamak', $exported['context']['operation'] );
+		self::assertSame( [ 'username', 'password', 'sender' ], $exported['context']['changed_keys'] );
+		self::assertStringNotContainsString( 'PRIVATE_', wp_json_encode( $exported ) );
 	}
 
 	public function test_audit_events_are_capped_per_request(): void {

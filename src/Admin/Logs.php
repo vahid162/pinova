@@ -251,7 +251,22 @@ final class Logs {
 			if ( $keys ) {
 				$safe['changed_keys'] = $keys;
 			}
-			if ( isset( $stored['operation'] ) && in_array( $stored['operation'], [ 'pinova_general', 'pinova_sms', 'pinova_messengers', 'pinova_zohal', 'pinova_design', 'pinova_logging', 'pinova_advanced' ], true ) ) {
+			if ( isset( $stored['operation'] ) && in_array(
+				$stored['operation'],
+				[
+					'pinova_general',
+					'pinova_sms',
+					'pinova_gateway_maxsms',
+					'pinova_gateway_melipayamak',
+					'pinova_gateway_panelchi',
+					'pinova_messengers',
+					'pinova_zohal',
+					'pinova_design',
+					'pinova_logging',
+					'pinova_advanced',
+				],
+				true
+			) ) {
 				$safe['operation'] = $stored['operation'];
 			}
 			if ( 'success' === ( $stored['result'] ?? '' ) ) {

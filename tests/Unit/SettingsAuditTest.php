@@ -45,6 +45,23 @@ final class SettingsAuditTest extends TestCase {
 		self::assertSame( [], SettingsAudit::changed_keys( 'pinova_delete_data_on_uninstall', 1, 1 ) );
 	}
 
+	public function test_only_defined_sms_provider_fields_are_audited(): void {
+		$providers = [
+			'pinova_gateway_maxsms'      => [ 'api_key', 'sender' ],
+			'pinova_gateway_melipayamak' => [ 'username', 'password', 'sender' ],
+			'pinova_gateway_panelchi'   => [ 'api_key', 'source_number' ],
+		];
+
+		foreach ( $providers as $option => $fields ) {
+			$new = array_fill_keys( $fields, 'PRIVATE_CREDENTIAL_VALUE' );
+			$new['unknown_secret'] = 'PRIVATE_UNKNOWN_VALUE';
+			self::assertSame( $fields, SettingsAudit::changed_keys( $option, [], $new ) );
+			self::assertSame( [], SettingsAudit::changed_keys( $option, $new, $new ) );
+		}
+
+		self::assertSame( [], SettingsAudit::changed_keys( 'pinova_gateway_pwsms', [], [ 'pwsms_help' => 'PRIVATE_VALUE' ] ) );
+	}
+
 	public function test_context_rejects_unknown_keys_and_adjacent_secret_values(): void {
 		$context = ( new SafeContext() )->sanitize(
 			[

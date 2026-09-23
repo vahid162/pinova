@@ -9,13 +9,16 @@ final class SettingsAudit {
 
 	/** Only first-party persisted fields may appear as audit keys. */
 	private const FIELDS = [
-		'pinova_general'    => [ 'wordpress_users_can_register', 'wordpress_default_role', 'woocommerce_checkout_registration_required' ],
-		'pinova_sms'        => [ 'gateway', 'message_code', 'test_mobile' ],
-		'pinova_messengers' => [ 'bale_api_token', 'bale_bot_id' ],
-		'pinova_zohal'      => [ 'api_key' ],
-		'pinova_design'     => [ 'logo' ],
-		'pinova_logging'    => [ 'minimum_level', 'retention_days', 'diagnostic_until' ],
-		'pinova_advanced'   => [
+		'pinova_general'            => [ 'wordpress_users_can_register', 'wordpress_default_role', 'woocommerce_checkout_registration_required' ],
+		'pinova_sms'                => [ 'gateway', 'message_code', 'test_mobile' ],
+		'pinova_gateway_maxsms'      => [ 'api_key', 'sender' ],
+		'pinova_gateway_melipayamak' => [ 'username', 'password', 'sender' ],
+		'pinova_gateway_panelchi'   => [ 'api_key', 'source_number' ],
+		'pinova_messengers'         => [ 'bale_api_token', 'bale_bot_id' ],
+		'pinova_zohal'              => [ 'api_key' ],
+		'pinova_design'             => [ 'logo' ],
+		'pinova_logging'            => [ 'minimum_level', 'retention_days', 'diagnostic_until' ],
+		'pinova_advanced'           => [
 			'mobile_possible_meta_keys',
 			'code_length',
 			'default_login_method',

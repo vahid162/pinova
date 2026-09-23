@@ -34,6 +34,7 @@ class ChannelService {
 						'otp.channel_send_failed',
 						[
 							'user_id'                => $otp->user_id,
+							'flow_id'                => $otp->flow_id,
 							'otp_type'               => $otp->type,
 							'channel'                => $channel,
 							'identifier_type'        => $identifier->get_type(),

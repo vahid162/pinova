@@ -135,14 +135,18 @@ final class Logger extends AbstractLogger {
 	 * @param array<string, mixed> $context
 	 */
 	private function write( string $level, $message, array $context ): void {
-		$event = $this->sanitize_event( $message );
+		$event   = $this->sanitize_event( $message );
+		$context = $this->safe_context->sanitize( $context );
+		$flow_id = $context['flow_id'] ?? null;
+		unset( $context['flow_id'] );
 		$this->handler->write(
 			[
 				'schema'         => 'pinova.event.v1',
 				'level'          => $level,
 				'event'          => $event,
 				'correlation_id' => $this->correlation_id(),
-				'context'        => array_merge( $this->safe_context->sanitize( $context ), BuildMetadata::info() ),
+				'flow_id'        => $flow_id,
+				'context'        => array_merge( $context, BuildMetadata::info() ),
 			]
 		);
 	}

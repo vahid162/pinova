@@ -27,6 +27,7 @@ class OTPService {
 		$otp = OTP::query()->create(
 			[
 				'user_id'    => $user_id,
+				'flow_id'    => bin2hex( random_bytes( 16 ) ),
 				'identifier' => $identifier->get_value(),
 				'code'       => $code,
 				'type'       => $type,
@@ -41,6 +42,7 @@ class OTPService {
 				'otp.delivery_failed',
 				[
 					'user_id'                => $user_id,
+					'flow_id'                => $otp->flow_id,
 					'otp_type'               => $type,
 					'identifier_type'        => $identifier->get_type(),
 					'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
@@ -58,6 +60,7 @@ class OTPService {
 			'otp.created',
 			[
 				'user_id'                => $user_id,
+				'flow_id'                => $otp->flow_id,
 				'otp_type'               => $type,
 				'identifier_type'        => $identifier->get_type(),
 				'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
@@ -66,7 +69,7 @@ class OTPService {
 		);
 
 		return [
-			JWT::encode( [ 'otp_id' => $otp->id ] ),
+			self::signed_state( $otp ),
 			$successful_channels,
 		];
 	}
@@ -77,6 +80,16 @@ class OTPService {
 	 * @throws Exception
 	 */
 	public static function verify( string $jwt, string $code, array $expected_types ): \WP_User {
+		[ $user ] = self::verify_with_flow( $jwt, $code, $expected_types );
+		return $user;
+	}
+
+	/**
+	 * @param string[] $expected_types
+	 * @return array{0:\WP_User,1:?string}
+	 * @throws Exception
+	 */
+	public static function verify_with_flow( string $jwt, string $code, array $expected_types ): array {
 
 		try {
 			$payload = JWT::decode( $jwt );
@@ -108,10 +121,19 @@ class OTPService {
 		$identifier  = new Identifier( (string) $otp->identifier );
 		$log_context = [
 			'user_id'                => $otp->user_id,
+			'flow_id'                => $otp->flow_id,
 			'otp_type'               => $otp->type,
 			'identifier_type'        => $identifier->get_type(),
 			'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
 		];
+
+		$record_flow = $otp->flow_id;
+		$token_flow  = $payload['flow_id'] ?? null;
+		if ( ( null !== $record_flow && ( ! is_string( $record_flow ) || ! preg_match( '/\A[a-f0-9]{32}\z/', $record_flow ) ) )
+			|| $token_flow !== $record_flow ) {
+			Logger::instance()->notice( 'otp.verify_failed', $log_context + [ 'reason' => 'flow_mismatch' ] );
+			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
+		}
 
 		if ( ! $otp->hasType( $expected_types ) ) {
 			Logger::instance()->notice(
@@ -171,7 +193,16 @@ class OTPService {
 			$log_context
 		);
 
-		return UserService::get_or_create( $otp );
+		return [ UserService::get_or_create( $otp ), $record_flow ];
+	}
+
+	public static function signed_state( OTP $otp, ?int $ttl = null ): string {
+		$payload = [ 'otp_id' => $otp->id ];
+		if ( is_string( $otp->flow_id ) && preg_match( '/\A[a-f0-9]{32}\z/', $otp->flow_id ) ) {
+			$payload['flow_id'] = $otp->flow_id;
+		}
+
+		return JWT::encode( $payload, $ttl );
 	}
 
 	public static function generate_code(): int {

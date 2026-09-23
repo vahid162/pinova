@@ -51,6 +51,38 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( Install::SCHEMA_VERSION, (int) get_option( Install::SCHEMA_OPTION ) );
 	}
 
+	public function test_version_one_flow_migration_is_additive_and_retryable(): void {
+		global $wpdb;
+
+		$tables = [ $wpdb->prefix . 'pinova_otp', $wpdb->prefix . 'pinova_logs' ];
+		try {
+			foreach ( $tables as $table ) {
+				self::assertNotFalse( $wpdb->query( $wpdb->prepare( 'ALTER TABLE %i DROP INDEX flow_id, DROP COLUMN flow_id', $table ) ) );
+			}
+			update_option( Install::SCHEMA_OPTION, 1, false );
+			$interrupt = static function (): void {
+				throw new \RuntimeException( 'Deliberate test-only interruption after additive schema work.' );
+			};
+			add_action( 'pinova_after_db_schema_migration', $interrupt );
+			try {
+				self::assertFalse( Install::migrate() );
+				self::assertSame( 1, (int) get_option( Install::SCHEMA_OPTION ) );
+			} finally {
+				remove_action( 'pinova_after_db_schema_migration', $interrupt );
+			}
+			self::assertTrue( Install::migrate() );
+			self::assertSame( Install::SCHEMA_VERSION, (int) get_option( Install::SCHEMA_OPTION ) );
+			foreach ( $tables as $table ) {
+				self::assertNotNull( $wpdb->get_row( $wpdb->prepare( 'SHOW COLUMNS FROM %i LIKE %s', $table, 'flow_id' ) ) );
+				self::assertNotNull( $wpdb->get_row( $wpdb->prepare( 'SHOW INDEX FROM %i WHERE Key_name = %s', $table, 'flow_id' ) ) );
+			}
+			self::assertTrue( Install::migrate() );
+		} finally {
+			Install::create_tables();
+			update_option( Install::SCHEMA_OPTION, Install::SCHEMA_VERSION, false );
+		}
+	}
+
 	public function test_activation_does_not_write_to_plugin_directory(): void {
 		$sentinel = PINOVA_DIR . '/.activated';
 		self::assertFileDoesNotExist( $sentinel );

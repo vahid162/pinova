@@ -124,6 +124,8 @@ final class Logs {
 				<input id="pinova-log-event" type="text" name="event" maxlength="100" value="<?php echo esc_attr( $filters['event'] ); ?>" />
 				<label for="pinova-log-correlation"><?php esc_html_e( 'Correlation ID:', 'pinova' ); ?></label>
 				<input id="pinova-log-correlation" type="text" name="correlation_id" maxlength="64" value="<?php echo esc_attr( $filters['correlation_id'] ); ?>" />
+				<label for="pinova-log-flow"><?php esc_html_e( 'Flow ID:', 'pinova' ); ?></label>
+				<input id="pinova-log-flow" type="text" name="flow_id" maxlength="32" value="<?php echo esc_attr( $filters['flow_id'] ); ?>" />
 				<label for="pinova-log-user"><?php esc_html_e( 'User ID:', 'pinova' ); ?></label>
 				<input id="pinova-log-user" type="number" min="1" name="user_id" value="<?php echo esc_attr( $filters['user_id'] ); ?>" />
 				<label for="pinova-log-from"><?php esc_html_e( 'از تاریخ (UTC):', 'pinova' ); ?></label>
@@ -150,12 +152,13 @@ final class Logs {
 					<th><?php esc_html_e( 'سطح', 'pinova' ); ?></th>
 					<th><?php esc_html_e( 'رخداد', 'pinova' ); ?></th>
 					<th><?php esc_html_e( 'Correlation ID', 'pinova' ); ?></th>
+					<th><?php esc_html_e( 'Flow ID', 'pinova' ); ?></th>
 					<th><?php esc_html_e( 'User ID', 'pinova' ); ?></th>
 					<th><?php esc_html_e( 'Context امن', 'pinova' ); ?></th>
 				</tr></thead>
 				<tbody>
 				<?php if ( empty( $data['rows'] ) ) : ?>
-					<tr><td colspan="6"><?php esc_html_e( 'هنوز رخدادی مطابق فیلتر و سطح ثبت فعلی ذخیره نشده است.', 'pinova' ); ?></td></tr>
+					<tr><td colspan="7"><?php esc_html_e( 'هنوز رخدادی مطابق فیلتر و سطح ثبت فعلی ذخیره نشده است.', 'pinova' ); ?></td></tr>
 				<?php else : ?>
 					<?php foreach ( $data['rows'] as $row ) : ?>
 						<?php
@@ -167,6 +170,7 @@ final class Logs {
 							<td><code><?php echo esc_html( (string) $row['level'] ); ?></code></td>
 							<td><code><?php echo esc_html( (string) $row['event'] ); ?></code></td>
 							<td><code><?php echo esc_html( (string) $row['correlation_id'] ); ?></code></td>
+							<td><code><?php echo esc_html( (string) ( $row['flow_id'] ?? '' ) ); ?></code></td>
 							<td><?php echo $row['user_id'] ? esc_html( (string) $row['user_id'] ) : '&mdash;'; ?></td>
 							<td><code dir="ltr"><?php echo esc_html( is_string( $pretty ) ? $pretty : '{}' ); ?></code></td>
 						</tr>
@@ -189,13 +193,14 @@ final class Logs {
 	}
 
 	/** @param array<string,mixed> $input
-	 * @return array{event:string,correlation_id:string,user_id:string,created_from:string,created_to:string}
+	 * @return array{event:string,correlation_id:string,flow_id:string,user_id:string,created_from:string,created_to:string}
 	 */
 	private static function request_filters( array $input ): array {
 		$filters = [];
 		foreach ( [
 			'event'          => 100,
 			'correlation_id' => 64,
+			'flow_id'        => 32,
 			'user_id'        => 20,
 			'created_from'   => 10,
 			'created_to'     => 10,
@@ -288,6 +293,7 @@ final class Logs {
 			'level'          => in_array( $row['level'] ?? '', [ 'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency' ], true ) ? $row['level'] : 'unknown',
 			'event'          => preg_match( '/\A[a-z0-9_.-]{1,100}\z/', (string) ( $row['event'] ?? '' ) ) ? $row['event'] : 'logging.unknown_event',
 			'correlation_id' => preg_match( '/\A[A-Za-z0-9-]{1,64}\z/', (string) ( $row['correlation_id'] ?? '' ) ) ? $row['correlation_id'] : '',
+			'flow_id'        => preg_match( '/\A[a-f0-9]{32}\z/', (string) ( $row['flow_id'] ?? '' ) ) ? $row['flow_id'] : '',
 			'user_id'        => max( 0, (int) ( $row['user_id'] ?? 0 ) ),
 			'context'        => $safe,
 		];

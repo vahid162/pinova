@@ -12,6 +12,8 @@ final class SafeContext {
 		'subject_fingerprint',
 	];
 
+	private const FLOW_ID_PATTERN = '/\A[a-f0-9]{32}\z/';
+
 	private const INTEGER_KEYS = [
 		'attempt',
 		'attempts',
@@ -87,6 +89,10 @@ final class SafeContext {
 			if ( preg_match( '/\A[a-f0-9]{32}\z/', $value ) ) {
 				$safe[ $key ] = $value;
 			}
+		}
+
+		if ( isset( $context['flow_id'] ) && is_string( $context['flow_id'] ) && preg_match( self::FLOW_ID_PATTERN, $context['flow_id'] ) ) {
+			$safe['flow_id'] = $context['flow_id'];
 		}
 
 		if ( isset( $context['channels'] ) && is_array( $context['channels'] ) ) {

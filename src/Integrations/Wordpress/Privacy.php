@@ -201,12 +201,12 @@ final class Privacy {
 	 * @return array{items_removed:bool,items_retained:bool,messages:string[],done:bool}
 	 */
 	private static function erase_unowned_email_data( string $email_address ): array {
-		$identifiers  = self::email_variants( $email_address );
-		$otp_result   = self::delete_otp_records( 0, $identifiers );
+		$identifiers   = self::email_variants( $email_address );
+		$otp_result    = self::delete_otp_records( 0, $identifiers );
 		$queue_cleared = RateLimitService::delete_queued_for_identifiers( $identifiers );
-		$fingerprints = self::identifier_fingerprints( $identifiers );
-		$logs         = LogRepository::anonymize_user( 0, self::BATCH_SIZE, $fingerprints, self::identifier_types( $identifiers ) );
-		$success      = $otp_result['success'] && $queue_cleared && $logs['success'];
+		$fingerprints  = self::identifier_fingerprints( $identifiers );
+		$logs          = LogRepository::anonymize_user( 0, self::BATCH_SIZE, $fingerprints, self::identifier_types( $identifiers ) );
+		$success       = $otp_result['success'] && $queue_cleared && $logs['success'];
 
 		return [
 			'items_removed'  => $otp_result['removed'] > 0 || $logs['processed'] > 0,

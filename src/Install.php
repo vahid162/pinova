@@ -179,7 +179,7 @@ class Install extends \Nabik\Utils\V1\Install {
 		}
 
 		// Keep the opt-in until every other deletion succeeds, so an interrupted purge can be retried.
-		$options = array_values( array_diff( $options, [ self::PURGE_OPTION ] ) );
+		$options   = array_values( array_diff( $options, [ self::PURGE_OPTION ] ) );
 		$options[] = self::PURGE_OPTION;
 
 		foreach ( $options as $option ) {

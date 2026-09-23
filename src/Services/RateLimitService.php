@@ -160,7 +160,7 @@ class RateLimitService {
 		if ( $wpdb->last_error || ! is_array( $rows ) || 1 !== count( $rows ) ) {
 			return null;
 		}
-		$row = $rows[0];
+		$row     = $rows[0];
 		$claimed = $wpdb->query(
 			$wpdb->prepare( 'UPDATE %i SET `payload` = %s WHERE `bucket_key` = %s AND `payload` = %s AND `reset_at` > UTC_TIMESTAMP()', $table, 'processing', $row['bucket_key'], $row['payload'] )
 		);

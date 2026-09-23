@@ -29,7 +29,7 @@ final class EventThrottle {
 			'scope' => 'log_reset_succeeded',
 			'level' => 'info',
 		],
-		'otp.verify_failed'            => [
+		'otp.verify_failed'             => [
 			'scope' => 'log_otp_verify_failed',
 			'level' => 'notice',
 		],
@@ -54,8 +54,8 @@ final class EventThrottle {
 			if ( 'otp.verify_failed' === $event ) {
 				$source .= '|' . (string) ( $context['reason'] ?? 'unknown' );
 			}
-			$hash   = hash_hmac( 'sha256', (string) $source, wp_salt( 'auth' ) );
-			$slot   = hexdec( substr( $hash, 0, 4 ) ) % self::SOURCE_SLOTS;
+			$hash = hash_hmac( 'sha256', (string) $source, wp_salt( 'auth' ) );
+			$slot = hexdec( substr( $hash, 0, 4 ) ) % self::SOURCE_SLOTS;
 
 			// Fixed slots bound storage even if cleanup stops. Collisions only suppress
 			// observations; they never deny authentication or increase the log budget.

@@ -129,7 +129,7 @@ class UserService {
 			return null;
 		}
 		$candidate_ids = array_values( array_unique( array_filter( array_merge( $login_user_ids, $meta_user_ids ) ) ) );
-		$matching_ids = [];
+		$matching_ids  = [];
 		foreach ( $candidate_ids as $candidate_id ) {
 			$explicit_mobile = self::get_persisted_mobile_result( $candidate_id );
 			if ( ! $explicit_mobile['success'] ) {

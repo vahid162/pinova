@@ -100,6 +100,7 @@ class OTPService {
 				return;
 			}
 			[ $user_id, $mobile_unclaimed ] = UserService::match_with_registration_policy( $identifier );
+
 			$user = $user_id ? get_userdata( $user_id ) : false;
 			if ( $user instanceof \WP_User && UserService::is_native_only( $user ) ) {
 				return;
@@ -119,7 +120,13 @@ class OTPService {
 			unset( $exception );
 		} catch ( Throwable $throwable ) {
 			RateLimitService::release_queued_otp( $flow_id );
-			EventThrottle::log( 'auth.request_failed', [ 'operation' => 'queued_otp', 'reason' => 'delivery_worker_error' ] );
+			EventThrottle::log(
+				'auth.request_failed',
+				[
+					'operation' => 'queued_otp',
+					'reason'    => 'delivery_worker_error',
+				]
+			);
 			// A queued delivery cannot change the response already sent to the caller.
 			unset( $throwable );
 		}

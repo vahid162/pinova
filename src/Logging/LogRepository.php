@@ -141,7 +141,7 @@ final class LogRepository {
 		foreach ( is_array( $rows ) ? $rows : [] as $row ) {
 			$row['event']          = self::redact_event( $row['event'] ?? null );
 			$row['correlation_id'] = self::redact_correlation_id( $row['correlation_id'] ?? null );
-			$safe_rows[]            = $row;
+			$safe_rows[]           = $row;
 		}
 
 		return [

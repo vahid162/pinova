@@ -182,7 +182,13 @@ class UserAPI extends RestAPI {
 			self::minimum_response_time( $started );
 			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 503 );
 		} catch ( Throwable $throwable ) {
-			EventThrottle::log( 'auth.request_failed', [ 'operation' => 'authenticate', 'reason' => 'initiation_error' ] );
+			EventThrottle::log(
+				'auth.request_failed',
+				[
+					'operation' => 'authenticate',
+					'reason'    => 'initiation_error',
+				]
+			);
 			self::minimum_response_time( $started );
 			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 503 );
 		}

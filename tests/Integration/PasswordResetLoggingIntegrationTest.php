@@ -76,8 +76,15 @@ final class PasswordResetLoggingIntegrationTest extends WP_UnitTestCase {
 		$jwt     = UserService::generate_jwt( $user->ID, $flow_id );
 		$response = $this->change( $jwt, 'private-reset-key', 'different-password' );
 		self::assertSame( 400, $response->get_status() );
-		self::assertSame( $flow_id, $this->assert_reset_event( 'auth.password_reset_failed', 'password_mismatch' )['flow_id'] );
+		$record = $this->assert_reset_event( 'auth.password_reset_failed', 'password_mismatch' );
+		self::assertSame( $flow_id, $record['flow_id'] );
+		self::assertSame( $user->ID, (int) $record['user_id'] );
 		$this->assert_no_secrets( [ $jwt, 'private-reset-key', 'different-password' ] );
+		self::assertSame( [ 'processed' => 1, 'done' => true, 'success' => true ], LogRepository::anonymize_user( $user->ID ) );
+		$erased = $this->assert_reset_event( 'auth.password_reset_failed', 'password_mismatch' );
+		self::assertSame( $record['id'], $erased['id'] );
+		self::assertNull( $erased['user_id'] );
+		self::assertNull( $erased['flow_id'] );
 	}
 
 	public function test_repeated_failures_with_changing_tokens_and_reasons_emit_one_event(): void {

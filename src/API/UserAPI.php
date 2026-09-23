@@ -440,6 +440,7 @@ class UserAPI extends RestAPI {
 				[
 					'operation' => 'forgot_change',
 					'reason'    => 'password_mismatch',
+					'user_id'   => $user_id,
 					'flow_id'   => $flow_id,
 				]
 			);

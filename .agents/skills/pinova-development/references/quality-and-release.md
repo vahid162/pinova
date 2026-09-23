@@ -64,7 +64,7 @@ The CI cleanup script is restricted to the exact run-owned Compose project and w
 
 ## Reproducible installable ZIP
 
-Build with the Composer version pinned by `tools/build.sh`. The build exports a fixed timezone, stages one top-level `pinova/` directory, installs production dependencies from `composer.lock`, removes development-only files, normalizes permissions and timestamps, sorts entries, and writes the versioned ZIP.
+Build with the Composer version pinned by `tools/build.sh`. The build exports a fixed timezone, stages only the explicit runtime source allowlist under one top-level `pinova/` directory, installs production dependencies from `composer.lock`, removes build-only manifests, normalizes permissions and timestamps, sorts entries, and writes the versioned ZIP. `tools/check-package-content.sh` must reject unexpected ZIP entries before a build succeeds.
 
 The ZIP excludes repository metadata, GitHub and agent instructions, root development documentation, caches, `node_modules`, tests, tools, and development Composer packages. It retains WordPress `readme.txt` and all production runtime dependencies rebuilt from `composer.lock`.
 

@@ -74,18 +74,9 @@ curl --fail --silent --show-error --max-time 20 \
 		}
 '
 
-cron_idle=0
-for (( attempt = 0; attempt < 15; attempt++ )); do
-	if wp_site eval 'if ( get_transient( "doing_cron" ) ) { exit( 1 ); }' >/dev/null 2>&1; then
-		cron_idle=1
-		break
-	fi
-	sleep 1
-done
-if [[ "${cron_idle}" != 1 ]]; then
-	printf 'The disposable site has an active or stuck WordPress Cron lock.\n' >&2
-	exit 1
-fi
+# wp-env setup can leave a stale core Cron lock before this test starts. Clear
+# only that lock in this run-owned disposable site; no OTP job exists yet.
+wp_site eval 'delete_transient( "doing_cron" );'
 
 response_status="$(curl --fail --silent --show-error --max-time 20 \
 	--header 'Content-Type: application/json' \

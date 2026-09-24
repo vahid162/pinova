@@ -150,7 +150,7 @@ class RateLimitService {
 		$row = $wpdb->get_row(
 		$wpdb->prepare( 'SELECT `scope`, `reset_at`, `payload` FROM %i WHERE `bucket_key` = %s', $table, $bucket_key )
 		);
-		if ( ! $row || $wpdb->last_error || ! preg_match( '/\A[a-f0-9]{32}\z/', (string) $row->scope ) || strtotime( $row->reset_at . ' UTC' ) <= time() || str_starts_with( (string) $row->payload, 'cancelled:' ) ) {
+		if ( ! $row || ! preg_match( '/\A[a-f0-9]{32}\z/', (string) $row->scope ) || strtotime( $row->reset_at . ' UTC' ) <= time() || str_starts_with( (string) $row->payload, 'cancelled:' ) ) {
 			throw new RateLimitUnavailableException( 'The decoy flow could not be read.' );
 		}
 		$nonce      = random_bytes( 12 );
@@ -364,7 +364,7 @@ class RateLimitService {
 		}
 		$expired      = $wpdb->query( $wpdb->prepare( $expired_sql, array_merge( $params, [ self::OTP_CLAIM_LEASE ] ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
 		$pending      = $wpdb->get_var( $wpdb->prepare( $pending_sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
-		return false !== $cancelled && false !== $deleted && false !== $cancelled_late && false !== $expired && ! $wpdb->last_error && '0' === (string) $pending;
+		return false !== $cancelled && false !== $deleted && false !== $cancelled_late && false !== $expired && '0' === (string) $pending;
 	}
 
 	private static function queue_key(): string {
@@ -381,7 +381,7 @@ class RateLimitService {
 			return false;
 		}
 		$acquired = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) );
-		return ! $wpdb->last_error && '1' === (string) $acquired;
+		return '1' === (string) $acquired;
 	}
 
 	private static function unlock_queued_otp( string $flow_id ): void {

@@ -138,9 +138,7 @@ class OTPService {
 			self::create( $identifier, ChannelService::get_channels( $identifier ), $type, $user_id, true, $queued['deadline'], $flow_id, $queued['ip'], $queued['claim_token'] );
 		} catch ( SendOTPException $exception ) {
 			// ChannelService already recorded the privacy-safe provider failure.
-			if ( null !== $queued ) {
-				RateLimitService::release_queued_otp( $flow_id, $queued['claim_token'] );
-			}
+			RateLimitService::release_queued_otp( $flow_id, $queued['claim_token'] );
 			unset( $exception );
 		} catch ( Throwable $throwable ) {
 			if ( null !== $queued ) {

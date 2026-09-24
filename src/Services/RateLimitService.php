@@ -316,7 +316,7 @@ class RateLimitService {
 		if ( false === $cancelled ) {
 			return false;
 		}
-		$deleted   = $wpdb->query(
+		$deleted = $wpdb->query(
 			$wpdb->prepare( "DELETE FROM %i WHERE `scope` = %s AND (`payload` IS NULL OR (LEFT(`payload`, 10) <> 'cancelled:' AND LEFT(`payload`, 11) <> 'processing:' AND `payload` <> 'processing'))", $table, $flow_id )
 		);
 		return false !== $deleted;

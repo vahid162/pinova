@@ -175,7 +175,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertTrue( Privacy::erase_personal_data( $email )['done'] );
 	}
 
-	public function test_erasure_during_provider_send_requires_a_second_cleanup_pass(): void {
+	public function test_erasure_during_provider_send_reports_incomplete(): void {
 		global $wpdb;
 
 		$email = 'sending-erasure@example.test';

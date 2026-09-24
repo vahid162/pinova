@@ -345,6 +345,53 @@ final class SecurityRegressionTest extends WP_UnitTestCase {
 		self::assertFalse( OTP::query()->where( 'flow_id', $flow_id )->exists() );
 	}
 
+	public function test_queued_otp_rechecks_identifier_and_original_ip_blocks(): void {
+		$had_ip      = array_key_exists( 'REMOTE_ADDR', $_SERVER );
+		$previous_ip = $_SERVER['REMOTE_ADDR'] ?? null;
+		$sent        = 0;
+		$mail        = static function () use ( &$sent ): bool {
+			++$sent;
+			return true;
+		};
+		add_filter( 'pre_wp_mail', $mail );
+		try {
+			$responses = [];
+			foreach ( [ 'identifier', 'ip' ] as $blocked_type ) {
+				$email                    = 'queued-' . $blocked_type . '-block@example.test';
+				$original_ip              = '192.0.2.' . ( 'ip' === $blocked_type ? '71' : '70' );
+				$_SERVER['REMOTE_ADDR']   = $original_ip;
+				self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+				$request = new WP_REST_Request( 'POST', '/pinova/user/authenticate' );
+				$request->set_param( 'identifier', new Identifier( $email ) );
+				$request->set_param( 'force_otp', true );
+				$response    = ( new UserAPI() )->authenticate( $request );
+				$responses[] = $response;
+				self::assertSame( 200, $response->get_status() );
+				$flow_id = JWT::decode( $response->get_data()['data']['jwt'] )['flow_id'];
+				self::assertFalse( OTP::query()->where( 'flow_id', $flow_id )->exists() );
+
+				$blocked_value = 'ip' === $blocked_type ? $original_ip : $email;
+				Block::query()->create( [ 'identifier' => $blocked_value, 'blocked_until' => null ] );
+				try {
+					$_SERVER['REMOTE_ADDR'] = '198.51.100.70';
+					$this->run_queued_otp( $flow_id );
+					self::assertFalse( OTP::query()->where( 'flow_id', $flow_id )->exists(), $blocked_type );
+				} finally {
+					Block::query()->where( 'identifier', $blocked_value )->delete();
+				}
+			}
+			self::assertSame( 0, $sent );
+			self::assertSame( $responses[0]->get_data()['message'], $responses[1]->get_data()['message'] );
+		} finally {
+			remove_filter( 'pre_wp_mail', $mail );
+			if ( $had_ip ) {
+				$_SERVER['REMOTE_ADDR'] = $previous_ip;
+			} else {
+				unset( $_SERVER['REMOTE_ADDR'] );
+			}
+		}
+	}
+
 	public function test_delivery_failure_can_retry_without_changing_the_public_flow(): void {
 		$email = 'queued-retry@example.test';
 		self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );

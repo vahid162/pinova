@@ -113,6 +113,9 @@ class OTPService {
 			if ( $queued['deadline'] <= time() ) {
 				return;
 			}
+			if ( FirewallService::is_blocked( $identifier->get_value() ) || FirewallService::is_blocked( $queued['ip'] ) ) {
+				return;
+			}
 			self::create( $identifier, ChannelService::get_channels( $identifier ), $type, $user_id, true, $queued['deadline'], $flow_id, $queued['ip'] );
 		} catch ( SendOTPException $exception ) {
 			// ChannelService already recorded the privacy-safe provider failure.

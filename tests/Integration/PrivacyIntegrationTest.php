@@ -367,6 +367,86 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertFalse( $erasure['items_removed'] );
 	}
 
+	public function test_erasure_preserves_unowned_mobile_data_for_a_native_mobile_shaped_username(): void {
+		global $wpdb;
+
+		$email  = 'native-mobile-username@example.test';
+		$mobile = '+989123335555';
+		$user_id = self::factory()->user->create(
+			[
+				'user_email' => $email,
+				'user_login' => '09123335555',
+			]
+		);
+		$wpdb->delete( $wpdb->usermeta, [ 'user_id' => $user_id, 'meta_key' => 'pinova_mobile' ], [ '%d', '%s' ] );
+		clean_user_cache( $user_id );
+		[ $flow_id ] = RateLimitService::decoy_flow( $mobile, 'authenticate', '192.0.2.44' );
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_otp',
+			[
+				'user_id'     => null,
+				'identifier'  => $mobile,
+				'code'        => '555666',
+				'ip_address'  => '127.0.0.1',
+				'attempts'    => 0,
+				'type'        => 'register',
+				'channels'    => '{}',
+				'expires_at'  => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ),
+				'verified_at' => null,
+			]
+		);
+		$fingerprint = Logger::instance()->fingerprint( $mobile, 'mobile' );
+		Logger::instance()->audit(
+			'info',
+			'privacy.native_username_pre_account',
+			[
+				'identifier_type'        => 'mobile',
+				'identifier_fingerprint' => $fingerprint,
+			]
+		);
+
+		$result  = Privacy::erase_personal_data( $email );
+		$context = (string) $wpdb->get_var( $wpdb->prepare( 'SELECT `context` FROM %i WHERE `event` = %s', $wpdb->prefix . 'pinova_logs', 'privacy.native_username_pre_account' ) );
+
+		self::assertTrue( $result['done'] );
+		self::assertFalse( $result['items_removed'] );
+		self::assertFalse( $result['items_retained'] );
+		self::assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+		self::assertSame( '1', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE `identifier` = %s', $wpdb->prefix . 'pinova_otp', $mobile ) ) );
+		self::assertStringContainsString( $fingerprint, $context );
+	}
+
+	public function test_erasure_retries_without_writes_when_mobile_username_ownership_read_fails(): void {
+		global $wpdb;
+
+		$email = 'marker-read-failure@example.test';
+		self::factory()->user->create(
+			[
+				'user_email' => $email,
+				'user_login' => '09123336666',
+				'meta_input' => [ 'created_by' => 'pinova' ],
+			]
+		);
+		[ $flow_id ] = RateLimitService::decoy_flow( '+989123336666', 'authenticate', '192.0.2.44' );
+		$fail_marker_read = static function ( string $query ) use ( $wpdb ): string {
+			if ( str_contains( $query, "`meta_key` = 'created_by'" ) && str_contains( $query, $wpdb->usermeta ) ) {
+				return "SELECT `pinova_missing_column` FROM {$wpdb->usermeta} LIMIT 1";
+			}
+			return $query;
+		};
+		add_filter( 'query', $fail_marker_read );
+		try {
+			$result = Privacy::erase_personal_data( $email );
+		} finally {
+			remove_filter( 'query', $fail_marker_read );
+		}
+
+		self::assertFalse( $result['done'] );
+		self::assertTrue( $result['items_retained'] );
+		self::assertFalse( $result['items_removed'] );
+		self::assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+	}
+
 	public function test_eraser_reports_retained_data_when_a_physical_delete_fails(): void {
 		$user_id = self::factory()->user->create( [ 'user_email' => 'retry-erasure@example.test' ] );
 		update_user_meta( $user_id, 'pinova_mobile', '09125556666' );
@@ -440,6 +520,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 			[ '%d', '%s' ]
 		);
 		clean_user_cache( $user_id );
+		[ $flow_id ] = RateLimitService::decoy_flow( '+989127778888', 'authenticate', '192.0.2.44' );
 
 		$fingerprint = Logger::instance()->fingerprint( '+989127778888', 'mobile' );
 		Logger::instance()->audit(
@@ -477,6 +558,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertTrue( $result['items_removed'] );
 		self::assertFalse( $result['items_retained'] );
 		self::assertTrue( $result['done'] );
+		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
 		self::assertSame(
 			'0',
 			(string) $wpdb->get_var(

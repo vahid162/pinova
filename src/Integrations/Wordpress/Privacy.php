@@ -254,7 +254,31 @@ final class Privacy {
 		global $wpdb;
 
 		$identifiers   = array_merge( self::email_variants( $user->user_email ), self::email_variants( $email_address ) );
-		$mobile_values = [ $user->user_login ];
+		$mobile_values = [];
+
+		// A native/imported mobile-shaped username is not proof that Pinova owns
+		// pre-account records for that number. Only Pinova-created accounts may
+		// use their legacy username as an erasure-only mobile alias.
+		if ( ( new Mobile( $user->user_login ) )->is_valid() ) {
+			$pinova_created = $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT 1 FROM %i WHERE `user_id` = %d AND `meta_key` = %s AND `meta_value` = %s LIMIT 1',
+					$wpdb->usermeta,
+					$user->ID,
+					'created_by',
+					'pinova'
+				)
+			);
+			if ( self::database_error_present() ) {
+				return [
+					'success'     => false,
+					'identifiers' => [],
+				];
+			}
+			if ( '1' === (string) $pinova_created ) {
+				$mobile_values[] = $user->user_login;
+			}
+		}
 
 		if ( null !== $physical_mobile ) {
 			$mobile_values[] = $physical_mobile;

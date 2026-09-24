@@ -34,11 +34,11 @@ An OTP flow ID is 16 cryptographically random bytes represented as 32 lowercase 
 - Never enable permanent debug logging through a hidden option or filter.
 - Events controlled by an attacker must be bounded. Log rate-limit transition only when `hits === limit + 1`; do not log every rejected request. Do not add per-request firewall-denial logs without persistent deduplication.
 
-Retention defaults to 14 days, is clamped to 1–90 days, and is deleted in bounded batches by `pinova_logging_cleanup`. Manual deletion requires `manage_options` plus the `pinova_clear_logs` nonce and writes a fresh `logging.cleared` audit event after deletion. That bounded administrator action uses `Logger::audit()` so it is not suppressed when the configured minimum is `error`; do not use this threshold bypass for request-driven events.
+Retention defaults to 14 days, is clamped to 1–90 days, and is deleted in bounded batches by `pinova_logging_cleanup`. Manual deletion requires `manage_options` plus the `pinova_clear_logs` nonce and writes a fresh `logging.cleared` audit event only after a successful DELETE, including a successful zero-row DELETE. A missing table or database error must return a generic failure rather than a success notice or success audit. That bounded administrator action uses `Logger::audit()` so it is not suppressed when the configured minimum is `error`; do not use this threshold bypass for request-driven events.
 
 ## Privacy and context allowlist
 
-Context is deny-by-default. `SafeContext` accepts only documented numeric IDs/counts, short code-like values, bounded code lists, approved keyed fingerprints, and exception class/code. It discards unknown keys.
+Context is deny-by-default. `SafeContext` accepts only documented numeric IDs/counts, short code-like values, bounded code lists, approved keyed fingerprints, and exception class/code. It discards unknown keys. Historical event and correlation columns are also untrusted: the administrator viewer, incident export, and WordPress privacy export show only catalogued event codes and canonical WordPress-generated UUIDv4 request correlation IDs. Unknown events become `logging.unknown_event`; malformed or legacy-shaped correlation values become empty. This preserves ordinary support correlation while refusing syntax-valid secrets in historical columns. A deliberately UUIDv4-shaped historical secret cannot be distinguished from a generated ID by shape alone and remains a residual risk until rows have verifiable provenance.
 
 `changed_keys` accepts at most 20 names from the first-party settings field allowlist; it never contains values. Only strict 32-character lowercase hexadecimal `flow_id` values pass `SafeContext`, and `Logger` moves them into the dedicated column before JSON persistence. Packaged `build_commit` (40 lowercase hexadecimal characters), `package_identity` (`pinova-release-zip`), and an optional validated `release_tag` are trusted package metadata, not arbitrary `SafeContext` input. Source checkouts carry only `package_identity=source`.
 
@@ -65,7 +65,7 @@ Adding a context key requires all of:
 | --- | --- | --- |
 | `admin.sms_test_succeeded` | notice | Authorized SMS test completed |
 | `admin.sms_test_failed` | error | Authorized SMS test failed |
-| `auth.request_failed` | error | Unexpected authentication request failure |
+| `auth.request_failed` | error | Unexpected authentication request or queued-delivery worker failure; worker observations are throttled |
 | `auth.password_failed` | notice | Native pipeline rejected password or role policy |
 | `auth.password_succeeded` | info | Password login completed |
 | `auth.logout_rejected` | notice | A logout nonce was invalid; session preserved and observation throttled |
@@ -94,9 +94,9 @@ Adding a context key requires all of:
 | `user.export_failed` | error | Export generation failed |
 | `user.registered` | notice | Pinova created a WordPress user |
 
-Event names are API-like identifiers, not translated prose. Renaming an event is a compatibility change for monitoring consumers. Add a new event rather than inserting dynamic data into the event name.
+Event names are API-like identifiers, not translated prose. Renaming an event is a compatibility change for monitoring consumers. Add a new event rather than inserting dynamic data into the event name. Add each new stable event to `LogRepository`'s export allowlist at the same time; otherwise its event code is replaced by `logging.unknown_event` in administrator and privacy exports.
 
-The logout-rejection and password-reset events use `EventThrottle`, not the administrator-only threshold bypass. The existing rate-limit table admits at most one observation per HMAC-derived source slot and 100 observations site-wide per event in a 15-minute window. Each event has 1,024 fixed source slots plus one site bucket, so missing cleanup cannot grow throttle storage without bound. Slot collisions conservatively suppress observations; they never affect authentication. Conditional database writes determine admission atomically. A missing/failing throttle backend suppresses these observations without blocking the user operation. These sampled events are not complete request counters. Their contexts contain only fixed reasons/statuses, optional trusted User ID, and keyed IP fingerprint, never a nonce, reset key, password, token, or return URL.
+The logout-rejection, password-reset, and OTP-verification-failure events use `EventThrottle`, not the administrator-only threshold bypass. The existing rate-limit table admits at most one observation per HMAC-derived source slot and 100 observations site-wide per event in a 15-minute window. OTP failures separate source slots by fixed failure reason so distinct operational causes remain visible. Each event has 1,024 fixed source slots plus one site bucket, so missing cleanup cannot grow throttle storage without bound. Slot collisions conservatively suppress observations; they never affect authentication. Conditional database writes determine admission atomically. A missing/failing throttle backend suppresses these observations without blocking the user operation. These sampled events are not complete request counters. Their contexts contain only fixed reasons/statuses, optional trusted User ID, and keyed IP fingerprint, never a nonce, reset key, password, token, or return URL.
 
 Disabled event levels skip throttle database writes entirely. Failure to read the logging configuration suppresses the observation without affecting authentication.
 
@@ -113,6 +113,8 @@ Settings audit observes successful WordPress option updates for first-party Pino
 `auth.redirect_failed` is emitted when WordPress rejects a validated safe redirect or when the header state is already committed before/while dispatch reports success. Its context is limited to the bounded operation, reason and header-state codes plus the intended HTTP fallback status. Never include the destination/return URL, query string, nonce, cookie, identifier, token, source file/line, exception message, or trace.
 
 ## Operational workflow
+
+Unexpected queued-delivery worker failures use the existing finite `EventThrottle` budget for `auth.request_failed`; routine provider failures retain their existing `otp.delivery_failed` event. The public response carries neither result.
 
 1. Ask the reporter for the approximate time, operation, and `X-Pinova-Correlation-ID`; do not ask them to send OTPs, passwords, tokens, or full cookies.
 2. Review **Pinova → Logs** with the smallest necessary level, exact event, correlation ID, User ID, and UTC date filters. Access requires `manage_options`; page size and page number are capped, and filters use prepared exact-match predicates. The viewer redacts even historical context before display. It reports effective minimum level and read-only health: `unavailable` when the table/connection is absent, `degraded` when the table cannot be queried or cleanup is unscheduled, `database-backed` when readable with cleanup scheduled, and `fallback` only if the current PHP request actually used WooCommerce/PHP fallback. A healthy read is not proof of future write success; no write probe is performed merely by opening the page. An empty table with minimum `error` may be expected because lower-severity events were never persisted; it is not by itself evidence of a rendering failure.

@@ -29,19 +29,31 @@ class UserService {
 	 * @return int|null
 	 */
 	public static function get_by_mobile( $mobile ): ?int {
+		[ $user_id ] = self::resolve_mobile( $mobile );
+		return $user_id;
+	}
+
+	/**
+	 * @param string|Mobile $mobile
+	 * @return array{0:?int,1:bool} Matched user and whether the number is unclaimed.
+	 */
+	private static function resolve_mobile( $mobile ): array {
 		if ( ! is_a( $mobile, Mobile::class ) ) {
 
 			$mobile = new Mobile( $mobile );
 		}
 
 		if ( ! $mobile->is_valid() ) {
-			return null;
+			return [ null, false ];
 		}
 
 		$candidate_ids = self::get_mobile_candidate_ids( $mobile );
+		if ( null === $candidate_ids ) {
+			return [ null, false ];
+		}
 
 		if ( 1 === count( $candidate_ids ) ) {
-			return $candidate_ids[0];
+			return [ $candidate_ids[0], false ];
 		}
 
 		if ( count( $candidate_ids ) > 1 ) {
@@ -56,7 +68,7 @@ class UserService {
 			do_action( 'pinova/identity_conflict_detected', 'mobile', $candidate_ids );
 		}
 
-		return null;
+		return [ null, [] === $candidate_ids ];
 	}
 
 	/**
@@ -73,23 +85,30 @@ class UserService {
 
 		$candidate_ids = self::get_mobile_candidate_ids( $mobile );
 
-		return [] === array_values( array_diff( $candidate_ids, [ $user_id ] ) );
+		return null !== $candidate_ids && [] === array_values( array_diff( $candidate_ids, [ $user_id ] ) );
 	}
 
-	private static function get_mobile_candidate_ids( Mobile $mobile ): array {
+	/** @return int[]|null Null means a database read failed. */
+	private static function get_mobile_candidate_ids( Mobile $mobile ): ?array {
 		global $wpdb;
 
 		$possible_formats = array_values( array_unique( array_map( 'strval', $mobile->possible_formats() ) ) );
 		$login_tokens     = implode( ', ', array_fill( 0, count( $possible_formats ), '%s' ) );
-		$login_query      = "SELECT `ID` FROM %i WHERE `user_login` IN ({$login_tokens}) ORDER BY `ID` LIMIT 1";
+		$login_query      = "SELECT `ID` FROM %i WHERE `user_login` IN ({$login_tokens}) ORDER BY `ID`";
 		$login_params     = array_merge( [ $wpdb->users ], $possible_formats );
-		$login_user_id    = (int) $wpdb->get_var(
-			$wpdb->prepare(
-				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The dynamic fragment contains placeholders only.
-				$login_query,
-				...$login_params
+		$login_user_ids   = array_map(
+			'intval',
+			(array) $wpdb->get_col(
+				$wpdb->prepare(
+					// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The dynamic fragment contains placeholders only.
+					$login_query,
+					...$login_params
+				)
 			)
 		);
+		if ( self::mobile_lookup_failed() ) {
+			return null;
+		}
 
 		$meta_keys     = self::mobile_possible_meta_keys();
 		$key_tokens    = implode( ', ', array_fill( 0, count( $meta_keys ), '%s' ) );
@@ -106,19 +125,32 @@ class UserService {
 				)
 			)
 		);
-		$candidate_ids = array_values( array_unique( array_filter( array_merge( [ $login_user_id ], $meta_user_ids ) ) ) );
-		$candidate_ids = array_values(
-			array_filter(
-				$candidate_ids,
-				static function ( int $candidate_id ) use ( $possible_formats ): bool {
-					$explicit_mobile = self::get_persisted_mobile( $candidate_id );
+		if ( self::mobile_lookup_failed() ) {
+			return null;
+		}
+		$candidate_ids = array_values( array_unique( array_filter( array_merge( $login_user_ids, $meta_user_ids ) ) ) );
+		$matching_ids  = [];
+		foreach ( $candidate_ids as $candidate_id ) {
+			$explicit_mobile = self::get_persisted_mobile_result( $candidate_id );
+			if ( ! $explicit_mobile['success'] ) {
+				return null;
+			}
+			if ( null === $explicit_mobile['value'] || in_array( $explicit_mobile['value'], $possible_formats, true ) ) {
+				$matching_ids[] = $candidate_id;
+			}
+		}
 
-					return null === $explicit_mobile || in_array( $explicit_mobile, $possible_formats, true );
-				}
-			)
-		);
+		return $matching_ids;
+	}
 
-		return $candidate_ids;
+	/**
+	 * Database calls mutate this global between checks.
+	 *
+	 * @phpstan-impure
+	 */
+	private static function mobile_lookup_failed(): bool {
+		global $wpdb;
+		return '' !== (string) $wpdb->last_error;
 	}
 
 	public static function get_by_username( string $username ): ?int {
@@ -164,13 +196,20 @@ class UserService {
 	}
 
 	public static function match( Identifier $identifier ): ?int {
-		$user_id = null;
+		[ $user_id ] = self::match_with_registration_policy( $identifier );
+		return $user_id;
+	}
+
+	/** @return array{0:?int,1:bool} Matched user and safe-to-register mobile state. */
+	public static function match_with_registration_policy( Identifier $identifier ): array {
+		$user_id          = null;
+		$mobile_unclaimed = false;
 		if ( $identifier->is_email() ) {
 			$user_id = self::get_by_email( $identifier->get_value() );
 		}
 
 		if ( $identifier->is_mobile() ) {
-			$user_id = self::get_by_mobile( $identifier->get_value() );
+			[ $user_id, $mobile_unclaimed ] = self::resolve_mobile( $identifier->get_value() );
 		}
 
 		if ( $identifier->is_username() ) {
@@ -187,7 +226,7 @@ class UserService {
 			]
 		);
 
-		return $user_id;
+		return [ $user_id, $mobile_unclaimed ];
 	}
 
 	public static function update_username( int $user_id, string $username ): bool {
@@ -278,6 +317,10 @@ class UserService {
 			if ( ! $mobile->is_valid() ) {
 				throw new Exception( 'تلفن همراه برای ثبت نام معتبر نمی‌باشد.' );
 			}
+		}
+
+		if ( ! self::mobile_is_available_for_user( $mobile, 0 ) ) {
+			throw new Exception( __( 'امکان ثبت‌نام با این شماره وجود ندارد.', 'pinova' ) );
 		}
 
 		$userdata = wp_parse_args(

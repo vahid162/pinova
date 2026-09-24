@@ -11,7 +11,7 @@ entries="$(unzip -Z1 "${zip_path}")"
 
 while IFS= read -r entry; do
   case "${entry}" in
-    */AGENTS.md|*/CLAUDE.md|*/GEMINI.md|*/.github/*|*/.agents/*|*/.cursor/*|*/.codex/*|*/test/*|*/tests/*|*/Test/*|*/Tests/*|*/docs/*|*/examples/*|pinova/vendor/bin/*|*.scss|*.map)
+    */AGENTS.md|*/CLAUDE.md|*/GEMINI.md|*/.github/*|*/.agents/*|*/.cursor/*|*/.codex/*|*/test/*|*/tests/*|*/Test/*|*/Tests/*|*/docs/*|*/examples/*|pinova/vendor/bin/*|*/.gitignore|*/.gitattributes|*/.editorconfig|*/CONTRIBUTING*|*/phpunit.xml*|*/phpstan.neon*|*/psalm.xml*|*.scss|*.map)
       echo "Unexpected release ZIP entry: ${entry}" >&2
       exit 1
       ;;

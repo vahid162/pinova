@@ -9,6 +9,7 @@ use Pinova\Integrations\Wordpress\Privacy;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
 use Pinova\Services\UserService;
+use Pinova\Services\RateLimitService;
 use WP_UnitTestCase;
 
 final class PrivacyIntegrationTest extends WP_UnitTestCase {
@@ -35,7 +36,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		update_user_meta( $user_id, 'pinova_mobile', '09120000000' );
 		Logger::instance()->audit(
 			'warning',
-			'privacy.export_test',
+			'auth.request_failed',
 			[
 				'user_id'                => $user_id,
 				'identifier_fingerprint' => Logger::instance()->fingerprint( 'privacy@example.test', 'email' ),
@@ -62,11 +63,51 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 
 		self::assertTrue( $export['done'] );
 		self::assertStringContainsString( '+989120000000', $json );
-		self::assertStringContainsString( 'privacy.export_test', $json );
+		self::assertStringContainsString( 'auth.request_failed', $json );
 		self::assertStringContainsString( Logger::instance()->correlation_id(), $json );
 		self::assertStringNotContainsString( '789456', $json );
 		self::assertStringNotContainsString( 'never-export-password', $json );
 		self::assertStringNotContainsString( 'identifier_fingerprint', $json );
+	}
+
+	public function test_approved_erasure_removes_a_pending_encrypted_otp_delivery(): void {
+		global $wpdb;
+
+		$email = 'queued-erasure@example.test';
+		self::factory()->user->create( [ 'user_email' => $email ] );
+		[ $flow_id ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.44' );
+		self::assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+
+		$result = Privacy::erase_personal_data( $email );
+		self::assertTrue( $result['done'] );
+		self::assertNull( RateLimitService::claim_queued_otp( $flow_id ) );
+		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+	}
+
+	public function test_export_redacts_legacy_secrets_in_event_and_correlation_fields(): void {
+		global $wpdb;
+
+		$email   = 'historical-log@example.test';
+		$user_id = self::factory()->user->create( [ 'user_email' => $email ] );
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_logs',
+			[
+				'created_at'     => gmdate( 'Y-m-d H:i:s' ),
+				'level'          => 'warning',
+				'event'          => 'otp.09123456789',
+				'correlation_id' => 'legacy-token-secret',
+				'user_id'        => $user_id,
+				'context'        => '{}',
+			]
+		);
+
+		$export = Privacy::export_personal_data( $email, 1 );
+		$json   = (string) wp_json_encode( $export );
+
+		self::assertTrue( $export['done'] );
+		self::assertStringContainsString( 'logging.unknown_event', $json );
+		self::assertStringNotContainsString( '09123456789', $json );
+		self::assertStringNotContainsString( 'legacy-token-secret', $json );
 	}
 
 	public function test_export_does_not_claim_a_mobile_shaped_login_without_owned_meta(): void {

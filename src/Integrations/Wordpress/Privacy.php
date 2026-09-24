@@ -7,6 +7,7 @@ use Pinova\Logging\LogRepository;
 use Pinova\Objects\Identifier;
 use Pinova\Objects\Mobile;
 use Pinova\Services\UserService;
+use Pinova\Services\RateLimitService;
 use WP_Error;
 use WP_User;
 
@@ -170,6 +171,7 @@ final class Privacy {
 		$mobile           = $mobile_lookup['value'];
 		$identifiers      = self::erasure_identifiers( $user, $email_address, $mobile );
 		$otp_result       = self::delete_otp_records( $user->ID, $identifiers );
+		$queue_cleared    = RateLimitService::delete_queued_for_identifiers( $identifiers );
 		$fingerprints     = self::identifier_fingerprints( $identifiers );
 		$identifier_types = self::identifier_types( $identifiers );
 		$logs             = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE, $fingerprints, $identifier_types );
@@ -178,11 +180,11 @@ final class Privacy {
 			'success' => true,
 		];
 
-		if ( $otp_result['success'] && $logs['success'] && $logs['done'] ) {
+		if ( $otp_result['success'] && $queue_cleared && $logs['success'] && $logs['done'] ) {
 			$mobile_result = self::delete_physical_mobile( $user->ID );
 		}
 
-		$success = $otp_result['success'] && $mobile_result['success'] && $logs['success'];
+		$success = $otp_result['success'] && $queue_cleared && $mobile_result['success'] && $logs['success'];
 
 		return [
 			'items_removed'  => $mobile_result['removed'] > 0 || $otp_result['removed'] > 0 || $logs['processed'] > 0,
@@ -199,11 +201,12 @@ final class Privacy {
 	 * @return array{items_removed:bool,items_retained:bool,messages:string[],done:bool}
 	 */
 	private static function erase_unowned_email_data( string $email_address ): array {
-		$identifiers  = self::email_variants( $email_address );
-		$otp_result   = self::delete_otp_records( 0, $identifiers );
-		$fingerprints = self::identifier_fingerprints( $identifiers );
-		$logs         = LogRepository::anonymize_user( 0, self::BATCH_SIZE, $fingerprints, self::identifier_types( $identifiers ) );
-		$success      = $otp_result['success'] && $logs['success'];
+		$identifiers   = self::email_variants( $email_address );
+		$otp_result    = self::delete_otp_records( 0, $identifiers );
+		$queue_cleared = RateLimitService::delete_queued_for_identifiers( $identifiers );
+		$fingerprints  = self::identifier_fingerprints( $identifiers );
+		$logs          = LogRepository::anonymize_user( 0, self::BATCH_SIZE, $fingerprints, self::identifier_types( $identifiers ) );
+		$success       = $otp_result['success'] && $queue_cleared && $logs['success'];
 
 		return [
 			'items_removed'  => $otp_result['removed'] > 0 || $logs['processed'] > 0,
@@ -220,6 +223,8 @@ final class Privacy {
 
 		$content = '<p>'
 			. esc_html__( 'پینوا برای احراز هویت می‌تواند شماره موبایل و رکوردهای موقت OTP را پردازش کند. رکوردهای OTP شامل کد موقت هستند و هرگز در خروجی حریم خصوصی نمایش داده نمی‌شوند.', 'pinova' )
+			. '</p><p>'
+			. esc_html__( 'برای ارسال کد، شناسه و نشانی IP درخواست تا پایان مهلت کوتاه جریان در صف رمزنگاری‌شده نگهداری می‌شوند و پس از پردازش حذف می‌گردند. درخواست پاک‌سازی تأییدشده این صف را نیز حذف می‌کند.', 'pinova' )
 			. '</p><p>'
 			. esc_html__( 'رخدادهای عملیاتی پینوا برای مدت محدود با کد رخداد، شناسه هم‌بستگی و اطلاعات زمینه‌ای محدود نگهداری می‌شوند. رمز عبور، OTP، کلید API، توکن، متن پیام و شناسه خام نباید در این گزارش‌ها ذخیره شوند.', 'pinova' )
 			. '</p><p>'

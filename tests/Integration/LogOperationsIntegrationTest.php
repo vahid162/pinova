@@ -111,6 +111,37 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 		self::assertStringNotContainsString( 'secret-token', $json );
 	}
 
+	public function test_incident_redaction_accepts_only_known_events_and_generated_correlation_ids(): void {
+		$row = [
+			'created_at'     => '2026-01-01 00:00:00',
+			'level'          => 'warning',
+			'event'          => '09123456789',
+			'correlation_id' => 'token-like-legacy-secret',
+			'flow_id'        => 'not-a-flow-id',
+			'context'        => '{}',
+		];
+		$redacted = Logs::redact_incident_row( $row );
+
+		self::assertSame( 'logging.unknown_event', $redacted['event'] );
+		self::assertSame( '', $redacted['correlation_id'] );
+		self::assertSame( '', $redacted['flow_id'] );
+		self::assertStringNotContainsString( '09123456789', (string) wp_json_encode( $redacted ) );
+		self::assertStringNotContainsString( 'token-like-legacy-secret', (string) wp_json_encode( $redacted ) );
+		foreach ( [ str_repeat( 'a', 32 ), str_repeat( 'b', 64 ), '123e4567-e89b-12d3-a456-426614174000' ] as $legacy_id ) {
+			$row['correlation_id'] = $legacy_id;
+			self::assertSame( '', Logs::redact_incident_row( $row )['correlation_id'] );
+		}
+
+		$row['event']          = 'auth.request_failed';
+		$row['correlation_id'] = '123e4567-e89b-42d3-a456-426614174000';
+		$row['flow_id']        = str_repeat( 'a', 32 );
+		$redacted             = Logs::redact_incident_row( $row );
+
+		self::assertSame( 'auth.request_failed', $redacted['event'] );
+		self::assertSame( $row['correlation_id'], $redacted['correlation_id'] );
+		self::assertSame( $row['flow_id'], $redacted['flow_id'] );
+	}
+
 	public function test_authorized_incident_export_is_exact_redacted_and_audited(): void {
 		global $wpdb;
 
@@ -130,17 +161,17 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 		$base  = [
 			'created_at'     => $today . ' 12:00:00',
 			'level'          => 'warning',
-			'correlation_id' => 'incident-123',
+			'correlation_id' => '123e4567-e89b-42d3-a456-426614174000',
 			'flow_id'        => str_repeat( 'c', 32 ),
 			'user_id'        => $administrator,
 			'context'        => '{"http_status":403,"attempts":"123","count":"09120000000","duration_ms":9123456789,"identifier_fingerprint":"secret-fingerprint","password":"secret-password"}',
 		];
-		$wpdb->insert( $table, $base + [ 'event' => 'auth.selected' ] );
-		$wpdb->insert( $table, $base + [ 'event' => 'auth.unselected' ] );
+		$wpdb->insert( $table, $base + [ 'event' => 'auth.request_failed' ] );
+		$wpdb->insert( $table, $base + [ 'event' => 'auth.password_failed' ] );
 
 		$json = $this->capture_export(
 			[
-				'event'        => 'auth.selected',
+				'event'        => 'auth.request_failed',
 				'level'        => 'warning',
 				'created_from' => $today,
 				'created_to'   => $today,
@@ -154,7 +185,8 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( [ $today, $today ], $data['selected_range'] );
 		self::assertSame( 'warning', $data['level_filter'] );
 		self::assertCount( 1, $data['events'] );
-		self::assertSame( 'auth.selected', $data['events'][0]['event'] );
+		self::assertSame( 'auth.request_failed', $data['events'][0]['event'] );
+		self::assertSame( $base['correlation_id'], $data['events'][0]['correlation_id'] );
 		self::assertSame( str_repeat( 'c', 32 ), $data['events'][0]['flow_id'] );
 		self::assertSame( 403, $data['events'][0]['context']['http_status'] );
 		self::assertArrayNotHasKey( 'attempts', $data['events'][0]['context'] );
@@ -170,6 +202,123 @@ final class LogOperationsIntegrationTest extends WP_UnitTestCase {
 		self::assertIsArray( $audit );
 		self::assertSame( (string) $administrator, $audit['user_id'] );
 		self::assertSame( 1, json_decode( $audit['context'], true )['count'] );
+	}
+
+	public function test_incident_export_and_viewer_hide_legacy_secrets_in_record_fields(): void {
+		global $wpdb;
+
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_logs',
+			[
+				'created_at'     => gmdate( 'Y-m-d H:i:s' ),
+				'level'          => 'warning',
+				'event'          => 'otp.09123456789',
+				'correlation_id' => 'token-like-legacy-secret',
+				'flow_id'        => 'not-a-flow-id',
+				'context'        => '{}',
+			]
+		);
+
+		$json = $this->capture_export( [] );
+		$data = json_decode( $json, true );
+		self::assertIsArray( $data );
+		self::assertSame( 'logging.unknown_event', $data['events'][0]['event'] );
+		self::assertSame( '', $data['events'][0]['correlation_id'] );
+		self::assertSame( '', $data['events'][0]['flow_id'] );
+		self::assertStringNotContainsString( '09123456789', $json );
+		self::assertStringNotContainsString( 'token-like-legacy-secret', $json );
+
+		$original_get  = $_GET;
+		$_GET         = [];
+		$buffer_level = ob_get_level();
+		ob_start();
+		try {
+			Logs::render();
+			$html = (string) ob_get_clean();
+		} finally {
+			while ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			$_GET = $original_get;
+		}
+		self::assertStringContainsString( 'logging.unknown_event', $html );
+		self::assertStringNotContainsString( '09123456789', $html );
+		self::assertStringNotContainsString( 'token-like-legacy-secret', $html );
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_logs',
+			[
+				'created_at' => gmdate( 'Y-m-d H:i:s' ),
+				'level'      => 'warning',
+				'event'      => 'Auth.Request_Failed',
+				'context'    => '{}',
+			]
+		);
+
+		$filtered = LogRepository::paginate( 1, 50, '', [ 'event' => 'logging.unknown_event' ] );
+		self::assertSame( 2, $filtered['total'] );
+		self::assertSame( 0, LogRepository::paginate( 1, 50, '', [ 'event' => 'auth.request_failed' ] )['total'] );
+		self::assertSame( 'logging.unknown_event', Logs::redact_incident_row( $filtered['rows'][0] )['event'] );
+		$batch = LogRepository::incident_batch( [ 'event' => 'logging.unknown_event' ] );
+		self::assertTrue( $batch['success'] );
+		self::assertCount( 2, $batch['rows'] );
+		self::assertSame( 'logging.unknown_event', Logs::redact_incident_row( $batch['rows'][0] )['event'] );
+		$filtered_json = $this->capture_export( [ 'event' => 'logging.unknown_event' ] );
+		$filtered_data = json_decode( $filtered_json, true );
+		self::assertCount( 2, $filtered_data['events'] );
+		self::assertSame( 'logging.unknown_event', $filtered_data['events'][0]['event'] );
+		self::assertStringNotContainsString( '09123456789', $filtered_json );
+	}
+
+	public function test_failed_manual_clear_does_not_claim_or_audit_success(): void {
+		global $wpdb;
+
+		self::assertSame( 0, LogRepository::delete_all(), 'An empty table is a successful deletion.' );
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		$table = $wpdb->prefix . 'pinova_logs';
+		$wpdb->insert(
+			$table,
+			[
+				'created_at'     => gmdate( 'Y-m-d H:i:s' ),
+				'level'          => 'warning',
+				'event'          => 'auth.request_failed',
+				'correlation_id' => '123e4567-e89b-42d3-a456-426614174000',
+				'context'        => '{}',
+			]
+		);
+
+		$fail_delete = static function ( string $query ) use ( $table ): string {
+			return str_starts_with( $query, 'DELETE FROM ' ) && str_contains( $query, $table )
+				? 'SELECT `pinova_missing_column` FROM ' . $table . ' LIMIT 1'
+				: $query;
+		};
+		$die_handler = static function (): callable {
+			return static function ( $message, $title, $args ): void {
+				throw new \RuntimeException( (string) $args['response'] );
+			};
+		};
+		$original_request = $_REQUEST;
+		$previous_errors  = $wpdb->suppress_errors( true );
+		add_filter( 'query', $fail_delete );
+		add_filter( 'wp_die_handler', $die_handler );
+		try {
+			self::assertFalse( LogRepository::delete_all() );
+			$_REQUEST = [ '_wpnonce' => wp_create_nonce( 'pinova_clear_logs' ) ];
+			try {
+				( new Logs() )->clear();
+				self::fail( 'Expected database failure to prevent clear success.' );
+			} catch ( \RuntimeException $exception ) {
+				self::assertSame( '503', $exception->getMessage() );
+			}
+		} finally {
+			$_REQUEST = $original_request;
+			remove_filter( 'query', $fail_delete );
+			remove_filter( 'wp_die_handler', $die_handler );
+			$wpdb->suppress_errors( $previous_errors );
+		}
+
+		self::assertSame( '1', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $table ) ) );
+		self::assertSame( '0', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE `event` = %s', $table, 'logging.cleared' ) ) );
 	}
 
 	public function test_incident_export_marks_the_row_limit(): void {

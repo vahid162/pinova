@@ -13,6 +13,10 @@ final class EventThrottle {
 	private const SOURCE_SLOTS   = 1024;
 
 	private const EVENTS = [
+		'auth.request_failed'           => [
+			'scope' => 'log_auth_request_failed',
+			'level' => 'error',
+		],
 		'auth.logout_rejected'          => [
 			'scope' => 'log_logout_rejected',
 			'level' => 'notice',
@@ -25,6 +29,10 @@ final class EventThrottle {
 			'scope' => 'log_reset_succeeded',
 			'level' => 'info',
 		],
+		'otp.verify_failed'             => [
+			'scope' => 'log_otp_verify_failed',
+			'level' => 'notice',
+		],
 	];
 
 	/** @param array<string, mixed> $context */
@@ -36,14 +44,18 @@ final class EventThrottle {
 		try {
 			$config = self::EVENTS[ $event ];
 			$logger = Logger::instance();
-			if ( ! $logger->is_enabled( $config['level'] ) ) {
+			$level  = 'otp.verify_failed' === $event && 'ip_mismatch' === ( $context['reason'] ?? '' ) ? 'warning' : $config['level'];
+			if ( ! $logger->is_enabled( $level ) ) {
 				return;
 			}
 
 			$ip     = IP::get();
 			$source = '' === $ip ? 'unknown' : inet_pton( $ip );
-			$hash   = hash_hmac( 'sha256', (string) $source, wp_salt( 'auth' ) );
-			$slot   = hexdec( substr( $hash, 0, 4 ) ) % self::SOURCE_SLOTS;
+			if ( 'otp.verify_failed' === $event ) {
+				$source .= '|' . (string) ( $context['reason'] ?? 'unknown' );
+			}
+			$hash = hash_hmac( 'sha256', (string) $source, wp_salt( 'auth' ) );
+			$slot = hexdec( substr( $hash, 0, 4 ) ) % self::SOURCE_SLOTS;
 
 			// Fixed slots bound storage even if cleanup stops. Collisions only suppress
 			// observations; they never deny authentication or increase the log budget.
@@ -52,7 +64,10 @@ final class EventThrottle {
 				return;
 			}
 
-			$logger->log( $config['level'], $event, $context + [ 'ip_fingerprint' => $logger->fingerprint( $ip, 'ip' ) ] );
+			$event_context = 'otp.verify_failed' === $event
+				? $context
+				: $context + [ 'ip_fingerprint' => $logger->fingerprint( $ip, 'ip' ) ];
+			$logger->log( $level, $event, $event_context );
 		} catch ( Throwable $throwable ) {
 			// Fail closed for emission, not for the user operation being observed.
 			unset( $throwable );

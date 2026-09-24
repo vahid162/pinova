@@ -25,13 +25,18 @@ final class LoggingTestGateway extends BaseGateway {
 	protected string $url = 'example.test';
 
 	public static bool $fail_with_error = false;
+	public static bool $fail_with_exception = false;
+	public static bool $return_false = false;
 
 	public function send( string $mobile, string $message ): bool {
 		if ( self::$fail_with_error ) {
 			throw new \Error( 'Deliberate test-only transport failure.' );
 		}
+		if ( self::$fail_with_exception ) {
+			throw new \RuntimeException( 'Provider echoed api_key=secret-token and mobile=' . $mobile );
+		}
 
-		return true;
+		return ! self::$return_false;
 	}
 
 	public function is_enable(): bool {
@@ -66,6 +71,8 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 
 	public function tear_down(): void {
 		LoggingTestGateway::$fail_with_error = false;
+		LoggingTestGateway::$fail_with_exception = false;
+		LoggingTestGateway::$return_false = false;
 		LogRepository::delete_all();
 		$this->delete_rate_limits();
 		delete_option( 'pinova_logging' );
@@ -123,6 +130,7 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 		}
 
 		self::assertSame( 200, $response->get_status() );
+		self::assertSame( 'کد تأیید با موفقیت پیامک شد.', $response->get_data()['message'] );
 		$this->assert_latest_event( 'admin.sms_test_succeeded', 'notice' );
 	}
 
@@ -144,6 +152,46 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 
 		self::assertSame( 503, $response->get_status() );
 		self::assertSame( 'خطای داخلی هنگام ارسال پیامک رخ داده است.', $response->get_data()['message'] );
+		$this->assert_latest_event( 'admin.sms_test_failed', 'error' );
+	}
+
+	public function test_admin_sms_test_treats_false_provider_result_as_failure(): void {
+		LoggingTestGateway::$return_false = true;
+		$filter = static fn(): array => [
+			'gateway'      => LoggingTestGateway::class,
+			'message_code' => 'pattern:test\ncode:{{otp}}',
+		];
+		add_filter( 'pre_option_pinova_sms', $filter );
+		try {
+			$request = new WP_REST_Request( 'POST', '/pinova/admin/test/sms' );
+			$request->set_param( 'identifier', new Identifier( '09120000000' ) );
+			$response = ( new AdminAPI() )->test_sms( $request );
+		} finally {
+			remove_filter( 'pre_option_pinova_sms', $filter );
+		}
+
+		self::assertSame( 503, $response->get_status() );
+		$this->assert_latest_event( 'admin.sms_test_failed', 'error' );
+	}
+
+	public function test_admin_sms_test_does_not_return_provider_exception_text(): void {
+		LoggingTestGateway::$fail_with_exception = true;
+		$filter = static fn(): array => [
+			'gateway'      => LoggingTestGateway::class,
+			'message_code' => 'pattern:test\ncode:{{otp}}',
+		];
+		add_filter( 'pre_option_pinova_sms', $filter );
+		try {
+			$request = new WP_REST_Request( 'POST', '/pinova/admin/test/sms' );
+			$request->set_param( 'identifier', new Identifier( '09120000000' ) );
+			$response = ( new AdminAPI() )->test_sms( $request );
+		} finally {
+			remove_filter( 'pre_option_pinova_sms', $filter );
+		}
+
+		self::assertSame( 503, $response->get_status() );
+		self::assertSame( 'خطای داخلی هنگام ارسال پیامک رخ داده است.', $response->get_data()['message'] );
+		self::assertStringNotContainsString( 'secret-token', wp_json_encode( $response->get_data() ) );
 		$this->assert_latest_event( 'admin.sms_test_failed', 'error' );
 	}
 

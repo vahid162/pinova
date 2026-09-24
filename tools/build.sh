@@ -73,6 +73,14 @@ find "${stage_dir}/vendor" -type d \( \
   -name docs -o -name examples -o -name bin \
 \) -prune -exec rm -rf -- '{}' +
 
+# Composer distributions also carry loose development files. Keep runtime
+# sources, package metadata, and licenses while excluding these artifacts.
+find "${stage_dir}/vendor" -type f \( \
+  -name .gitignore -o -name .gitattributes -o -name .editorconfig -o \
+  -name 'CONTRIBUTING*' -o -name 'phpunit.xml*' -o \
+  -name 'phpstan.neon*' -o -name 'psalm.xml*' \
+\) -delete
+
 if ! grep -Fq "utils/class-database.php" "${stage_dir}/vendor/composer/autoload_files.php"; then
 	echo "Pinova database bootstrap is missing from Composer's eager autoload files." >&2
 	exit 1

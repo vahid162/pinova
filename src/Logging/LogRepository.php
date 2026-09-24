@@ -8,6 +8,52 @@ final class LogRepository {
 
 	public const DEFAULT_RETENTION_DAYS = 14;
 	private const LEVELS                = [ 'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency' ];
+	private const EXPORT_EVENTS         = [
+		'admin.sms_test_failed',
+		'admin.sms_test_succeeded',
+		'auth.logout_rejected',
+		'auth.password_failed',
+		'auth.password_reset_failed',
+		'auth.password_reset_succeeded',
+		'auth.password_succeeded',
+		'auth.redirect_failed',
+		'auth.request_failed',
+		'auth.session_created',
+		'auth.session_destroyed',
+		'identity.mobile_conflict',
+		'identity.resolved',
+		'logging.cleared',
+		'logging.incident_exported',
+		'logging.unknown_event',
+		'logging.write_failed',
+		'otp.channel_send_failed',
+		'otp.created',
+		'otp.delivery_failed',
+		'otp.verified',
+		'otp.verify_failed',
+		'security.block_added',
+		'security.block_removed',
+		'security.native_login_armed',
+		'security.native_login_gate_disabled',
+		'security.native_login_gate_enabled',
+		'security.rate_limited',
+		'settings.updated',
+		'user.export_failed',
+		'user.export_generated',
+		'user.registered',
+	];
+
+	/** @param mixed $event */
+	public static function redact_event( $event ): string {
+		return is_string( $event ) && in_array( $event, self::EXPORT_EVENTS, true ) ? $event : 'logging.unknown_event';
+	}
+
+	/** @param mixed $correlation_id */
+	public static function redact_correlation_id( $correlation_id ): string {
+		return is_string( $correlation_id ) && preg_match( '/\A[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\z/', $correlation_id )
+			? $correlation_id
+			: '';
+	}
 
 	public static function cleanup(): int {
 		global $wpdb;
@@ -27,14 +73,15 @@ final class LogRepository {
 		return max( 0, (int) $wpdb->query( $query ) );
 	}
 
-	public static function delete_all(): int {
+	public static function delete_all(): int|false {
 		global $wpdb;
 
 		if ( ! self::table_exists() ) {
-			return 0;
+			return false;
 		}
 
-		return max( 0, (int) $wpdb->query( $wpdb->prepare( 'DELETE FROM %i', self::table_name() ) ) );
+		$deleted = $wpdb->query( $wpdb->prepare( 'DELETE FROM %i', self::table_name() ) );
+		return false === $deleted ? false : max( 0, (int) $deleted );
 	}
 
 	/**
@@ -90,8 +137,15 @@ final class LogRepository {
 			];
 		}
 
+		$safe_rows = [];
+		foreach ( is_array( $rows ) ? $rows : [] as $row ) {
+			$row['event']          = self::redact_event( $row['event'] ?? null );
+			$row['correlation_id'] = self::redact_correlation_id( $row['correlation_id'] ?? null );
+			$safe_rows[]           = $row;
+		}
+
 		return [
-			'rows'    => is_array( $rows ) ? $rows : [],
+			'rows'    => $safe_rows,
 			'success' => true,
 		];
 	}
@@ -426,7 +480,6 @@ final class LogRepository {
 		$values  = [];
 		foreach ( [
 			'level'          => $level,
-			'event'          => $filters['event'],
 			'correlation_id' => $filters['correlation_id'],
 			'flow_id'        => $filters['flow_id'],
 		] as $column => $value ) {
@@ -434,6 +487,16 @@ final class LogRepository {
 				$clauses[] = '`' . $column . '` = %s';
 				$values[]  = $value;
 			}
+		}
+		if ( 'logging.unknown_event' === $filters['event'] ) {
+			$placeholders = implode( ', ', array_fill( 0, count( self::EXPORT_EVENTS ), '%s' ) );
+			$clauses[]    = '(BINARY `event` = %s OR BINARY `event` NOT IN (' . $placeholders . '))';
+			$values[]     = 'logging.unknown_event';
+			$values       = array_merge( $values, self::EXPORT_EVENTS );
+		} elseif ( '' !== $filters['event'] ) {
+			$clauses[] = '(`event` = %s AND BINARY `event` = %s)';
+			$values[]  = $filters['event'];
+			$values[]  = $filters['event'];
 		}
 		if ( $filters['user_id'] > 0 ) {
 			$clauses[] = '`user_id` = %d';

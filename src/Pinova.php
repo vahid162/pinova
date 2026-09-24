@@ -9,6 +9,7 @@ use Pinova\Logging\LogRepository;
 use Pinova\Logging\SettingsAudit;
 use Pinova\Services\APIService;
 use Pinova\Services\RateLimitService;
+use Pinova\Services\OTPService;
 use Pinova\Services\SMSService;
 use Pinova\Services\UserService;
 
@@ -44,6 +45,7 @@ class Pinova {
 		add_action( 'init', [ $this, 'register_rewrite_rules' ] );
 		add_action( 'init', [ $this, 'schedule_cleanup' ] );
 		add_action( 'pinova_rate_limit_cleanup', [ RateLimitService::class, 'cleanup' ] );
+		add_action( 'pinova_otp_delivery', [ OTPService::class, 'deliver_queued' ] );
 		add_action( 'pinova_logging_cleanup', [ $this, 'cleanup_logs' ] );
 		add_action( 'updated_option', [ SettingsAudit::class, 'updated' ], 10, 3 );
 		add_action( 'added_option', [ SettingsAudit::class, 'added' ], 10, 2 );

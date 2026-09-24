@@ -23,7 +23,7 @@ final class EventThrottleIntegrationTest extends WP_UnitTestCase {
 		global $wpdb;
 		$this->original_server = $_SERVER;
 		$_SERVER['REMOTE_ADDR'] = '192.0.2.80';
-		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded')" );
+		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded', 'log_otp_verify_failed', 'log_auth_request_failed')" );
 		LogRepository::delete_all();
 		update_option( 'pinova_logging', [ 'minimum_level' => 'info', 'diagnostic_until' => 0 ] );
 	}
@@ -43,6 +43,17 @@ final class EventThrottleIntegrationTest extends WP_UnitTestCase {
 		$context = LogRepository::paginate()['rows'][0]['context'];
 		self::assertStringNotContainsString( 'secret-password', $context );
 		self::assertStringNotContainsString( '192.0.2.80', $context );
+	}
+
+	public function test_invalid_otp_observations_are_bounded_per_reason_and_site(): void {
+		global $wpdb;
+
+		for ( $index = 0; $index < 10; ++$index ) {
+			EventThrottle::log( 'otp.verify_failed', [ 'reason' => 'record_not_found' ] );
+		}
+		self::assertSame( 1, LogRepository::paginate()['total'] );
+		$site_key = hash( 'sha256', 'pinova:event-throttle:log_otp_verify_failed:site' );
+		self::assertSame( '1', $wpdb->get_var( $wpdb->prepare( 'SELECT `hits` FROM %i WHERE `bucket_key` = %s', $wpdb->prefix . 'pinova_rate_limits', $site_key ) ) );
 	}
 
 	public function test_source_and_site_windows_reopen_without_new_bucket_keys(): void {

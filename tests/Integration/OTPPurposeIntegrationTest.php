@@ -31,6 +31,8 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 
 	public function set_up(): void {
 		parent::set_up();
+		global $wpdb;
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', 'log_otp_verify_failed' ) );
 
 		$this->had_remote_address = isset( $_SERVER['REMOTE_ADDR'] );
 		$this->remote_address     = (string) ( $_SERVER['REMOTE_ADDR'] ?? '' );
@@ -50,6 +52,8 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
+		wp_unschedule_hook( 'pinova_otp_delivery' );
+		remove_action( 'shutdown', [ OTPService::class, 'spawn_queued_delivery' ], 100 );
 		OTP::query()->delete();
 		LogRepository::delete_all();
 		delete_option( 'pinova_logging' );
@@ -73,16 +77,30 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		);
 		$login_otp  = $this->create_otp( $user_id, 'purpose-reuse@example.test', OTP::TYPE_LOGIN );
 		$forgot_otp = $this->create_otp( $user_id, 'purpose-reuse@example.test', OTP::TYPE_FORGET );
+		$login_otp->flow_id  = str_repeat( 'a', 32 );
+		$forgot_otp->flow_id = str_repeat( 'b', 32 );
+		$login_otp->save();
+		$forgot_otp->save();
 
-		$forgot_response = $this->authenticate( 'purpose-reuse@example.test', true, false );
-		$forgot_payload  = JWT::decode( $forgot_response->get_data()['data']['jwt'] );
+		$mail = static fn(): bool => true;
+		add_filter( 'pre_wp_mail', $mail );
+		try {
+			$forgot_response = $this->authenticate( 'purpose-reuse@example.test', true, false );
+			$login_response  = $this->authenticate( 'purpose-reuse@example.test', false, true );
+		} finally {
+			remove_filter( 'pre_wp_mail', $mail );
+		}
+		$forgot_payload = JWT::decode( $forgot_response->get_data()['data']['jwt'] );
 
-		self::assertSame( (int) $forgot_otp->id, (int) $forgot_payload['otp_id'] );
+		self::assertNotSame( $forgot_otp->flow_id, $forgot_payload['flow_id'] );
+		self::assertSame( OTP::TYPE_FORGET, OTP::query()->where( 'flow_id', $forgot_payload['flow_id'] )->firstOrFail()->type );
+		self::assertArrayNotHasKey( 'otp_id', $forgot_payload );
 
-		$login_response = $this->authenticate( 'purpose-reuse@example.test', false, true );
 		$login_payload  = JWT::decode( $login_response->get_data()['data']['jwt'] );
 
-		self::assertSame( (int) $login_otp->id, (int) $login_payload['otp_id'] );
+		self::assertNotSame( $login_otp->flow_id, $login_payload['flow_id'] );
+		self::assertSame( OTP::TYPE_LOGIN, OTP::query()->where( 'flow_id', $login_payload['flow_id'] )->firstOrFail()->type );
+		self::assertArrayNotHasKey( 'otp_id', $login_payload );
 	}
 
 	public function test_new_otp_reuses_one_server_signed_flow_across_requests(): void {
@@ -102,15 +120,36 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 200, $second->get_status() );
 		$first_payload  = JWT::decode( $first->get_data()['data']['jwt'] );
 		$second_payload = JWT::decode( $second->get_data()['data']['jwt'] );
-		$otp            = OTP::query()->findOrFail( $first_payload['otp_id'] );
+		$otp            = OTP::query()->where( 'flow_id', $first_payload['flow_id'] )->firstOrFail();
 		self::assertSame( $user_id, (int) $otp->user_id );
 		self::assertMatchesRegularExpression( '/\A[a-f0-9]{32}\z/', $otp->flow_id );
 		self::assertSame( $otp->flow_id, $first_payload['flow_id'] );
+		self::assertArrayNotHasKey( 'otp_id', $first_payload );
 		self::assertSame( $first_payload['flow_id'], $second_payload['flow_id'] );
-		self::assertSame( $first_payload['otp_id'], $second_payload['otp_id'] );
 		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT `flow_id`, `context` FROM %i WHERE `event` = %s ORDER BY `id` DESC LIMIT 1', $wpdb->prefix . 'pinova_logs', 'otp.created' ), ARRAY_A );
 		self::assertSame( $otp->flow_id, $row['flow_id'] );
 		self::assertArrayNotHasKey( 'flow_id', json_decode( $row['context'], true ) );
+	}
+
+	public function test_public_initiation_replaces_a_legacy_null_flow_without_invalidating_its_token(): void {
+		$user_id = self::factory()->user->create( [ 'user_email' => 'legacy-flow@example.test', 'role' => 'subscriber' ] );
+		$legacy  = $this->create_otp( $user_id, 'legacy-flow@example.test', OTP::TYPE_LOGIN );
+		$legacy_token = OTPService::signed_state( $legacy );
+		$mail    = static fn(): bool => true;
+		add_filter( 'pre_wp_mail', $mail );
+		try {
+			$response = $this->authenticate( 'legacy-flow@example.test', false, true );
+		} finally {
+			remove_filter( 'pre_wp_mail', $mail );
+		}
+
+		self::assertSame( 200, $response->get_status() );
+		$payload = JWT::decode( $response->get_data()['data']['jwt'] );
+		self::assertArrayNotHasKey( 'otp_id', $payload );
+		self::assertNotNull( OTP::query()->where( 'flow_id', $payload['flow_id'] )->first() );
+		self::assertNull( $legacy->fresh()->flow_id );
+		self::assertNull( $legacy->fresh()->verified_at );
+		self::assertSame( $user_id, OTPService::verify( $legacy_token, '1234', [ OTP::TYPE_LOGIN ] )->ID );
 	}
 
 	public function test_signed_flow_mismatch_and_unsigned_override_cannot_verify(): void {
@@ -126,7 +165,7 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		self::assertNull( $otp->fresh()->verified_at );
 		self::assertSame( 0, (int) $otp->fresh()->attempts );
 
-		$request->set_param( 'jwt', JWT::encode( [ 'otp_id' => $otp->id, 'flow_id' => $otp->flow_id ] ) );
+		$request->set_param( 'jwt', OTPService::signed_state( $otp ) );
 		$request->set_param( 'flow_id', $otp->flow_id );
 		self::assertSame( 400, ( new UserAPI() )->login_otp( $request )->get_status() );
 		self::assertNull( $otp->fresh()->verified_at );
@@ -140,13 +179,59 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		$otp->flow_id = str_repeat( 'c', 32 );
 		$otp->save();
 		$request = new WP_REST_Request( 'POST', '/pinova/user/login/otp' );
-		$request->set_param( 'jwt', JWT::encode( [ 'otp_id' => $otp->id, 'flow_id' => $otp->flow_id ] ) );
+		$request->set_param( 'jwt', OTPService::signed_state( $otp ) );
 		$request->set_param( 'code', '1234' );
 
 		self::assertSame( 200, ( new UserAPI() )->login_otp( $request )->get_status() );
 		self::assertSame( $user_id, get_current_user_id() );
 		$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT `event`, `flow_id` FROM %i WHERE `event` IN (%s, %s) ORDER BY `id` ASC', $wpdb->prefix . 'pinova_logs', 'otp.verified', 'auth.session_created' ), ARRAY_A );
 		self::assertSame( [ [ 'event' => 'otp.verified', 'flow_id' => $otp->flow_id ], [ 'event' => 'auth.session_created', 'flow_id' => $otp->flow_id ] ], $rows );
+	}
+
+	public function test_only_one_stale_copy_can_claim_an_otp(): void {
+		$otp    = $this->create_otp( self::factory()->user->create( [ 'role' => 'subscriber' ] ), 'one-use@example.test', OTP::TYPE_LOGIN );
+		$first  = OTP::query()->findOrFail( $otp->id );
+		$second = OTP::query()->findOrFail( $otp->id );
+
+		self::assertTrue( $first->markVerified() );
+		self::assertFalse( $second->markVerified() );
+		self::assertNotNull( $otp->fresh()->verified_at );
+	}
+
+	public function test_stale_copies_cannot_lose_attempts_or_exceed_the_limit(): void {
+		$otp    = $this->create_otp( self::factory()->user->create( [ 'role' => 'subscriber' ] ), 'attempts@example.test', OTP::TYPE_LOGIN );
+		$copies = [];
+		for ( $index = 0; $index < 6; ++$index ) {
+			$copies[] = OTP::query()->findOrFail( $otp->id );
+		}
+
+		foreach ( $copies as $index => $copy ) {
+			self::assertSame( $index < 5, $copy->incrementAttempts() );
+		}
+
+		self::assertSame( 5, (int) $otp->fresh()->attempts );
+		self::assertFalse( $otp->fresh()->markVerified() );
+	}
+
+	public function test_a_claim_during_code_check_cannot_create_a_second_session(): void {
+		$otp     = $this->create_otp( self::factory()->user->create( [ 'role' => 'subscriber' ] ), 'claim-race@example.test', OTP::TYPE_LOGIN );
+		$claimed = false;
+		$claim   = static function ( bool $checked ) use ( $otp, &$claimed ): bool {
+			if ( ! $claimed ) {
+				$claimed = $otp->fresh()->markVerified();
+			}
+			return $checked;
+		};
+		add_filter( 'check_password', $claim );
+		try {
+			$response = $this->verify( 'login', $otp, '1234' );
+		} finally {
+			remove_filter( 'check_password', $claim );
+		}
+
+		self::assertTrue( $claimed );
+		self::assertSame( 401, $response->get_status() );
+		self::assertSame( 0, get_current_user_id() );
 	}
 
 	public function test_recovery_keeps_the_flow_in_server_signed_reset_state(): void {
@@ -430,7 +515,14 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		$request->set_param( 'forget', $forget );
 		$request->set_param( 'force_otp', $force_otp );
 
-		return ( new UserAPI() )->authenticate( $request );
+		$response = ( new UserAPI() )->authenticate( $request );
+		if ( 200 === $response->get_status() && isset( $response->get_data()['data']['jwt'] ) ) {
+			$flow_id = JWT::decode( $response->get_data()['data']['jwt'] )['flow_id'];
+			wp_clear_scheduled_hook( 'pinova_otp_delivery', [ $flow_id ] );
+			do_action( 'pinova_otp_delivery', $flow_id );
+		}
+
+		return $response;
 	}
 
 	private function verify( string $purpose, OTP $otp, string $code ): WP_REST_Response {

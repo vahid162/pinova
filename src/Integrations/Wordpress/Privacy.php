@@ -169,9 +169,18 @@ final class Privacy {
 		}
 
 		$mobile           = $mobile_lookup['value'];
-		$identifiers      = self::erasure_identifiers( $user, $email_address, $mobile );
-		$otp_result       = self::delete_otp_records( $user->ID, $identifiers );
+		$identity_result  = self::erasure_identifiers( $user, $email_address, $mobile );
+		if ( ! $identity_result['success'] ) {
+			return [
+				'items_removed'  => false,
+				'items_retained' => true,
+				'messages'       => [ __( 'بخشی از داده‌های پینوا حذف نشد. لطفاً عملیات پاک‌سازی را دوباره اجرا کنید.', 'pinova' ) ],
+				'done'           => false,
+			];
+		}
+		$identifiers      = $identity_result['identifiers'];
 		$queue_cleared    = RateLimitService::delete_queued_for_identifiers( $identifiers );
+		$otp_result       = self::delete_otp_records( $user->ID, $identifiers );
 		$fingerprints     = self::identifier_fingerprints( $identifiers );
 		$identifier_types = self::identifier_types( $identifiers );
 		$logs             = LogRepository::anonymize_user( $user->ID, self::BATCH_SIZE, $fingerprints, $identifier_types );
@@ -202,8 +211,8 @@ final class Privacy {
 	 */
 	private static function erase_unowned_email_data( string $email_address ): array {
 		$identifiers   = self::email_variants( $email_address );
-		$otp_result    = self::delete_otp_records( 0, $identifiers );
 		$queue_cleared = RateLimitService::delete_queued_for_identifiers( $identifiers );
+		$otp_result    = self::delete_otp_records( 0, $identifiers );
 		$fingerprints  = self::identifier_fingerprints( $identifiers );
 		$logs          = LogRepository::anonymize_user( 0, self::BATCH_SIZE, $fingerprints, self::identifier_types( $identifiers ) );
 		$success       = $otp_result['success'] && $queue_cleared && $logs['success'];
@@ -235,26 +244,60 @@ final class Privacy {
 	}
 
 	/**
-	 * Include a Pinova-created mobile login for erasure ownership only. It is
-	 * not exported as Pinova profile metadata unless a physical meta row exists.
+	 * Include only mobile aliases which resolve uniquely to this account under
+	 * the same rules used by authentication. They remain excluded from profile
+	 * export unless a physical Pinova mobile row exists.
 	 *
-	 * @return string[]
+	 * @return array{success:bool,identifiers:string[]}
 	 */
 	private static function erasure_identifiers( WP_User $user, string $email_address, ?string $physical_mobile ): array {
+		global $wpdb;
+
 		$identifiers = array_merge( self::email_variants( $user->user_email ), self::email_variants( $email_address ) );
+		$mobile_values = [ $user->user_login ];
 
 		if ( null !== $physical_mobile ) {
-			$identifiers[] = $physical_mobile;
+			$mobile_values[] = $physical_mobile;
 		}
 
-		if ( 'pinova' === get_user_meta( $user->ID, 'created_by', true ) ) {
-			$registration_mobile = new Mobile( $user->user_login );
-			if ( $registration_mobile->is_valid() ) {
-				$identifiers[] = $registration_mobile->get_formatted();
+		$meta_keys = array_values( array_filter( array_diff( UserService::mobile_possible_meta_keys(), [ 'pinova_mobile' ] ), 'is_string' ) );
+		if ( $meta_keys ) {
+			$placeholders = implode( ', ', array_fill( 0, count( $meta_keys ), '%s' ) );
+			$values = $wpdb->get_col(
+				$wpdb->prepare(
+					// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Only fixed placeholders are generated.
+					"SELECT `meta_value` FROM %i WHERE `user_id` = %d AND `meta_key` IN ({$placeholders})",
+					...array_merge( [ $wpdb->usermeta, $user->ID ], $meta_keys )
+				)
+			);
+			if ( $wpdb->last_error || ! is_array( $values ) ) {
+				return [ 'success' => false, 'identifiers' => [] ];
+			}
+			$mobile_values = array_merge( $mobile_values, $values );
+		}
+
+		$mobile_candidates = [];
+		foreach ( $mobile_values as $value ) {
+			$mobile = new Mobile( is_scalar( $value ) ? (string) $value : '' );
+			if ( ! $mobile->is_valid() ) {
+				continue;
+			}
+			$mobile_candidates[] = $mobile->get_formatted();
+		}
+		foreach ( array_unique( $mobile_candidates ) as $formatted ) {
+			$owner       = UserService::mobile_candidate_ids_result( $formatted );
+			$after_erase = null === $physical_mobile ? $owner : UserService::mobile_candidate_ids_result( $formatted, $user->ID );
+			if ( ! $owner['success'] || ! $after_erase['success'] ||
+				( in_array( $user->ID, $owner['ids'], true ) && 1 !== count( $owner['ids'] ) ) ||
+				( in_array( $user->ID, $after_erase['ids'], true ) && 1 !== count( $after_erase['ids'] ) ) ) {
+				return [ 'success' => false, 'identifiers' => [] ];
+			}
+			if ( [ $user->ID ] === $owner['ids'] || [ $user->ID ] === $after_erase['ids'] ) {
+				$identifiers[] = $formatted;
 			}
 		}
 
-		return array_values( array_unique( array_filter( $identifiers ) ) );
+		return [ 'success' => true, 'identifiers' => array_values( array_unique( array_filter( $identifiers ) ) ) ];
 	}
 
 	/** @return string[] */

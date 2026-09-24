@@ -318,6 +318,154 @@ final class SecurityRegressionTest extends WP_UnitTestCase {
 		self::assertSame( 'in-progress@example.test', RateLimitService::claim_queued_otp( $first[0] )['identifier'] );
 	}
 
+	public function test_crashed_delivery_claim_can_be_recovered_before_the_flow_expires(): void {
+		global $wpdb;
+
+		$email = 'crashed-worker@example.test';
+		self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+		$first = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.50' );
+		self::assertNotNull( RateLimitService::claim_queued_otp( $first[0] ) );
+		self::assertNull( RateLimitService::claim_queued_otp( $first[0] ) );
+
+		$wpdb->update(
+			$wpdb->prefix . 'pinova_rate_limits',
+			[ 'updated_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS - 1 ) ],
+			[ 'scope' => $first[0] ]
+		);
+		self::assertNull( RateLimitService::claim_queued_otp( $first[0] ) );
+		$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', 'pinova_otp_' . $first[0] ) );
+
+		self::assertFalse( wp_next_scheduled( 'pinova_otp_delivery', [ $first[0] ] ) );
+		$request = new WP_REST_Request( 'POST', '/pinova/user/authenticate' );
+		$request->set_param( 'identifier', new Identifier( $email ) );
+		$request->set_param( 'force_otp', true );
+		$response = ( new UserAPI() )->authenticate( $request );
+		self::assertSame( 200, $response->get_status() );
+		self::assertSame( $first[0], JWT::decode( $response->get_data()['data']['jwt'] )['flow_id'] );
+		self::assertNotFalse( wp_next_scheduled( 'pinova_otp_delivery', [ $first[0] ] ) );
+
+		$sent = 0;
+		$mail = static function () use ( &$sent ): bool {
+			++$sent;
+			return true;
+		};
+		add_filter( 'pre_wp_mail', $mail );
+		try {
+			$this->run_queued_otp( $first[0] );
+		} finally {
+			remove_filter( 'pre_wp_mail', $mail );
+		}
+		self::assertSame( 1, $sent );
+		self::assertCount( 1, OTP::query()->where( 'flow_id', $first[0] )->get() );
+	}
+
+	public function test_expired_flow_cannot_rotate_over_a_live_worker_claim(): void {
+		global $wpdb;
+
+		$email = 'expiring-worker@example.test';
+		[ $flow_id ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.50' );
+		$claim = RateLimitService::claim_queued_otp( $flow_id );
+		self::assertNotNull( $claim );
+		$wpdb->update( $wpdb->prefix . 'pinova_rate_limits', [ 'reset_at' => gmdate( 'Y-m-d H:i:s', time() - 1 ) ], [ 'scope' => $flow_id ] );
+
+		try {
+			RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.50' );
+			self::fail( 'An active worker claim was overwritten after flow expiry.' );
+		} catch ( RateLimitUnavailableException $exception ) {
+			self::assertSame( 'An OTP delivery is still active.', $exception->getMessage() );
+		}
+		$payload = $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) );
+		self::assertStringStartsWith( 'processing:' . $claim['claim_token'] . ':', $payload );
+		RateLimitService::finish_queued_otp( $flow_id, $claim['claim_token'] );
+		[ $next_flow ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.50' );
+		self::assertNotSame( $flow_id, $next_flow );
+	}
+
+	public function test_legacy_processing_marker_rotates_only_after_expiry_and_grace(): void {
+		global $wpdb;
+
+		$email = 'legacy-processing@example.test';
+		[ $flow_id ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.50' );
+		$table = $wpdb->prefix . 'pinova_rate_limits';
+		$wpdb->update( $table, [ 'payload' => 'processing', 'reset_at' => gmdate( 'Y-m-d H:i:s', time() - 1 ) ], [ 'scope' => $flow_id ] );
+		try {
+			RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.50' );
+			self::fail( 'A legacy in-flight marker rotated before its safety grace.' );
+		} catch ( RateLimitUnavailableException $exception ) {
+			self::assertSame( 'The decoy flow could not be read.', $exception->getMessage() );
+		}
+		$wpdb->update( $table, [ 'reset_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS - 2 ) ], [ 'scope' => $flow_id ] );
+		[ $next_flow ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.50' );
+		self::assertNotSame( $flow_id, $next_flow );
+	}
+
+	public function test_recovered_claim_supersedes_a_stale_worker_token(): void {
+		global $wpdb;
+
+		[ $flow_id ] = RateLimitService::decoy_flow( 'superseded-worker@example.test', 'authenticate', '192.0.2.50' );
+		$first = RateLimitService::claim_queued_otp( $flow_id );
+		$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', 'pinova_otp_' . $flow_id ) );
+		$wpdb->update(
+			$wpdb->prefix . 'pinova_rate_limits',
+			[ 'updated_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS - 1 ) ],
+			[ 'scope' => $flow_id ]
+		);
+		$second = RateLimitService::claim_queued_otp( $flow_id );
+
+		self::assertNotSame( $first['claim_token'], $second['claim_token'] );
+		self::assertFalse( RateLimitService::queued_otp_is_active( $flow_id, $first['claim_token'] ) );
+		self::assertTrue( RateLimitService::queued_otp_is_active( $flow_id, $second['claim_token'] ) );
+		RateLimitService::finish_queued_otp( $flow_id, $first['claim_token'] );
+		self::assertTrue( RateLimitService::queued_otp_is_active( $flow_id, $second['claim_token'] ) );
+		self::assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT IS_USED_LOCK(%s)', 'pinova_otp_' . $flow_id ) ) );
+		RateLimitService::finish_queued_otp( $flow_id, $second['claim_token'] );
+	}
+
+	public function test_crash_after_otp_insert_preserves_a_possibly_delivered_code(): void {
+		global $wpdb;
+
+		$email = 'crashed-after-insert@example.test';
+		$user_id = self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+		[ $flow_id ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.50' );
+		self::assertNotNull( RateLimitService::claim_queued_otp( $flow_id ) );
+		$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', 'pinova_otp_' . $flow_id ) );
+		$old = OTP::query()->create(
+			[
+				'user_id' => $user_id,
+				'flow_id' => $flow_id,
+				'identifier' => $email,
+				'code' => '1234',
+				'ip_address' => '192.0.2.50',
+				'type' => OTP::TYPE_LOGIN,
+				'channels' => [ 'email' => false ],
+			]
+		);
+		$wpdb->update(
+			$wpdb->prefix . 'pinova_rate_limits',
+			[ 'updated_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS - 1 ) ],
+			[ 'scope' => $flow_id ]
+		);
+
+		$sent = 0;
+		$mail = static function () use ( &$sent ): bool {
+			++$sent;
+			return true;
+		};
+		add_filter( 'pre_wp_mail', $mail );
+		try {
+			OTPService::deliver_queued( $flow_id );
+		} finally {
+			remove_filter( 'pre_wp_mail', $mail );
+		}
+
+		self::assertSame( 0, $sent );
+		self::assertNotNull( $old->fresh() );
+		self::assertTrue( wp_check_password( '1234', $old->fresh()->code ) );
+		self::assertCount( 1, OTP::query()->where( 'flow_id', $flow_id )->get() );
+		[ $next_flow ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.50' );
+		self::assertNotSame( $flow_id, $next_flow );
+	}
+
 	public function test_expired_queued_flow_does_not_send_a_code(): void {
 		global $wpdb;
 

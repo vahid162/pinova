@@ -20,7 +20,7 @@ class OTPService {
 	/**
 	 * @throws Exception
 	 */
-	public static function create( Identifier $identifier, array $channels, string $type, ?int $user_id = null, bool $rate_limit_consumed = false, ?int $state_deadline = null, ?string $flow_id = null, ?string $ip_address = null ): array {
+	public static function create( Identifier $identifier, array $channels, string $type, ?int $user_id = null, bool $rate_limit_consumed = false, ?int $state_deadline = null, ?string $flow_id = null, ?string $ip_address = null, ?string $queue_claim_token = null ): array {
 		if ( ! $rate_limit_consumed ) {
 			RateLimitService::otp( IP::get(), $identifier->get_value() );
 		}
@@ -40,6 +40,10 @@ class OTPService {
 				'expires_at' => null === $state_deadline ? null : Carbon::createFromTimestampUTC( $state_deadline ),
 			]
 		);
+		if ( null !== $queue_claim_token && ( null === $flow_id || ! RateLimitService::queued_otp_is_active( $flow_id, $queue_claim_token ) ) ) {
+			$otp->delete();
+			throw new SendOTPException( 'Queued OTP delivery was cancelled.' );
+		}
 
 		try {
 			$successful_channels = ChannelService::send( $otp, $code );
@@ -84,6 +88,7 @@ class OTPService {
 
 	/** Deliver only after the public initiation response has been prepared. */
 	public static function deliver_queued( string $flow_id ): void {
+		$queued = null;
 		try {
 			$queued = RateLimitService::claim_queued_otp( $flow_id );
 			if ( null === $queued || $queued['deadline'] <= time() ) {
@@ -92,7 +97,18 @@ class OTPService {
 
 			// A repeated public request retains this flow; a successful delivery
 			// must never send a second OTP for it.
-			if ( OTP::query()->where( 'flow_id', $flow_id )->exists() ) {
+			$existing = OTP::query()->where( 'flow_id', $flow_id )->limit( 2 )->get();
+			if ( $existing->count() > 1 ) {
+				return;
+			}
+			if ( 1 === $existing->count() ) {
+				$previous = $existing->first();
+				if ( $previous->isVerified() || in_array( true, (array) $previous->channels, true ) ) {
+					return;
+				}
+				// Provider acceptance before a crash is unknowable. Keep the old
+				// code valid and let a later public request open a fresh flow.
+				RateLimitService::retire_queued_otp( $flow_id );
 				return;
 			}
 			$identifier = new Identifier( $queued['identifier'] );
@@ -116,13 +132,20 @@ class OTPService {
 			if ( FirewallService::is_blocked( $identifier->get_value() ) || FirewallService::is_blocked( $queued['ip'] ) ) {
 				return;
 			}
-			self::create( $identifier, ChannelService::get_channels( $identifier ), $type, $user_id, true, $queued['deadline'], $flow_id, $queued['ip'] );
+			if ( ! RateLimitService::queued_otp_is_active( $flow_id, $queued['claim_token'] ) ) {
+				return;
+			}
+			self::create( $identifier, ChannelService::get_channels( $identifier ), $type, $user_id, true, $queued['deadline'], $flow_id, $queued['ip'], $queued['claim_token'] );
 		} catch ( SendOTPException $exception ) {
 			// ChannelService already recorded the privacy-safe provider failure.
-			RateLimitService::release_queued_otp( $flow_id );
+			if ( null !== $queued ) {
+				RateLimitService::release_queued_otp( $flow_id, $queued['claim_token'] );
+			}
 			unset( $exception );
 		} catch ( Throwable $throwable ) {
-			RateLimitService::release_queued_otp( $flow_id );
+			if ( null !== $queued ) {
+				RateLimitService::release_queued_otp( $flow_id, $queued['claim_token'] );
+			}
 			EventThrottle::log(
 				'auth.request_failed',
 				[
@@ -132,6 +155,10 @@ class OTPService {
 			);
 			// A queued delivery cannot change the response already sent to the caller.
 			unset( $throwable );
+		} finally {
+			if ( null !== $queued ) {
+				RateLimitService::finish_queued_otp( $flow_id, $queued['claim_token'] );
+			}
 		}
 	}
 
@@ -272,6 +299,9 @@ class OTPService {
 		if ( ! $otp->markVerified() ) {
 			EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'claim_rejected' ] );
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
+		}
+		if ( is_string( $record_flow ) ) {
+			RateLimitService::retire_queued_otp( $record_flow );
 		}
 		Logger::instance()->info(
 			'otp.verified',

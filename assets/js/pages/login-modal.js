@@ -888,7 +888,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
         this.returnFocusElement = null;
 
         if (returnFocusElement) {
-            setTimeout(() => {
+            const restoreFocus = () => {
                 if (focusRequest === this.focusSequence && !this.modalIsOpen) {
                     let focusTarget = returnFocusElement;
 
@@ -909,7 +909,10 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                         focusTarget.focus({ preventScroll: true });
                     }
                 }
-            }, 0);
+            };
+
+            // Wait for Alpine to hide the dialog before returning focus outside it.
+            this.$nextTick(restoreFocus);
         }
     },
 

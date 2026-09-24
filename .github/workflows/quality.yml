@@ -193,6 +193,8 @@ jobs:
           npx wp-env run cli wp rewrite structure '/%postname%/' --hard
           npx wp-env run cli wp rewrite flush --hard
           curl --fail --retry 10 --retry-delay 2 --retry-connrefused "${PLAYWRIGHT_BASE_URL}/login" --output /dev/null
+      - name: Verify real REST-to-Cron delivery boundary
+        run: bash tests/Integration/cron-rest-boundary.sh
       - name: Run Stage 1 browser acceptance
         run: npm run test:browser
       - name: Verify modal tests detect real product faults

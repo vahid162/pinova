@@ -151,6 +151,8 @@ function harness(
 
     vm.runInContext(loginScript, context, { filename: 'assets/js/pages/login-modal.js' });
     assert.equal(typeof factory, 'function');
+    const state = factory();
+    state.$nextTick = callback => callback();
 
     return {
         apiCalls,
@@ -159,7 +161,7 @@ function harness(
         listeners,
         location,
         pageContent,
-        state: factory(),
+        state,
     };
 }
 

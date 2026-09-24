@@ -128,12 +128,12 @@ class RateLimitService {
 		if ( false === $legacy_cleared ) {
 			throw new RateLimitUnavailableException( 'The legacy OTP queue could not be checked.' );
 		}
-		$written    = $wpdb->query(
+		$written = $wpdb->query(
 			$wpdb->prepare(
 				"INSERT INTO %i (`bucket_key`, `scope`, `hits`, `reset_at`, `updated_at`, `payload`)
 				 VALUES (%s, %s, 1, %s, UTC_TIMESTAMP(), NULL)
 				 ON DUPLICATE KEY UPDATE
-				 `scope` = IF(`reset_at` <= UTC_TIMESTAMP() AND (`payload` IS NULL OR (`payload` NOT LIKE 'processing:%%' AND `payload` NOT LIKE 'cancelled:%%' AND `payload` <> 'processing')), VALUES(`scope`), `scope`),
+				 `scope` = IF(`reset_at` <= UTC_TIMESTAMP() AND (`payload` IS NULL OR (LEFT(`payload`, 11) <> 'processing:' AND LEFT(`payload`, 10) <> 'cancelled:' AND `payload` <> 'processing')), VALUES(`scope`), `scope`),
 				 `payload` = IF(`scope` = VALUES(`scope`), NULL, `payload`),
 				 `reset_at` = IF(`scope` = VALUES(`scope`), VALUES(`reset_at`), `reset_at`),
 				 `updated_at` = IF(`payload` IS NULL, UTC_TIMESTAMP(), `updated_at`)",
@@ -148,7 +148,7 @@ class RateLimitService {
 		}
 
 		$row = $wpdb->get_row(
-		$wpdb->prepare( 'SELECT `scope`, `reset_at`, `payload` FROM %i WHERE `bucket_key` = %s', $table, $bucket_key )
+			$wpdb->prepare( 'SELECT `scope`, `reset_at`, `payload` FROM %i WHERE `bucket_key` = %s', $table, $bucket_key )
 		);
 		if ( ! $row || ! preg_match( '/\A[a-f0-9]{32}\z/', (string) $row->scope ) || strtotime( $row->reset_at . ' UTC' ) <= time() || str_starts_with( (string) $row->payload, 'cancelled:' ) ) {
 			throw new RateLimitUnavailableException( 'The decoy flow could not be read.' );
@@ -184,6 +184,7 @@ class RateLimitService {
 			$result = self::claim_queued_otp_locked( $flow_id );
 			if ( null !== $result ) {
 				self::$held_claims[ $flow_id ] = $result['claim_token'];
+
 				$keep_lock = true;
 			}
 			return $result;
@@ -258,8 +259,8 @@ class RateLimitService {
 		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) || ( null !== $claim_token && ! preg_match( '/\A[a-f0-9]{16}\z/', $claim_token ) ) ) {
 			return false;
 		}
-		$table = $wpdb->prefix . 'pinova_rate_limits';
-		$pattern = null === $claim_token ? 'processing:%' : 'processing:' . $claim_token . ':%';
+		$table    = $wpdb->prefix . 'pinova_rate_limits';
+		$pattern  = null === $claim_token ? 'processing:%' : 'processing:' . $claim_token . ':%';
 		$released = $wpdb->query(
 			$wpdb->prepare( 'UPDATE %i SET `payload` = NULL WHERE `scope` = %s AND `payload` LIKE %s AND `reset_at` > UTC_TIMESTAMP()', $table, $flow_id, $pattern )
 		);
@@ -274,13 +275,13 @@ class RateLimitService {
 		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) || ! preg_match( '/\A[a-f0-9]{16}\z/', $claim_token ) ) {
 			return false;
 		}
-		$table = $wpdb->prefix . 'pinova_rate_limits';
+		$table          = $wpdb->prefix . 'pinova_rate_limits';
 		$pattern        = 'processing:' . $claim_token . ':%';
 		$cancel_pattern = 'cancelled:' . $claim_token;
-		$finished = $wpdb->query(
+		$finished       = $wpdb->query(
 			$wpdb->prepare( 'UPDATE %i SET `payload` = %s WHERE `scope` = %s AND `payload` LIKE %s', $table, 'delivered', $flow_id, $pattern )
 		);
-		$cancelled = $wpdb->query(
+		$cancelled      = $wpdb->query(
 			$wpdb->prepare( 'DELETE FROM %i WHERE `scope` = %s AND `payload` LIKE %s', $table, $flow_id, $cancel_pattern )
 		);
 		self::unlock_claim( $flow_id, $claim_token );
@@ -297,7 +298,7 @@ class RateLimitService {
 		$payload = $wpdb->get_var(
 			$wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s AND `reset_at` > UTC_TIMESTAMP() LIMIT 1', $wpdb->prefix . 'pinova_rate_limits', $flow_id )
 		);
-		$prefix = 'processing:' . $claim_token . ':';
+		$prefix  = 'processing:' . $claim_token . ':';
 		return ! $wpdb->last_error && is_string( $payload ) && str_starts_with( $payload, $prefix );
 	}
 
@@ -308,15 +309,15 @@ class RateLimitService {
 		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) {
 			return false;
 		}
-		$table = $wpdb->prefix . 'pinova_rate_limits';
+		$table     = $wpdb->prefix . 'pinova_rate_limits';
 		$cancelled = $wpdb->query(
-			$wpdb->prepare( "UPDATE %i SET `payload` = CONCAT('cancelled:', SUBSTRING_INDEX(SUBSTRING_INDEX(`payload`, ':', 2), ':', -1)) WHERE `scope` = %s AND `payload` LIKE 'processing:%%'", $table, $flow_id )
+			$wpdb->prepare( "UPDATE %i SET `payload` = CONCAT('cancelled:', SUBSTRING_INDEX(SUBSTRING_INDEX(`payload`, ':', 2), ':', -1)) WHERE `scope` = %s AND LEFT(`payload`, 11) = 'processing:'", $table, $flow_id )
 		);
 		if ( false === $cancelled ) {
 			return false;
 		}
-		$deleted = $wpdb->query(
-			$wpdb->prepare( "DELETE FROM %i WHERE `scope` = %s AND (`payload` IS NULL OR (`payload` NOT LIKE 'cancelled:%%' AND `payload` NOT LIKE 'processing:%%' AND `payload` <> 'processing'))", $table, $flow_id )
+		$deleted   = $wpdb->query(
+			$wpdb->prepare( "DELETE FROM %i WHERE `scope` = %s AND (`payload` IS NULL OR (LEFT(`payload`, 10) <> 'cancelled:' AND LEFT(`payload`, 11) <> 'processing:' AND `payload` <> 'processing'))", $table, $flow_id )
 		);
 		return false !== $deleted;
 	}
@@ -335,17 +336,17 @@ class RateLimitService {
 		if ( ! $keys ) {
 			return true;
 		}
-		$table        = $wpdb->prefix . 'pinova_rate_limits';
-		$placeholders = implode( ', ', array_fill( 0, count( $keys ), '%s' ) );
-		$params       = array_merge( [ $table ], $keys );
-		$cancel_sql   = "UPDATE %i SET `payload` = CONCAT('cancelled:', SUBSTRING_INDEX(SUBSTRING_INDEX(`payload`, ':', 2), ':', -1)) WHERE `bucket_key` IN ({$placeholders}) AND `payload` LIKE 'processing:%%'";
-		$delete_sql   = "DELETE FROM %i WHERE `bucket_key` IN ({$placeholders}) AND (`payload` IS NULL OR (`payload` NOT LIKE 'processing:%%' AND `payload` NOT LIKE 'cancelled:%%' AND `payload` <> 'processing'))";
-		$pending_sql  = "SELECT COUNT(*) FROM %i WHERE `bucket_key` IN ({$placeholders}) AND (`payload` LIKE 'cancelled:%%' OR `payload` = 'processing')";
-		$expired_sql  = "DELETE FROM %i WHERE `bucket_key` IN ({$placeholders}) AND `reset_at` <= UTC_TIMESTAMP() AND `payload` NOT LIKE 'cancelled:%%' AND (`payload` <> 'processing' OR `reset_at` <= UTC_TIMESTAMP() - INTERVAL %d SECOND)";
-		$cancelled    = $wpdb->query( $wpdb->prepare( $cancel_sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
-		$deleted      = $wpdb->query( $wpdb->prepare( $delete_sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
+		$table          = $wpdb->prefix . 'pinova_rate_limits';
+		$placeholders   = implode( ', ', array_fill( 0, count( $keys ), '%s' ) );
+		$params         = array_merge( [ $table ], $keys );
+		$cancel_sql     = "UPDATE %i SET `payload` = CONCAT('cancelled:', SUBSTRING_INDEX(SUBSTRING_INDEX(`payload`, ':', 2), ':', -1)) WHERE `bucket_key` IN ({$placeholders}) AND LEFT(`payload`, 11) = 'processing:'";
+		$delete_sql     = "DELETE FROM %i WHERE `bucket_key` IN ({$placeholders}) AND (`payload` IS NULL OR (LEFT(`payload`, 11) <> 'processing:' AND LEFT(`payload`, 10) <> 'cancelled:' AND `payload` <> 'processing'))";
+		$pending_sql    = "SELECT COUNT(*) FROM %i WHERE `bucket_key` IN ({$placeholders}) AND (LEFT(`payload`, 10) = 'cancelled:' OR `payload` = 'processing')";
+		$expired_sql    = "DELETE FROM %i WHERE `bucket_key` IN ({$placeholders}) AND `reset_at` <= UTC_TIMESTAMP() AND LEFT(`payload`, 10) <> 'cancelled:' AND (`payload` <> 'processing' OR `reset_at` <= UTC_TIMESTAMP() - INTERVAL %d SECOND)";
+		$cancelled      = $wpdb->query( $wpdb->prepare( $cancel_sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
+		$deleted        = $wpdb->query( $wpdb->prepare( $delete_sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
 		$cancelled_late = $wpdb->query( $wpdb->prepare( $cancel_sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Catch claims racing the first pass.
-		$stale = $wpdb->get_results( $wpdb->prepare( "SELECT `bucket_key`, `scope`, `payload` FROM %i WHERE `bucket_key` IN ({$placeholders}) AND `payload` LIKE 'cancelled:%%'", $params ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
+		$stale          = $wpdb->get_results( $wpdb->prepare( "SELECT `bucket_key`, `scope`, `payload` FROM %i WHERE `bucket_key` IN ({$placeholders}) AND LEFT(`payload`, 10) = 'cancelled:'", $params ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Only fixed placeholders are generated.
 		if ( ! is_array( $stale ) || $wpdb->last_error ) {
 			return false;
 		}
@@ -362,8 +363,8 @@ class RateLimitService {
 				self::unlock_queued_otp( $row['scope'] );
 			}
 		}
-		$expired      = $wpdb->query( $wpdb->prepare( $expired_sql, array_merge( $params, [ self::OTP_CLAIM_LEASE ] ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
-		$pending      = $wpdb->get_var( $wpdb->prepare( $pending_sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
+		$expired = $wpdb->query( $wpdb->prepare( $expired_sql, array_merge( $params, [ self::OTP_CLAIM_LEASE ] ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
+		$pending = $wpdb->get_var( $wpdb->prepare( $pending_sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
 		return false !== $cancelled && false !== $deleted && false !== $cancelled_late && false !== $expired && '0' === (string) $pending;
 	}
 
@@ -375,7 +376,7 @@ class RateLimitService {
 	private static function lock_queued_otp( string $flow_id ): bool {
 		global $wpdb;
 
-		$name = 'pinova_otp_' . $flow_id;
+		$name   = 'pinova_otp_' . $flow_id;
 		$holder = $wpdb->get_var( $wpdb->prepare( 'SELECT IS_USED_LOCK(%s)', $name ) );
 		if ( $wpdb->last_error || null !== $holder ) {
 			return false;

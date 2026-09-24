@@ -168,8 +168,8 @@ final class Privacy {
 			];
 		}
 
-		$mobile           = $mobile_lookup['value'];
-		$identity_result  = self::erasure_identifiers( $user, $email_address, $mobile );
+		$mobile          = $mobile_lookup['value'];
+		$identity_result = self::erasure_identifiers( $user, $email_address, $mobile );
 		if ( ! $identity_result['success'] ) {
 			return [
 				'items_removed'  => false,
@@ -253,7 +253,7 @@ final class Privacy {
 	private static function erasure_identifiers( WP_User $user, string $email_address, ?string $physical_mobile ): array {
 		global $wpdb;
 
-		$identifiers = array_merge( self::email_variants( $user->user_email ), self::email_variants( $email_address ) );
+		$identifiers   = array_merge( self::email_variants( $user->user_email ), self::email_variants( $email_address ) );
 		$mobile_values = [ $user->user_login ];
 
 		if ( null !== $physical_mobile ) {
@@ -263,7 +263,8 @@ final class Privacy {
 		$meta_keys = array_values( array_filter( array_diff( UserService::mobile_possible_meta_keys(), [ 'pinova_mobile' ] ), 'is_string' ) );
 		if ( $meta_keys ) {
 			$placeholders = implode( ', ', array_fill( 0, count( $meta_keys ), '%s' ) );
-			$values = $wpdb->get_col(
+			$values       = $wpdb->get_col(
+				// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- The unpacked alias keys supply the generated placeholders.
 				$wpdb->prepare(
 					// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Only fixed placeholders are generated.
 					"SELECT `meta_value` FROM %i WHERE `user_id` = %d AND `meta_key` IN ({$placeholders})",
@@ -271,7 +272,10 @@ final class Privacy {
 				)
 			);
 			if ( $wpdb->last_error || ! is_array( $values ) ) {
-				return [ 'success' => false, 'identifiers' => [] ];
+				return [
+					'success'     => false,
+					'identifiers' => [],
+				];
 			}
 			$mobile_values = array_merge( $mobile_values, $values );
 		}
@@ -290,14 +294,20 @@ final class Privacy {
 			if ( ! $owner['success'] || ! $after_erase['success'] ||
 				( in_array( $user->ID, $owner['ids'], true ) && 1 !== count( $owner['ids'] ) ) ||
 				( in_array( $user->ID, $after_erase['ids'], true ) && 1 !== count( $after_erase['ids'] ) ) ) {
-				return [ 'success' => false, 'identifiers' => [] ];
+				return [
+					'success'     => false,
+					'identifiers' => [],
+				];
 			}
 			if ( [ $user->ID ] === $owner['ids'] || [ $user->ID ] === $after_erase['ids'] ) {
 				$identifiers[] = $formatted;
 			}
 		}
 
-		return [ 'success' => true, 'identifiers' => array_values( array_unique( array_filter( $identifiers ) ) ) ];
+		return [
+			'success'     => true,
+			'identifiers' => array_values( array_unique( array_filter( $identifiers ) ) ),
+		];
 	}
 
 	/** @return string[] */

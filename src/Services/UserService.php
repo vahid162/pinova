@@ -152,12 +152,21 @@ class UserService {
 	public static function mobile_candidate_ids_result( string $mobile, ?int $ignore_mobile_override_for = null ): array {
 		$mobile = new Mobile( $mobile );
 		if ( ! $mobile->is_valid() ) {
-			return [ 'success' => true, 'ids' => [] ];
+			return [
+				'success' => true,
+				'ids'     => [],
+			];
 		}
 		$ids = self::get_mobile_candidate_ids( $mobile, $ignore_mobile_override_for );
 		return null === $ids
-			? [ 'success' => false, 'ids' => [] ]
-			: [ 'success' => true, 'ids' => $ids ];
+			? [
+				'success' => false,
+				'ids'     => [],
+			]
+			: [
+				'success' => true,
+				'ids'     => $ids,
+			];
 	}
 
 	/**

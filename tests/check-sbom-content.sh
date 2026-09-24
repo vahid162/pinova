@@ -24,12 +24,16 @@ write_sbom() {
 runtime='{"name":"example/runtime","versionInfo":"1.2.3","externalRefs":[{"referenceType":"purl","referenceLocator":"pkg:composer/example%2Fruntime@1.2.3"}]}'
 other='{"name":"other/library","versionInfo":"v4.5.6","externalRefs":[{"referenceType":"purl","referenceLocator":"pkg:composer/other%2Flibrary@v4.5.6"}]}'
 extra='{"name":"extra/package","versionInfo":"1.0.0","externalRefs":[{"referenceType":"purl","referenceLocator":"pkg:composer/extra%2Fpackage@1.0.0"}]}'
+non_composer='{"name":"wordpress-core","versionInfo":"6.8","externalRefs":[{"referenceType":"purl","referenceLocator":"pkg:generic/wordpress@6.8"}]}'
 write_sbom "[${runtime},${other}]"
+bash "${project_dir}/tools/check-sbom-content.sh" "${fixture_dir}/package.zip" "${fixture_dir}/sbom.json" >/dev/null
+write_sbom "[${runtime},${other},${non_composer}]"
 bash "${project_dir}/tools/check-sbom-content.sh" "${fixture_dir}/package.zip" "${fixture_dir}/sbom.json" >/dev/null
 
 reject_sbom() {
+  local scenario="${1:-invalid Composer inventory}"
   if bash "${project_dir}/tools/check-sbom-content.sh" "${fixture_dir}/package.zip" "${fixture_dir}/sbom.json" >/dev/null 2>&1; then
-    echo "SBOM checker accepted a missing, mismatched, or duplicate dependency." >&2
+    echo "SBOM checker accepted ${scenario}." >&2
     exit 1
   fi
 }
@@ -50,5 +54,13 @@ write_sbom "[${runtime},{\"name\":\"other/library\",\"versionInfo\":\"v4.5.6\",\
 reject_sbom
 write_sbom "[${runtime},{\"name\":\"other/library\",\"versionInfo\":\"v4.5.6\",\"externalRefs\":[{\"referenceType\":\"purl\",\"referenceLocator\":\"pkg:composer/other%2Flibrary@v4.5.7\"}]}]"
 reject_sbom
+write_sbom "[${runtime},${other},{\"name\":\"extra/package\",\"versionInfo\":\"1.0.0\",\"externalRefs\":[{\"referenceType\":\"purl\",\"referenceLocator\":\"pkg:composer/extra%2Fpackage@2.0.0\"}]}]"
+reject_sbom "an extra Composer entry with a mismatched purl version"
+write_sbom "[${runtime},${other},{\"name\":\"extra/package\",\"versionInfo\":\"1.0.0\",\"externalRefs\":[{\"referenceType\":\"purl\",\"referenceLocator\":\"pkg:composer/extra%2Fpackage\"}]}]"
+reject_sbom "an extra Composer entry with a malformed purl"
+write_sbom "[${runtime},${other},{\"name\":\"extra/package\",\"versionInfo\":\"1.0.0\",\"externalRefs\":[{\"referenceType\":\"OTHER\",\"referenceLocator\":\"pkg:composer/extra%2Fpackage@1.0.0\"}]}]"
+reject_sbom "a Composer purl with an inconsistent reference type"
+write_sbom "[${runtime},{\"name\":\"other/library\",\"versionInfo\":\"v4.5.6\",\"externalRefs\":[{\"referenceType\":\"purl\",\"referenceLocator\":\"pkg:composer/other%2Flibrary@v4.5.6\"},{\"referenceType\":\"purl\",\"referenceLocator\":\"pkg:composer/other%2Flibrary@v4.5.7\"}]}]"
+reject_sbom "a Composer entry with duplicate purl references"
 
 echo "SBOM inventory tests passed."

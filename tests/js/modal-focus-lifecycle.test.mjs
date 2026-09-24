@@ -12,6 +12,7 @@ const source = (await readFile(new URL('../../assets/js/pages/login-modal.js', i
 function harness() {
     const focus = [];
     const tasks = [];
+    let reactiveHideComplete = true;
     let factory;
     const background = {
         inert: false,
@@ -22,7 +23,11 @@ function harness() {
     const body = { children: [], style: { overflow: '' } };
     const root = { parentElement: body };
     body.children = [background, root];
-    const replacementOpener = { focus: () => focus.push('replacement-opener') };
+    const replacementOpener = {
+        focus: () => {
+            if (reactiveHideComplete) focus.push('replacement-opener');
+        },
+    };
     const document = {
         body, activeElement: null,
         getElementById(id) {
@@ -47,6 +52,7 @@ function harness() {
         clearInterval() {},
     });
     const state = factory();
+    state.$nextTick = callback => tasks.push({ callback, delay: 'alpine' });
     const opener = {
         isConnected: true,
         matches: selector => selector === '.showlogin',
@@ -59,6 +65,15 @@ function harness() {
             assert.notEqual(index, -1, `Missing deferred ${delay}ms callback`);
             tasks.splice(index, 1)[0].callback();
         },
+        runIfPresent(delay) {
+            const index = tasks.findIndex(task => task.delay === delay);
+            if (index !== -1) tasks.splice(index, 1)[0].callback();
+        },
+        beginReactiveHide() { reactiveHideComplete = false; },
+        finishReactiveHide() {
+            reactiveHideComplete = true;
+            this.runIfPresent('alpine');
+        },
     };
 }
 
@@ -69,7 +84,7 @@ test('current modal heading and ordinary close still receive focus', () => {
     h.run(100);
     assert.deepEqual(h.focus, ['pinova-modal-authenticate']);
     h.state.closeModal();
-    h.run(0);
+    h.finishReactiveHide();
     assert.deepEqual(h.focus, ['pinova-modal-authenticate', 'opener']);
     assert.equal(h.background.inert, false);
 });
@@ -80,7 +95,7 @@ test('a pending heading callback cannot steal restored focus after busy dismissa
     const request = h.state.beginRequest();
     assert.equal(h.state.pageLoaderIsActive, true);
     h.state.closeModal();
-    h.run(0);
+    h.finishReactiveHide();
     assert.deepEqual(h.focus, ['opener']);
     // The closing DOM can remain visible until its reactive hide is applied.
     // Even then, this stale callback must not call heading.focus at all.
@@ -97,8 +112,26 @@ test('a replaced checkout fragment restores focus to the equivalent live opener'
     h.state.openModal('', h.opener);
     h.opener.isConnected = false;
     h.state.closeModal();
-    h.run(0);
+    h.finishReactiveHide();
     assert.deepEqual(h.focus, ['replacement-opener']);
+});
+
+test('replacement focus waits until Alpine hides the modal', () => {
+    const h = harness();
+    h.state.openModal('', h.opener);
+    const request = h.state.beginRequest();
+    h.opener.isConnected = false;
+    h.beginReactiveHide();
+    h.state.closeModal();
+
+    // A timer can run before Alpine applies the reactive hide. Browser focus
+    // silently fails while the old dialog still owns the focus lifecycle.
+    h.runIfPresent(0);
+    assert.deepEqual(h.focus, []);
+    h.finishReactiveHide();
+    assert.deepEqual(h.focus, ['replacement-opener']);
+    assert.equal(request.signal.aborted, true);
+    assert.equal(h.background.inert, false);
 });
 
 test('a superseded step callback cannot focus an old heading', () => {
@@ -126,7 +159,7 @@ test('rapid reopen invalidates both the old heading and old return-focus callbac
     h.state.openModal('', h.opener);
     h.state.closeModal();
     h.state.openModal('', h.opener);
-    h.run(0);
+    h.finishReactiveHide();
     assert.deepEqual(h.focus, []);
     h.run(100);
     assert.deepEqual(h.focus, []);

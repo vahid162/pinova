@@ -131,6 +131,44 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		self::assertArrayNotHasKey( 'flow_id', json_decode( $row['context'], true ) );
 	}
 
+	public function test_verified_login_and_recovery_flows_do_not_block_the_next_code(): void {
+		foreach ( [ 'login' => false, 'forget' => true ] as $purpose => $forget ) {
+			$email = 'verified-' . $purpose . '@example.test';
+			self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+			$codes = [];
+			$mail  = static function ( $return, array $args ) use ( &$codes ): bool {
+				if ( preg_match( '/<span[^>]*>\s*([0-9]{4,6})\s*<\/span>/u', (string) $args['message'], $matches ) ) {
+					$codes[] = $matches[1];
+				}
+				return true;
+			};
+			add_filter( 'pre_wp_mail', $mail, 10, 2 );
+			try {
+				$first  = $this->authenticate( $email, $forget, ! $forget );
+				$repeat = $this->authenticate( $email, $forget, ! $forget );
+				$first_flow = JWT::decode( $first->get_data()['data']['jwt'] )['flow_id'];
+				self::assertSame( $first_flow, JWT::decode( $repeat->get_data()['data']['jwt'] )['flow_id'] );
+				self::assertCount( 1, $codes );
+
+				[ $verified_user, $verified_flow ] = OTPService::verify_with_flow(
+					$first->get_data()['data']['jwt'],
+					$codes[0],
+					[ $forget ? OTP::TYPE_FORGET : OTP::TYPE_LOGIN ]
+				);
+				self::assertGreaterThan( 0, $verified_user->ID );
+				self::assertSame( $first_flow, $verified_flow );
+
+				$next = $this->authenticate( $email, $forget, ! $forget );
+				$next_flow = JWT::decode( $next->get_data()['data']['jwt'] )['flow_id'];
+				self::assertNotSame( $first_flow, $next_flow );
+				self::assertCount( 2, $codes );
+				self::assertNotNull( OTP::query()->where( 'flow_id', $next_flow )->first() );
+			} finally {
+				remove_filter( 'pre_wp_mail', $mail, 10 );
+			}
+		}
+	}
+
 	public function test_public_initiation_replaces_a_legacy_null_flow_without_invalidating_its_token(): void {
 		$user_id = self::factory()->user->create( [ 'user_email' => 'legacy-flow@example.test', 'role' => 'subscriber' ] );
 		$legacy  = $this->create_otp( $user_id, 'legacy-flow@example.test', OTP::TYPE_LOGIN );

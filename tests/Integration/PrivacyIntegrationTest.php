@@ -8,8 +8,10 @@ use Pinova\Install;
 use Pinova\Integrations\Wordpress\Privacy;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
+use Pinova\Models\OTP;
 use Pinova\Services\UserService;
 use Pinova\Services\RateLimitService;
+use Pinova\Services\OTPService;
 use WP_UnitTestCase;
 
 final class PrivacyIntegrationTest extends WP_UnitTestCase {
@@ -84,6 +86,221 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
 	}
 
+	public function test_erasure_remains_incomplete_until_a_claimed_worker_has_exited(): void {
+		$email = 'claimed-erasure@example.test';
+		self::factory()->user->create( [ 'user_email' => $email ] );
+		[ $flow_id ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.44' );
+		$claim = RateLimitService::claim_queued_otp( $flow_id );
+		self::assertNotNull( $claim );
+
+		$first = Privacy::erase_personal_data( $email );
+		self::assertFalse( $first['done'] );
+		self::assertTrue( $first['items_retained'] );
+		self::assertFalse( RateLimitService::queued_otp_is_active( $flow_id, $claim['claim_token'] ) );
+		RateLimitService::finish_queued_otp( $flow_id, $claim['claim_token'] );
+
+		$second = Privacy::erase_personal_data( $email );
+		self::assertTrue( $second['done'] );
+		self::assertFalse( $second['items_retained'] );
+		self::assertNull( RateLimitService::claim_queued_otp( $flow_id ) );
+	}
+
+	public function test_erasure_retires_a_cancelled_claim_after_worker_crash(): void {
+		global $wpdb;
+
+		$email = 'crashed-claimed-erasure@example.test';
+		self::factory()->user->create( [ 'user_email' => $email ] );
+		[ $flow_id ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.44' );
+		self::assertNotNull( RateLimitService::claim_queued_otp( $flow_id ) );
+		self::assertFalse( Privacy::erase_personal_data( $email )['done'] );
+		$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', 'pinova_otp_' . $flow_id ) );
+
+		self::assertTrue( Privacy::erase_personal_data( $email )['done'] );
+		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+	}
+
+	public function test_erasure_retires_a_legacy_processing_marker_after_grace(): void {
+		global $wpdb;
+
+		$email = 'legacy-claim-erasure@example.test';
+		self::factory()->user->create( [ 'user_email' => $email ] );
+		[ $flow_id ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.44' );
+		$table = $wpdb->prefix . 'pinova_rate_limits';
+		$wpdb->update( $table, [ 'payload' => 'processing', 'reset_at' => gmdate( 'Y-m-d H:i:s', time() - 1 ) ], [ 'scope' => $flow_id ] );
+		self::assertFalse( Privacy::erase_personal_data( $email )['done'] );
+		$wpdb->update( $table, [ 'reset_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS - 2 ) ], [ 'scope' => $flow_id ] );
+		self::assertTrue( Privacy::erase_personal_data( $email )['done'] );
+		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $table, $flow_id ) ) );
+	}
+
+	public function test_verified_flow_keeps_an_active_delivery_barrier_until_worker_exit(): void {
+		$email   = 'verified-while-sending@example.test';
+		$user_id = self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+		[ $flow_id ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.44' );
+		$claim = RateLimitService::claim_queued_otp( $flow_id );
+		self::assertNotNull( $claim );
+		$otp = OTP::query()->create(
+			[
+				'user_id'    => $user_id,
+				'flow_id'    => $flow_id,
+				'identifier' => $email,
+				'code'       => '1234',
+				'type'       => OTP::TYPE_LOGIN,
+				'channels'   => [ 'email' => false ],
+			]
+		);
+		OTPService::verify_with_flow( OTPService::signed_state( $otp ), '1234', [ OTP::TYPE_LOGIN ] );
+
+		$first = Privacy::erase_personal_data( $email );
+		self::assertFalse( $first['done'] );
+		self::assertTrue( $first['items_retained'] );
+		RateLimitService::finish_queued_otp( $flow_id, $claim['claim_token'] );
+		self::assertTrue( Privacy::erase_personal_data( $email )['done'] );
+	}
+
+	public function test_expired_flow_does_not_hide_an_in_flight_delivery_from_erasure(): void {
+		global $wpdb;
+
+		$email = 'expired-while-sending@example.test';
+		self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+		[ $flow_id ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.44' );
+		$claim = RateLimitService::claim_queued_otp( $flow_id );
+		self::assertNotNull( $claim );
+		$wpdb->query( $wpdb->prepare( 'UPDATE %i SET `reset_at` = UTC_TIMESTAMP() - INTERVAL 1 SECOND WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) );
+
+		$first = Privacy::erase_personal_data( $email );
+		self::assertFalse( $first['done'] );
+		self::assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+		RateLimitService::finish_queued_otp( $flow_id, $claim['claim_token'] );
+		self::assertTrue( Privacy::erase_personal_data( $email )['done'] );
+	}
+
+	public function test_erasure_during_provider_send_reports_incomplete(): void {
+		global $wpdb;
+
+		$email = 'sending-erasure@example.test';
+		self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+		[ $flow_id ] = RateLimitService::decoy_flow( $email, 'authenticate', '192.0.2.44' );
+		$first = null;
+		$mail = static function () use ( $email, &$first ): bool {
+			$first = Privacy::erase_personal_data( $email );
+			return true;
+		};
+		add_filter( 'pre_wp_mail', $mail );
+		try {
+			OTPService::deliver_queued( $flow_id );
+		} finally {
+			remove_filter( 'pre_wp_mail', $mail );
+		}
+
+		self::assertIsArray( $first );
+		self::assertFalse( $first['done'] );
+		self::assertTrue( $first['items_retained'] );
+		// PHPUnit wraps wpdb in a transaction while Eloquent uses a separate
+		// connection. A same-request delete can hit MySQL's stale-read error;
+		// the next WordPress privacy request retries outside this transaction.
+		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+	}
+
+	public function test_erasure_covers_a_uniquely_owned_digits_only_mobile_queue(): void {
+		global $wpdb;
+
+		$email   = 'digits-only-erasure@example.test';
+		$user_id = self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+		update_user_meta( $user_id, 'digits_phone', '09123450123' );
+		$mobile = '+989123450123';
+		[ $flow_id ] = RateLimitService::decoy_flow( $mobile, 'authenticate', '192.0.2.44' );
+		self::assertSame( $mobile, UserService::get_mobile( $user_id ) );
+
+		$result = Privacy::erase_personal_data( $email );
+		self::assertTrue( $result['done'] );
+		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+	}
+
+	public function test_erasure_covers_a_configured_legacy_mobile_alias_queue(): void {
+		global $wpdb;
+
+		$email   = 'configured-alias-erasure@example.test';
+		$user_id = self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+		$previous_advanced = get_option( 'pinova_advanced', false );
+		update_option( 'pinova_advanced', [ 'mobile_possible_meta_keys' => 'legacy_mobile_for_test' ] );
+		try {
+			update_user_meta( $user_id, 'legacy_mobile_for_test', '09123450678' );
+			$mobile = '+989123450678';
+			[ $flow_id ] = RateLimitService::decoy_flow( $mobile, 'authenticate', '192.0.2.44' );
+			self::assertSame( $mobile, UserService::get_mobile( $user_id ) );
+
+			$result = Privacy::erase_personal_data( $email );
+			self::assertTrue( $result['done'] );
+			self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+		} finally {
+			if ( false === $previous_advanced ) {
+				delete_option( 'pinova_advanced' );
+			} else {
+				update_option( 'pinova_advanced', $previous_advanced );
+			}
+		}
+	}
+
+	public function test_erasure_clears_a_superseded_alias_before_removing_the_mobile_override(): void {
+		global $wpdb;
+
+		$email   = 'superseded-alias-erasure@example.test';
+		$user_id = self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+		update_user_meta( $user_id, 'digits_phone', '09123450888' );
+		update_user_meta( $user_id, 'pinova_mobile', '+989123450999' );
+		[ $flow_id ] = RateLimitService::decoy_flow( '+989123450888', 'authenticate', '192.0.2.44' );
+		self::assertSame( [], UserService::mobile_candidate_ids_result( '+989123450888' )['ids'] );
+
+		$result = Privacy::erase_personal_data( $email );
+		self::assertTrue( $result['done'] );
+		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+		// The compatibility filter may expose the retained Digits alias after the
+		// physical override is deleted; inspect the physical row directly.
+		self::assertSame( '0', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE `user_id` = %d AND `meta_key` = %s', $wpdb->usermeta, $user_id, 'pinova_mobile' ) ) );
+	}
+
+	public function test_erasure_does_not_delete_an_ambiguous_mobile_alias_queue(): void {
+		global $wpdb;
+
+		$email = 'ambiguous-erasure@example.test';
+		$first_id = self::factory()->user->create( [ 'user_email' => $email, 'role' => 'subscriber' ] );
+		$other_id = self::factory()->user->create( [ 'user_email' => 'other-ambiguous@example.test', 'role' => 'subscriber' ] );
+		update_user_meta( $first_id, 'digits_phone', '09123450456' );
+		update_user_meta( $other_id, 'digits_phone_no', '09123450456' );
+		[ $flow_id ] = RateLimitService::decoy_flow( '+989123450456', 'authenticate', '192.0.2.44' );
+
+		$result = Privacy::erase_personal_data( $email );
+		self::assertFalse( $result['done'] );
+		self::assertTrue( $result['items_retained'] );
+		self::assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+	}
+
+	public function test_erasure_retries_when_alias_ownership_read_fails(): void {
+		global $wpdb;
+
+		$email = 'alias-read-failure@example.test';
+		$user_id = self::factory()->user->create( [ 'user_email' => $email ] );
+		update_user_meta( $user_id, 'digits_phone', '09123450789' );
+		[ $flow_id ] = RateLimitService::decoy_flow( '+989123450789', 'authenticate', '192.0.2.44' );
+		$fail_alias_read = static function ( string $query ) use ( $wpdb ): string {
+			if ( str_contains( $query, '`meta_key` IN' ) && str_contains( $query, $wpdb->usermeta ) ) {
+				return "SELECT `pinova_missing_column` FROM {$wpdb->usermeta} LIMIT 1";
+			}
+			return $query;
+		};
+		add_filter( 'query', $fail_alias_read );
+		try {
+			$result = Privacy::erase_personal_data( $email );
+		} finally {
+			remove_filter( 'query', $fail_alias_read );
+		}
+
+		self::assertFalse( $result['done'] );
+		self::assertTrue( $result['items_retained'] );
+		self::assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+	}
+
 	public function test_export_redacts_legacy_secrets_in_event_and_correlation_fields(): void {
 		global $wpdb;
 
@@ -148,6 +365,86 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		$erasure = Privacy::erase_personal_data( 'login-mobile@example.test', 1 );
 
 		self::assertFalse( $erasure['items_removed'] );
+	}
+
+	public function test_erasure_preserves_unowned_mobile_data_for_a_native_mobile_shaped_username(): void {
+		global $wpdb;
+
+		$email  = 'native-mobile-username@example.test';
+		$mobile = '+989123335555';
+		$user_id = self::factory()->user->create(
+			[
+				'user_email' => $email,
+				'user_login' => '09123335555',
+			]
+		);
+		$wpdb->delete( $wpdb->usermeta, [ 'user_id' => $user_id, 'meta_key' => 'pinova_mobile' ], [ '%d', '%s' ] );
+		clean_user_cache( $user_id );
+		[ $flow_id ] = RateLimitService::decoy_flow( $mobile, 'authenticate', '192.0.2.44' );
+		$wpdb->insert(
+			$wpdb->prefix . 'pinova_otp',
+			[
+				'user_id'     => null,
+				'identifier'  => $mobile,
+				'code'        => '555666',
+				'ip_address'  => '127.0.0.1',
+				'attempts'    => 0,
+				'type'        => 'register',
+				'channels'    => '{}',
+				'expires_at'  => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ),
+				'verified_at' => null,
+			]
+		);
+		$fingerprint = Logger::instance()->fingerprint( $mobile, 'mobile' );
+		Logger::instance()->audit(
+			'info',
+			'privacy.native_username_pre_account',
+			[
+				'identifier_type'        => 'mobile',
+				'identifier_fingerprint' => $fingerprint,
+			]
+		);
+
+		$result  = Privacy::erase_personal_data( $email );
+		$context = (string) $wpdb->get_var( $wpdb->prepare( 'SELECT `context` FROM %i WHERE `event` = %s', $wpdb->prefix . 'pinova_logs', 'privacy.native_username_pre_account' ) );
+
+		self::assertTrue( $result['done'] );
+		self::assertFalse( $result['items_removed'] );
+		self::assertFalse( $result['items_retained'] );
+		self::assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
+		self::assertSame( '1', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE `identifier` = %s', $wpdb->prefix . 'pinova_otp', $mobile ) ) );
+		self::assertStringContainsString( $fingerprint, $context );
+	}
+
+	public function test_erasure_retries_without_writes_when_mobile_username_ownership_read_fails(): void {
+		global $wpdb;
+
+		$email = 'marker-read-failure@example.test';
+		self::factory()->user->create(
+			[
+				'user_email' => $email,
+				'user_login' => '09123336666',
+				'meta_input' => [ 'created_by' => 'pinova' ],
+			]
+		);
+		[ $flow_id ] = RateLimitService::decoy_flow( '+989123336666', 'authenticate', '192.0.2.44' );
+		$fail_marker_read = static function ( string $query ) use ( $wpdb ): string {
+			if ( str_contains( $query, "`meta_key` = 'created_by'" ) && str_contains( $query, $wpdb->usermeta ) ) {
+				return "SELECT `pinova_missing_column` FROM {$wpdb->usermeta} LIMIT 1";
+			}
+			return $query;
+		};
+		add_filter( 'query', $fail_marker_read );
+		try {
+			$result = Privacy::erase_personal_data( $email );
+		} finally {
+			remove_filter( 'query', $fail_marker_read );
+		}
+
+		self::assertFalse( $result['done'] );
+		self::assertTrue( $result['items_retained'] );
+		self::assertFalse( $result['items_removed'] );
+		self::assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
 	}
 
 	public function test_eraser_reports_retained_data_when_a_physical_delete_fails(): void {
@@ -223,6 +520,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 			[ '%d', '%s' ]
 		);
 		clean_user_cache( $user_id );
+		[ $flow_id ] = RateLimitService::decoy_flow( '+989127778888', 'authenticate', '192.0.2.44' );
 
 		$fingerprint = Logger::instance()->fingerprint( '+989127778888', 'mobile' );
 		Logger::instance()->audit(
@@ -260,6 +558,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		self::assertTrue( $result['items_removed'] );
 		self::assertFalse( $result['items_retained'] );
 		self::assertTrue( $result['done'] );
+		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) ) );
 		self::assertSame(
 			'0',
 			(string) $wpdb->get_var(

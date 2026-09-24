@@ -89,7 +89,7 @@ class UserService {
 	}
 
 	/** @return int[]|null Null means a database read failed. */
-	private static function get_mobile_candidate_ids( Mobile $mobile ): ?array {
+	private static function get_mobile_candidate_ids( Mobile $mobile, ?int $ignore_mobile_override_for = null ): ?array {
 		global $wpdb;
 
 		$possible_formats = array_values( array_unique( array_map( 'strval', $mobile->possible_formats() ) ) );
@@ -135,12 +135,38 @@ class UserService {
 			if ( ! $explicit_mobile['success'] ) {
 				return null;
 			}
-			if ( null === $explicit_mobile['value'] || in_array( $explicit_mobile['value'], $possible_formats, true ) ) {
+			if ( $candidate_id === $ignore_mobile_override_for || null === $explicit_mobile['value'] || in_array( $explicit_mobile['value'], $possible_formats, true ) ) {
 				$matching_ids[] = $candidate_id;
 			}
 		}
 
 		return $matching_ids;
+	}
+
+	/**
+	 * Expose the same ownership decision to approved privacy erasure. A failed
+	 * database read is distinct from an unclaimed or ambiguous mobile.
+	 *
+	 * @return array{success:bool,ids:int[]}
+	 */
+	public static function mobile_candidate_ids_result( string $mobile, ?int $ignore_mobile_override_for = null ): array {
+		$mobile = new Mobile( $mobile );
+		if ( ! $mobile->is_valid() ) {
+			return [
+				'success' => true,
+				'ids'     => [],
+			];
+		}
+		$ids = self::get_mobile_candidate_ids( $mobile, $ignore_mobile_override_for );
+		return null === $ids
+			? [
+				'success' => false,
+				'ids'     => [],
+			]
+			: [
+				'success' => true,
+				'ids'     => $ids,
+			];
 	}
 
 	/**

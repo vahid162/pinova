@@ -15,9 +15,9 @@ final class Load {
 
 	public const STATE_META = '_pinova_dokan_onboarding';
 
-	private static bool $booted     = false;
-	private static ?int $authorized = null;
-	private static ?array $forum    = null;
+	private static bool $booted      = false;
+	private static ?int $authorized  = null;
+	private static array $role_hooks = [];
 
 	public static function boot(): void {
 		if ( self::$booted ) {
@@ -27,6 +27,7 @@ final class Load {
 		add_action( 'template_redirect', [ self::class, 'guard_migration' ], 8 );
 		add_action( 'template_redirect', [ self::class, 'route' ], 9 );
 		add_action( 'template_redirect', [ self::class, 'clear_attempt' ], 11 );
+		add_action( 'shutdown', [ self::class, 'clear_attempt' ], 0 );
 		add_filter( 'dokan_customer_migration_required_fields', [ self::class, 'capture_forum' ], PHP_INT_MAX );
 		add_action( 'dokan_new_seller_created', [ self::class, 'converted' ], PHP_INT_MAX );
 		add_filter( 'dokan_customer_migration_redirect', [ self::class, 'migration_redirect' ], PHP_INT_MAX );
@@ -155,40 +156,50 @@ final class Load {
 		if ( ! self::can_convert( self::$authorized ) ) {
 			self::unavailable();
 		}
-		if ( function_exists( 'WPF' ) && defined( 'WPFORO_VERSION' ) && '3.2.1' === WPFORO_VERSION ) {
-			$primary = (int) WPF()->member->get_groupid( self::$authorized );
-			if ( $primary ) {
-				self::$forum = [
-					'primary'   => $primary,
-					'secondary' => array_map( 'intval', (array) WPF()->member->get_secondary_groupids( self::$authorized, true ) ),
-				];
+		if ( function_exists( 'WPF' ) && defined( 'WPFORO_VERSION' ) && '3.2.1' === WPFORO_VERSION
+			&& [] === self::$role_hooks ) {
+			global $wp_filter;
+			$callback = 'wpforo_update_usergroup_on_role_change';
+			foreach ( [ 'add_user_role', 'set_user_role' ] as $hook ) {
+				$priority = has_action( $hook, $callback );
+				if ( false === $priority ) {
+					continue;
+				}
+				$accepted = $wp_filter[ $hook ]->callbacks[ $priority ][ $callback ]['accepted_args'];
+				$wrapper  = static function ( $user_id, $role, $old_roles = [] ) use ( $callback ): void {
+					if ( self::$authorized === (int) $user_id && get_current_user_id() === (int) $user_id && 'seller' === $role ) {
+						return;
+					}
+					$callback( $user_id, $role, $old_roles );
+				};
+				self::$role_hooks[ $hook ] = [ $wrapper, $priority, $accepted ];
+				remove_action( $hook, $callback, $priority );
+				add_action( $hook, $wrapper, $priority, $accepted );
 			}
 		}
 		return $fields;
 	}
 
 	public static function clear_attempt(): void {
+		foreach ( self::$role_hooks as $hook => [ $wrapper, $priority, $accepted ] ) {
+			remove_action( $hook, $wrapper, $priority );
+			add_action( $hook, 'wpforo_update_usergroup_on_role_change', $priority, $accepted );
+		}
+		self::$role_hooks = [];
 		self::$authorized = null;
-		self::$forum      = null;
 	}
 
-	/** Only the exact, authorized native conversion may restore this request's forum snapshot. */
+	/** Prevent destructive role synchronization instead of depending on a second database write. */
 	public static function converted( int $user_id ): void {
 		if ( self::$authorized !== $user_id || get_current_user_id() !== $user_id || ! dokan_is_user_seller( $user_id ) ) {
 			return;
 		}
-		$forum = self::$forum;
+		$scoped = [] !== self::$role_hooks;
 		self::clear_attempt();
-		if ( null !== $forum ) {
-			$primary   = WPF()->member->set_groupid( $user_id, $forum['primary'] );
-			$secondary = WPF()->member->set_secondary_groupids( $user_id, $forum['secondary'] );
-			// reset() clears persistent profile data, but get_member() also has a request-local cache.
+		if ( $scoped ) {
 			WPF()->ram_cache->reset( [ get_class( WPF()->member ) . '::_get_member', [ $user_id ] ] );
 			WPF()->member->init_current_user();
 			WPF()->current_user_accesses = [];
-			if ( ! $primary || ! $secondary ) {
-				self::unavailable();
-			}
 		}
 		update_user_meta( $user_id, self::STATE_META, 'completed' );
 	}

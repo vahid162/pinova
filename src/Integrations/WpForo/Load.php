@@ -79,7 +79,10 @@ final class Load {
 		if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $key ) ) ) {
 			return false;
 		}
-		self::$locks[ $user_id ] = [ 'key' => $key, 'depth' => 1 ];
+		self::$locks[ $user_id ] = [
+			'key'   => $key,
+			'depth' => 1,
+		];
 		return true;
 	}
 
@@ -133,13 +136,19 @@ final class Load {
 		$expected    = $wpdb->prepare( 'UPDATE %i SET `status` = %s WHERE `userid` = %d', $table, $status, $user_id );
 		$conditional = $wpdb->prepare(
 			'UPDATE %i AS p INNER JOIN %i AS m ON m.user_id = p.userid AND m.meta_key = %s SET p.status = %s WHERE p.userid = %d AND p.status = %s AND m.meta_value = %s',
-			$table, $wpdb->usermeta, self::STATE_META, $status, $user_id, $previous, $state
+			$table,
+			$wpdb->usermeta,
+			self::STATE_META,
+			$status,
+			$user_id,
+			$previous,
+			$state
 		);
-		$prefix  = $wpdb->prepare( 'UPDATE %i SET ', $table );
-		$matched = false;
+		$prefix      = $wpdb->prepare( 'UPDATE %i SET ', $table );
+		$matched     = false;
 		// wpForo exposes no conditional-update argument. Scope the guard to its first profile write.
 		// Added fields or a changed statement must fail closed, never fall through unconditionally.
-		$guard = static function ( string $query ) use ( $prefix, $expected, $conditional, &$matched, &$guard ): string {
+		$guard       = static function ( string $query ) use ( $prefix, $expected, $conditional, &$matched, &$guard ): string {
 			global $wp_current_filter;
 			if ( 1 !== count( array_keys( (array) $wp_current_filter, 'query', true ) ) || ! str_starts_with( $query, $prefix ) ) {
 				return $query;
@@ -148,10 +157,11 @@ final class Load {
 			$matched = $query === $expected;
 			return $matched ? $conditional : 'SELECT 0';
 		};
-		$arm = static function ( array $fields ) use ( $guard ): array {
+		$arm         = static function ( array $fields ) use ( $guard ): array {
 			add_filter( 'query', $guard, PHP_INT_MAX );
 			return $fields;
 		};
+
 		self::$writing = $user_id;
 		add_filter( 'wpforo_before_update_profile_fields', $arm, PHP_INT_MAX );
 		try {

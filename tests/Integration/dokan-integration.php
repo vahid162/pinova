@@ -171,7 +171,22 @@ WPF()->member->get_member( $id );
 $activation = 'manually';
 $activation_filter = static function () use ( &$activation ): string { return $activation; };
 add_filter( 'dokan_new_seller_enable_selling_status', $activation_filter );
-$result = $attempt( $id, [ 'back_url' => $target ] );
+// Any group restoration write would fail here: preservation must not depend on it.
+$group_writes = 0;
+$reject_group_write = static function ( string $query ) use ( &$group_writes ): string {
+    if ( str_starts_with( $query, 'UPDATE ' ) && str_contains( $query, WPF()->tables->profiles )
+        && preg_match( '/SET.*(?:groupid|secondary_groups)/i', $query ) ) {
+        ++$group_writes;
+        return 'SELECT 0';
+    }
+    return $query;
+};
+add_filter( 'query', $reject_group_write, PHP_INT_MAX );
+try { $result = $attempt( $id, [ 'back_url' => $target ] ); }
+finally { remove_filter( 'query', $reject_group_write, PHP_INT_MAX ); }
+$check( 0 === $group_writes, 'native conversion never needs a fallible forum group restoration write' );
+$check( 99 === has_action( 'set_user_role', 'wpforo_update_usergroup_on_role_change' )
+    && 99 === has_action( 'add_user_role', 'wpforo_update_usergroup_on_role_change' ), 'native role callbacks restored after conversion' );
 $check( $target === $result['redirect'], 'explicit checkout continuation takes precedence over vendor wizard' );
 $user = get_userdata( $id );
 $check( $user->ID === $id && $user->user_login === $login && [ 'seller' ] === array_values( $user->roles ), 'same account and immutable login with native seller-only roles' );
@@ -197,7 +212,7 @@ $result = $attempt( $automatic );
 $check( '' !== $result['redirect'] && 'yes' === get_user_meta( $automatic, 'dokan_enable_selling', true )
 	&& 'no' === get_user_meta( $automatic, 'dokan_publishing', true ), 'native automatic activation still retains product review' );
 
-// A failed/finished request never restores its snapshot onto an unrelated trusted PHP conversion.
+// A failed/finished request never suppresses forum synchronization for an unrelated conversion.
 $other = $account();
 WPF()->member->set_secondary_groupids( $other, [ 5 ] );
 dokan_user_update_to_seller( get_userdata( $other ), [ 'fname' => 'Trusted', 'lname' => 'Fixture', 'shopname' => 'Other', 'phone' => '', 'shopurl' => 'other-' . $other, 'address' => '' ] );

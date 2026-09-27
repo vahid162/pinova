@@ -101,7 +101,12 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 
 	public function test_secondary_legacy_alias_can_login_without_proving_another_mobile(): void {
 		$id = self::factory()->user->create( [ 'user_login' => '989120000001', 'role' => 'subscriber' ] );
-		update_user_meta( $id, 'digits_phone', '09120000002' );
+		self::assertNotFalse( update_user_meta( $id, 'digits_phone', '09120000002' ), 'Legacy alias must be physically persisted.' );
+		global $wpdb;
+		self::assertSame( '09120000002', $wpdb->get_var( $wpdb->prepare( 'SELECT meta_value FROM %i WHERE user_id = %d AND meta_key = %s', $wpdb->usermeta, $id, 'digits_phone' ) ) );
+		self::assertNull( UserService::get_persisted_mobile( $id ), 'Legacy fixture must have no explicit override.' );
+		$ownership = UserService::mobile_candidate_ids_result( '09120000002' );
+		self::assertSame( [ 'success' => true, 'ids' => [ $id ] ], $ownership, 'Legacy fixture must resolve uniquely.' );
 		self::assertSame( $id, UserService::get_by_mobile( '09120000002' ) );
 		[ $user ] = $this->verify( $this->otp( $id, '09120000002' ) );
 		self::assertSame( $id, $user->ID );
@@ -113,7 +118,12 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 	/** @dataProvider alias_changes */
 	public function test_secondary_recovery_alias_remains_bound_to_its_current_unique_ownership( string $change ): void {
 		$id = self::factory()->user->create( [ 'user_login' => '989120000001', 'role' => 'subscriber' ] );
-		update_user_meta( $id, 'digits_phone', '09120000002' );
+		self::assertNotFalse( update_user_meta( $id, 'digits_phone', '09120000002' ), 'Legacy alias must be physically persisted.' );
+		global $wpdb;
+		self::assertSame( '09120000002', $wpdb->get_var( $wpdb->prepare( 'SELECT meta_value FROM %i WHERE user_id = %d AND meta_key = %s', $wpdb->usermeta, $id, 'digits_phone' ) ) );
+		self::assertNull( UserService::get_persisted_mobile( $id ), 'Legacy fixture must have no explicit override.' );
+		$ownership = UserService::mobile_candidate_ids_result( '09120000002' );
+		self::assertSame( [ 'success' => true, 'ids' => [ $id ] ], $ownership, 'Legacy fixture must resolve uniquely.' );
 		[ $user, $flow, $identity ] = $this->verify( $this->otp( $id, '09120000002', OTP::TYPE_FORGET ) );
 		$jwt = UserService::generate_jwt( $user->ID, $flow, $identity );
 		self::assertSame( [ $id, $flow, 'mobile' ], UserService::parse_jwt_with_flow( $jwt ) );

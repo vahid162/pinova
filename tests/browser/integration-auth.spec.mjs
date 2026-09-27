@@ -21,7 +21,8 @@ function cli(script) {
         process.env.WP_ENV_HOME !== `/tmp/${expected}`) {
         throw new Error('Integration browser fixtures require the exact disposable CI environment.');
     }
-    return execFileSync('npx', ['--no-install', 'wp-env', 'run', 'cli', 'wp', 'eval', script], {
+    const authorized = `$admins = get_users(['role' => 'administrator', 'number' => 1, 'fields' => 'ID']); if (!$admins) { throw new Exception('Missing fixture administrator'); } wp_set_current_user((int)$admins[0]); ${script}`;
+    return execFileSync('npx', ['--no-install', 'wp-env', 'run', 'cli', 'wp', 'eval', authorized], {
         cwd: repositoryRoot, encoding: 'utf8', timeout: 30000,
         env: process.env, stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -138,7 +139,11 @@ for (const width of [390, 1280]) {
         // Seed a synthetic delivered credential, then exercise the real browser/API verifier.
         // Queue/provider delivery is covered separately by the runner and boundary suites.
         fixture(String.raw`
-\Pinova\Models\OTP::query()->create(['user_id' => $id, 'identifier' => '${mobile}', 'type' => 'verify_mobile', 'code' => '${code}', 'flow_id' => '${payload.flow_id}', 'channels' => ['sms' => true]]);
+$queued = \Pinova\Services\RateLimitService::claim_queued_otp('${payload.flow_id}');
+if (!$queued || $queued['user_id'] !== (int)$id) { throw new Exception('Missing account-bound queued fixture'); }
+try {
+    \Pinova\Models\OTP::query()->create(['user_id' => $id, 'identifier' => $queued['identifier'], 'ip_address' => $queued['ip'], 'type' => 'verify_mobile', 'code' => '${code}', 'flow_id' => '${payload.flow_id}', 'channels' => ['sms' => true]]);
+} finally { \Pinova\Services\RateLimitService::finish_queued_otp('${payload.flow_id}', $queued['claim_token']); }
 `);
         let submissions = 0;
         page.on('request', request => { if (request.url().includes('/pinova/mobile/verify')) submissions += 1; });
@@ -217,7 +222,11 @@ wpforo_update_option('wpforo_authorization', $authorization);
         const payload = JSON.parse(Buffer.from(state.data.jwt.split('.')[1], 'base64url').toString());
         expect(payload.flow_id).toMatch(/^[a-f0-9]{32}$/);
         cli(String.raw`
-\Pinova\Models\OTP::query()->create(['identifier' => (new \Pinova\Objects\Identifier('${number}'))->get_value(), 'type' => 'register', 'code' => '${code}', 'flow_id' => '${payload.flow_id}', 'channels' => ['sms' => true]]);
+$queued = \Pinova\Services\RateLimitService::claim_queued_otp('${payload.flow_id}');
+if (!$queued) { throw new Exception('Missing queued registration fixture'); }
+try {
+    \Pinova\Models\OTP::query()->create(['identifier' => $queued['identifier'], 'ip_address' => $queued['ip'], 'type' => 'register', 'code' => '${code}', 'flow_id' => '${payload.flow_id}', 'channels' => ['sms' => true]]);
+} finally { \Pinova\Services\RateLimitService::finish_queued_otp('${payload.flow_id}', $queued['claim_token']); }
 `);
         const verified = page.waitForResponse(response => response.url().includes('/pinova/user/login/otp') && response.request().method() === 'POST');
         await page.locator('#pinova-login-otp').fill(code);

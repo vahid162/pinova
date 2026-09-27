@@ -257,27 +257,37 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 
 	public function test_privacy_erasure_cancels_new_number_queue_and_removes_evidence(): void {
 		global $wpdb;
-		$id = $this->account();
-		$this->verify( $this->otp( $id ) );
-		$flow = RateLimitService::decoy_flow( '09121111111', OTP::TYPE_VERIFY_MOBILE, '192.0.2.139', $id );
-		$result = Privacy::erase_personal_data( get_userdata( $id )->user_email );
-		if ( ! $result['done'] ) {
-			// Eloquent wrote this OTP through its separate connection after the
-			// WordPress test transaction began. MariaDB can reject the first
-			// DELETE with ER_CHECKREAD; preserve the eraser's explicit retry contract.
-			self::assertTrue( $result['items_retained'] );
-			self::assertNotEmpty( $result['messages'] );
-			self::assertSame( 1, OTP::query()->where( 'user_id', $id )->count() );
+		// Eloquent commits OTPs on a separate connection. Give only this test's
+		// transaction fresh reads across those writes; never commit its WP data.
+		self::assertNotFalse( $wpdb->query( 'ROLLBACK' ) );
+		self::assertNotFalse( $wpdb->query( 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED' ) );
+		self::assertNotFalse( $wpdb->query( 'START TRANSACTION' ) );
+		try {
+			self::assertNotFalse( $wpdb->query( $wpdb->prepare( 'DELETE FROM %i', $wpdb->prefix . 'pinova_rate_limits' ) ) );
+			$id = $this->account();
+			$user = get_userdata( $id );
+			$this->verify( $this->otp( $id ) );
+			self::assertTrue( Proof::is_verified( $id ) );
 			self::assertSame( '+989121234567', UserService::get_persisted_mobile( $id ) );
-			$result = Privacy::erase_personal_data( get_userdata( $id )->user_email );
+			$flow = RateLimitService::decoy_flow( '09121111111', OTP::TYPE_VERIFY_MOBILE, '192.0.2.139', $id );
+			self::assertNotSame( '', get_user_meta( $id, Proof::PENDING_META, true ) );
+			self::assertSame( '1', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE user_id = %d', $wpdb->prefix . 'pinova_otp', $id ) ) );
+
+			$result = Privacy::erase_personal_data( $user->user_email );
+			self::assertTrue( $result['done'] );
+			self::assertTrue( $result['items_removed'] );
+			self::assertFalse( $result['items_retained'] );
+			self::assertSame( '0', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE user_id = %d', $wpdb->prefix . 'pinova_otp', $id ) ) );
+			self::assertNull( RateLimitService::claim_queued_otp( $flow[0] ) );
+			self::assertFalse( Proof::is_verified( $id ) );
+			self::assertSame( '', get_user_meta( $id, Proof::PROOF_META, true ) );
+			self::assertSame( '', get_user_meta( $id, Proof::PENDING_META, true ) );
+			self::assertNull( UserService::get_persisted_mobile( $id ) );
+			self::assertSame( $user->user_login, $wpdb->get_var( $wpdb->prepare( 'SELECT user_login FROM %i WHERE ID = %d', $wpdb->users, $id ) ) );
+		} finally {
+			// Release the eraser's OTP row locks before Eloquent's tear_down cleanup.
+			$wpdb->query( 'ROLLBACK' );
 		}
-		self::assertTrue( $result['done'] );
-		self::assertFalse( $result['items_retained'] );
-		self::assertSame( '0', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE user_id = %d', $wpdb->prefix . 'pinova_otp', $id ) ) );
-		self::assertNull( RateLimitService::claim_queued_otp( $flow[0] ) );
-		self::assertFalse( Proof::is_verified( $id ) );
-		self::assertSame( '', get_user_meta( $id, Proof::PROOF_META, true ) );
-		self::assertSame( '', get_user_meta( $id, Proof::PENDING_META, true ) );
 	}
 
 	public function test_privacy_waits_for_active_new_number_delivery_and_prevents_further_send(): void {

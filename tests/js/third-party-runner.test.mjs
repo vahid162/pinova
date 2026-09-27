@@ -19,6 +19,7 @@ function fixture(action) {
         'if [[ "${FAKE_NO_MARKER:-}" != 1 ]]; then',
         '    marker=PINOVA_BASELINE_COMPLETE',
         '    if [[ " $* " == *"wpforo-integration.php"* ]]; then marker=PINOVA_WPFORO_COMPLETE; fi',
+        '    if [[ " $* " == *"dokan-integration.php"* ]]; then marker=PINOVA_DOKAN_COMPLETE; fi',
         '    if [[ "${FAKE_MISSING_SUITE:-}" != "$marker" ]]; then printf "%s %s\\n" "$marker" "${@: -1}"; fi',
         'fi',
         'exit "${FAKE_EXIT:-0}"',
@@ -58,7 +59,10 @@ test('third-party runner requires process success and explicit scenario completi
         assert.match(result.stdout, /PINOVA_BASELINE_COMPLETE manual-approval/);
         assert.match(result.stdout, /PINOVA_WPFORO_COMPLETE normal/);
         assert.match(result.stdout, /PINOVA_WPFORO_COMPLETE manual-approval/);
+        assert.match(result.stdout, /PINOVA_DOKAN_COMPLETE normal/);
+        assert.match(result.stdout, /PINOVA_DOKAN_COMPLETE manual-approval/);
         assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_WPFORO_COMPLETE' }).status, 0);
+        assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_DOKAN_COMPLETE' }).status, 0);
         assert.notEqual(execute({ FAKE_NO_MARKER: '1' }).status, 0);
         assert.notEqual(execute({ FAKE_EXIT: '7' }).status, 0);
     });

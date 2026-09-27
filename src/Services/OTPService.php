@@ -251,7 +251,7 @@ class OTPService {
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
-		if ( OTP::TYPE_VERIFY_MOBILE === $otp->type && ( (int) $otp->user_id !== get_current_user_id()
+		if ( OTP::TYPE_VERIFY_MOBILE === $otp->type && ( get_current_user_id() !== (int) $otp->user_id
 			|| ! isset( $payload['user_id'] ) || (int) $payload['user_id'] !== (int) $otp->user_id
 			|| OTP::TYPE_VERIFY_MOBILE !== ( $payload['purpose'] ?? null ) ) ) {
 			throw new Exception( __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ) );

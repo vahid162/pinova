@@ -57,7 +57,7 @@ final class AuthenticationPolicy {
 	public static function assert_otp( OTP $otp ): void {
 		$identifier = new Identifier( $otp->identifier );
 		if ( OTP::TYPE_VERIFY_MOBILE === $otp->type ) {
-			$allowed = null !== $otp->user_id && (int) $otp->user_id === get_current_user_id()
+			$allowed = null !== $otp->user_id && get_current_user_id() === (int) $otp->user_id
 				&& MobileVerificationService::can_assign( (int) $otp->user_id, $identifier );
 		} elseif ( null !== $otp->user_id ) {
 			$allowed = in_array( $otp->type, [ OTP::TYPE_LOGIN, OTP::TYPE_FORGET ], true )

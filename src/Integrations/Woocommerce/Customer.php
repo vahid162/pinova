@@ -15,8 +15,10 @@ class Customer {
 
 	public function set_new_customer_billing_phone( int $user_id ) {
 
-		$user   = get_user( $user_id );
-		$mobile = new Mobile( $user->user_login );
+		$mobile = new Mobile( UserService::get_mobile( $user_id ) ?? '' );
+		if ( ! $mobile->is_valid() ) {
+			return;
+		}
 		$mobile = str_replace( '+98', '0', $mobile->get_formatted() );
 
 		update_user_meta( $user_id, 'billing_phone', $mobile );

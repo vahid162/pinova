@@ -48,6 +48,14 @@ final class Load {
 		return function_exists( 'WPF' ) && isset( WPF()->member ) && method_exists( WPF()->member, 'get_status' );
 	}
 
+	/**
+	 * Fresh database state can change between calls.
+	 * @phpstan-impure
+	 */
+	private static function status( int $user_id ): string {
+		return (string) WPF()->member->get_status( $user_id );
+	}
+
 	private static function state( int $user_id ): string {
 		return (string) get_user_meta( $user_id, self::STATE_META, true );
 	}
@@ -66,7 +74,7 @@ final class Load {
 			return;
 		}
 		WPF()->member->synchronize_user( $user_id );
-		$status = WPF()->member->get_status( $user_id );
+		$status = self::status( $user_id );
 		if ( ! in_array( $status, [ 'active', 'inactive' ], true ) ) {
 			update_user_meta( $user_id, self::STATE_META, 'held' );
 			return;
@@ -89,12 +97,12 @@ final class Load {
 			|| wpforo_setting( 'authorization', 'manually_approval' ) || ! MobileVerificationService::is_verified( $user_id ) ) {
 			return;
 		}
-		if ( 'inactive' !== WPF()->member->get_status( $user_id ) ) {
+		if ( 'inactive' !== self::status( $user_id ) ) {
 			update_user_meta( $user_id, self::STATE_META, 'held' );
 			return;
 		}
 		self::write_status( $user_id, 'active' );
-		if ( 'active' === WPF()->member->get_status( $user_id ) ) {
+		if ( 'active' === self::status( $user_id ) ) {
 			update_user_meta( $user_id, self::STATE_META, 'verified' );
 		}
 	}
@@ -114,14 +122,14 @@ final class Load {
 			}
 			// Genuine email recovery can confirm email; it still cannot approve forum membership.
 			if ( isset( $fields['status'] ) ) {
-				$fields['status'] = WPF()->member->get_status( $user_id );
+				$fields['status'] = self::status( $user_id );
 			}
 			return $fields;
 		}
 		if ( array_key_exists( 'status', $fields ) && '' !== self::state( $user_id ) ) {
 			$administrator = current_user_can( 'edit_users' ) || ( 0 < get_current_user_id() && isset( WPF()->usergroup ) && WPF()->usergroup->can( 'em' ) );
 			if ( 'active' === $fields['status'] && ! $administrator ) {
-				$fields['status'] = WPF()->member->get_status( $user_id );
+				$fields['status'] = self::status( $user_id );
 			} else {
 				update_user_meta( $user_id, self::STATE_META, 'active' === $fields['status'] ? 'approved' : 'held' );
 			}
@@ -137,10 +145,10 @@ final class Load {
 		$state = self::state( $user_id );
 		if ( '' === $state ) {
 			return IntegrationSettings::enabled( 'wpforo' ) && self::available()
-				&& 'active' !== WPF()->member->get_status( $user_id );
+				&& 'active' !== self::status( $user_id );
 		}
 		return ! in_array( $state, [ 'verified', 'approved' ], true ) || ! self::available()
-			|| 'active' !== WPF()->member->get_status( $user_id ) || ! MobileVerificationService::is_verified( $user_id );
+			|| 'active' !== self::status( $user_id ) || ! MobileVerificationService::is_verified( $user_id );
 	}
 
 	public static function forum_can( $result, string $permission ) {
@@ -201,6 +209,7 @@ final class Load {
 		unset( $flow );
 		$user   = get_userdata( $user_id );
 		$origin = 'email' === $origin && $user && '' !== $user->user_email ? 'email' : 'unknown';
+
 		self::$resets[] = [
 			'user_id' => $user_id,
 			'origin'  => $origin,

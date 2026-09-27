@@ -62,6 +62,7 @@ if ( ! ( new \Pinova\Version() )->migrate() ) {
 
 \Pinova\Integrations\Wordpress\Load::instance();
 \Pinova\Integrations\WpForo\Load::boot();
+\Pinova\Integrations\Dokan\Load::boot();
 
 \Pinova\Integrations\WPRocket\Load::instance();
 \Pinova\Integrations\Perfmatters\Load::instance();

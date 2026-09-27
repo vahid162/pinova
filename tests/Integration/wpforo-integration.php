@@ -29,6 +29,11 @@ $check( defined( 'WPFORO_VERSION' ) && '3.2.1' === WPFORO_VERSION && defined( 'W
 $check( WPF()->is_installed(), 'real wpForo installation' );
 add_filter( 'pre_wp_mail', '__return_true' );
 add_filter( 'pre_http_request', static fn() => new WP_Error( 'pinova_fixture_no_network' ) );
+// WP-CLI loads base services but does not render the forum shortcode.
+// Use the native lifecycle to initialize the real forum/topic/post services.
+if ( null === WPF()->forum ) {
+	WPF()->init();
+}
 $_SERVER['REMOTE_ADDR'] = '192.0.2.156';
 $original_settings = get_option( IntegrationSettings::OPTION, null );
 $original_authorization = WPF()->settings->authorization;

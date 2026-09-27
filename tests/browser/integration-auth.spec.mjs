@@ -7,6 +7,11 @@ const username = 'pinova_mobile_browser';
 const password = 'Pinova-browser-proof-2026!';
 const mobile = '09125557788';
 const code = '482163';
+let forumLogin;
+let forumRegister;
+let forumHome;
+let vendorMigration;
+let vendorDashboard;
 
 function cli(script) {
     const expected = `pinova-browser-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
@@ -19,6 +24,13 @@ function cli(script) {
         cwd: repositoryRoot, encoding: 'utf8', timeout: 30000,
         env: process.env, stdio: ['ignore', 'pipe', 'pipe'],
     });
+}
+
+function readData(script) {
+    const output = cli(script);
+    const line = output.split('\n').find(value => value.startsWith('PINOVA_BROWSER_DATA '));
+    if (!line) throw new Error('Missing CLI fixture receipt');
+    return JSON.parse(line.slice('PINOVA_BROWSER_DATA '.length));
 }
 
 function fixture(script) {
@@ -51,7 +63,11 @@ wp_set_password('${password}', $id);
 update_option('woocommerce_coming_soon', 'no');
 update_option('woocommerce_store_pages_only', 'no');
 WPF()->member->synchronize_user($id);
+add_option('pinova_browser_saved_options', ['integrations' => get_option('pinova_integrations', null), 'authorization' => WPF()->settings->authorization]);
 `);
+    const routes = readData(`echo 'PINOVA_BROWSER_DATA ' . wp_json_encode(['login' => wpforo_url('', 'login'), 'register' => wpforo_url('', 'register'), 'home' => wpforo_home_url(), 'migration' => wc_get_account_endpoint_url('account-migration'), 'dashboard' => dokan_get_navigation_url()]);`);
+    forumLogin = routes.login; forumRegister = routes.register; forumHome = routes.home;
+    vendorMigration = routes.migration; vendorDashboard = routes.dashboard;
 });
 
 test.afterAll(() => {
@@ -64,6 +80,17 @@ if ($id) {
     \Pinova\Models\OTP::query()->where('user_id', $id)->delete();
     require_once ABSPATH . 'wp-admin/includes/user.php';
     wp_delete_user($id);
+}
+foreach (['09127770001', '09127770002'] as $mobile) {
+    $synthetic_id = \Pinova\Services\UserService::get_by_mobile($mobile);
+    if ($synthetic_id) { wp_delete_user($synthetic_id); }
+    \Pinova\Services\RateLimitService::delete_queued_for_identifiers([(new \Pinova\Objects\Identifier($mobile))->get_value()]);
+}
+$saved = get_option('pinova_browser_saved_options');
+if (is_array($saved)) {
+    null === $saved['integrations'] ? delete_option('pinova_integrations') : update_option('pinova_integrations', $saved['integrations']);
+    wpforo_update_option('wpforo_authorization', $saved['authorization']);
+    delete_option('pinova_browser_saved_options');
 }
 wp_unschedule_hook('pinova_otp_delivery');
 `);
@@ -130,3 +157,100 @@ echo 'PINOVA_BROWSER_PROOF_OK';
         expect(replay.status()).toBe(401);
     });
 }
+
+test('real forum GET and registration POST reach Pinova before native mutation', async ({ page }) => {
+    cli(`update_option('pinova_integrations', ['wpforo_enabled' => '1', 'dokan_enabled' => '0']);`);
+    const target = new URL('/my-account/?next=%2Fcheckout%3Fa%3D1#forum', forumHome).href;
+    for (const route of [forumLogin, forumRegister]) {
+        await page.goto(route + (route.includes('?') ? '&' : '?') + 'redirect_to=' + encodeURIComponent(target));
+        await expect(page.locator('#authenticate')).toBeVisible();
+        expect(new URL(page.url()).searchParams.get('back_url')).toBe(target);
+    }
+    const usersBefore = readData(`global $wpdb; echo 'PINOVA_BROWSER_DATA ' . wp_json_encode((int)$wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->users}"));`);
+    const result = await page.request.post(forumRegister, {
+        form: { wpfaction: 'registration', redirect_to: target, user_login: 'pinova_browser_bypass', user_email: 'bypass@example.test' },
+        maxRedirects: 0,
+    });
+    expect(result.status()).toBe(302);
+    expect(new URL(result.headers().location).searchParams.get('back_url')).toBe(target);
+    expect(result.headers()['set-cookie'] || '').not.toContain('wordpress_logged_in_');
+    expect(readData(`global $wpdb; echo 'PINOVA_BROWSER_DATA ' . wp_json_encode((int)$wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->users}"));`)).toBe(usersBefore);
+});
+
+for (const manual of [false, true]) {
+    test(`real mobile signup keeps forum email truthful with manual approval ${manual}`, async ({ page }) => {
+        const number = manual ? '09127770002' : '09127770001';
+        cli(String.raw`
+update_option('pinova_integrations', ['wpforo_enabled' => '1', 'dokan_enabled' => '0']);
+\Pinova\Pinova::set_option('general.wordpress_users_can_register', '1');
+$authorization = WPF()->settings->authorization;
+$authorization['manually_approval'] = ${manual ? 'true' : 'false'};
+$authorization['user_register'] = true;
+$authorization['user_register_email_confirm'] = true;
+wpforo_update_option('wpforo_authorization', $authorization);
+`);
+        await page.goto(forumRegister + (forumRegister.includes('?') ? '&' : '?') + 'redirect_to=' + encodeURIComponent(forumHome));
+        await expect(page.locator('#authenticate')).toBeVisible();
+        const pending = page.waitForResponse(response => response.url().includes('/pinova/user/authenticate') && response.request().method() === 'POST');
+        await page.locator('#pinova-identifier').fill(number);
+        await page.locator('#authenticate button[type="submit"]').click();
+        const accepted = await pending;
+        expect(accepted.status()).toBe(200);
+        const state = await accepted.json();
+        expect(state.success).toBe(true);
+        const payload = JSON.parse(Buffer.from(state.data.jwt.split('.')[1], 'base64url').toString());
+        expect(payload.flow_id).toMatch(/^[a-f0-9]{32}$/);
+        cli(String.raw`
+\Pinova\Models\OTP::query()->create(['identifier' => (new \Pinova\Objects\Identifier('${number}'))->get_value(), 'type' => 'register', 'code' => '${code}', 'flow_id' => '${payload.flow_id}', 'channels' => ['sms' => true]]);
+`);
+        const verified = page.waitForResponse(response => response.url().includes('/pinova/user/login/otp') && response.request().method() === 'POST');
+        await page.locator('#pinova-login-otp').fill(code);
+        const response = await verified;
+        expect(response.status()).toBe(200);
+        expect((await response.json()).success).toBe(true);
+        await expect.poll(() => new URL(page.url()).pathname).not.toMatch(/^\/login\/?$/);
+        expect((await page.context().cookies()).some(cookie => cookie.name.startsWith('wordpress_logged_in_'))).toBe(true);
+        const outcome = readData(String.raw`
+$id = \Pinova\Services\UserService::get_by_mobile('${number}');
+if (!$id) { throw new Exception('Mobile signup did not create its account'); }
+echo 'PINOVA_BROWSER_DATA ' . wp_json_encode(['proof' => \Pinova\Services\MobileVerificationService::is_verified($id), 'status' => WPF()->member->get_status($id), 'email_confirmed' => (bool)WPF()->member->get_is_email_confirmed($id), 'email' => get_userdata($id)->user_email, 'seller' => in_array('seller', get_userdata($id)->roles, true)]);
+`);
+        expect(outcome).toEqual({ proof: true, status: manual ? 'inactive' : 'active', email_confirmed: false, email: '', seller: false });
+    });
+}
+
+test('native vendor conversion keeps the authenticated account and mobile proof', async ({ page }) => {
+    fixture(String.raw`
+update_option('pinova_integrations', ['wpforo_enabled' => '1', 'dokan_enabled' => '1']);
+if (!\Pinova\Services\MobileVerificationService::is_verified($id)) { throw new Exception('Earlier real browser proof is required'); }
+WPF()->member->set_secondary_groupids($id, [5]);
+`);
+    await page.goto(vendorDashboard);
+    await expect(page.locator('#authenticate')).toBeVisible();
+    expect(new URL(page.url()).searchParams.get('back_url')).toBe(vendorDashboard);
+    await login(page);
+    await page.goto(vendorMigration);
+    const form = page.locator('form.update-customer-to-vendor');
+    await expect(form).toBeVisible();
+    const nonce = await form.locator('[name="dokan_nonce"]').inputValue();
+    const invalid = await page.request.post(vendorMigration, {
+        form: { dokan_migration: '1', dokan_nonce: 'invalid', fname: 'Browser', shopname: 'Fixture', phone: '09350000001' },
+        maxRedirects: 0,
+    });
+    expect(invalid.status()).toBe(200);
+    expect(fixture(`if (dokan_is_user_seller($id)) { throw new Exception('Invalid nonce converted account'); } echo 'PINOVA_VENDOR_UNCHANGED';`)).toContain('PINOVA_VENDOR_UNCHANGED');
+    const target = new URL('/my-account/?from=vendor&next=%2Fcheckout%3Fa%3D1#details', vendorMigration).href;
+    const converted = await page.request.post(vendorMigration, {
+        form: { dokan_migration: '1', dokan_nonce: nonce, fname: 'Browser', lname: 'Fixture', shopname: 'Browser fixture store', shopurl: 'pinova-browser-fixture', phone: '09350000001', back_url: target },
+        maxRedirects: 0,
+    });
+    expect(converted.status()).toBe(302);
+    expect(converted.headers().location).toBe(target);
+    expect(fixture(String.raw`
+$user = get_userdata($id);
+if ($user->user_login !== '${username}' || !dokan_is_user_seller($id) || !\Pinova\Services\MobileVerificationService::is_verified($id) || get_user_meta($id, '_pinova_dokan_onboarding', true) !== 'completed' || !in_array(5, array_map('intval', WPF()->member->get_secondary_groupids($id)), true)) { throw new Exception('Native browser conversion did not preserve account/proof/forum groups'); }
+echo 'PINOVA_VENDOR_BROWSER_OK';
+`)).toContain('PINOVA_VENDOR_BROWSER_OK');
+    await page.goto(target);
+    await expect(page.locator('body')).not.toContainText('critical error');
+});

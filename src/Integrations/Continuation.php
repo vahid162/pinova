@@ -57,6 +57,6 @@ final class Continuation {
 				return null;
 			}
 		}
-		return $target === wp_validate_redirect( $target, '' ) ? $target : null;
+		return wp_validate_redirect( $target, '' ) === $target ? $target : null;
 	}
 }

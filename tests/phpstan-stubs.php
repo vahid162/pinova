@@ -17,6 +17,9 @@ namespace {
 	function wpforo_setting( string $group, string $key ) {}
 	function wpforo_url( string $path = '', ?string $route = null ): string { return ''; }
 	function wpforo_home_url(): string { return ''; }
+	function dokan_is_user_seller( int $user_id ): bool { return false; }
+	function dokan_get_navigation_url( string $name = '' ): string { return ''; }
+	function dokan_get_option( string $key, string $section, $default = '' ) { return $default; }
 
 	function PWSMS() {
 		return null;

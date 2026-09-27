@@ -18,10 +18,11 @@ plugin_directory="$(basename "$repo_root")"
 result_file="$(mktemp)"
 trap 'rm -f -- "$result_file"' EXIT
 
-for suite in third-party-baseline wpforo-integration; do
+for suite in third-party-baseline wpforo-integration dokan-integration; do
 	case "$suite" in
 		third-party-baseline) marker=PINOVA_BASELINE_COMPLETE ;;
 		wpforo-integration) marker=PINOVA_WPFORO_COMPLETE ;;
+		dokan-integration) marker=PINOVA_DOKAN_COMPLETE ;;
 	esac
 	for scenario in normal manual-approval; do
 		npx --no-install wp-env run cli \

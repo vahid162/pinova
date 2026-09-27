@@ -18,7 +18,11 @@ use WP_REST_Response;
 
 final class MobileVerificationAPI extends RestAPI {
 	public function register_routes(): void {
-		foreach ( [ 'request' => 'initiate', 'verify' => 'verify' ] as $route => $callback ) {
+		$routes = [
+			'request' => 'initiate',
+			'verify'  => 'verify',
+		];
+		foreach ( $routes as $route => $callback ) {
 			register_rest_route(
 				'pinova',
 				'/mobile/' . $route,
@@ -56,7 +60,7 @@ final class MobileVerificationAPI extends RestAPI {
 					return RateLimitService::decoy_flow( $identifier->get_value(), OTP::TYPE_VERIFY_MOBILE, IP::get(), $user_id );
 				}
 			);
-			$args = [ $flow[0] ];
+			$args    = [ $flow[0] ];
 			if ( ! wp_next_scheduled( 'pinova_otp_delivery', $args ) && true !== wp_schedule_single_event( time(), 'pinova_otp_delivery', $args ) ) {
 				throw new \Exception( 'OTP scheduling failed.' );
 			}

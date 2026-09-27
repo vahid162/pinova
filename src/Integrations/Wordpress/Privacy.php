@@ -199,7 +199,7 @@ final class Privacy {
 			];
 		}
 		$proof_before     = MobileVerificationService::private_data_present( $user->ID );
-		$proof_cleared     = MobileVerificationService::revoke( $user->ID ) && MobileVerificationService::erase_pending( $user->ID );
+		$proof_cleared    = MobileVerificationService::revoke( $user->ID ) && MobileVerificationService::erase_pending( $user->ID );
 		$identifiers      = $identity_result['identifiers'];
 		$queue_cleared    = RateLimitService::delete_queued_for_identifiers( $identifiers );
 		$otp_result       = self::delete_otp_records( $user->ID, $identifiers );
@@ -522,8 +522,8 @@ final class Privacy {
 				)
 			)
 		);
-		$where  = [];
-		$values = [ $table ];
+		$where       = [];
+		$values      = [ $table ];
 		if ( $user_id > 0 ) {
 			$where[]  = '`user_id` = %d';
 			$values[] = $user_id;

@@ -92,7 +92,7 @@ final class MobileVerificationService {
 		update_user_meta( $user_id, self::EPOCH_META, $epoch );
 		delete_user_meta( $user_id, self::PROOF_META );
 		try {
-			return $epoch === self::meta( $user_id, self::EPOCH_META ) && null === self::meta( $user_id, self::PROOF_META );
+			return self::meta( $user_id, self::EPOCH_META ) === $epoch && null === self::meta( $user_id, self::PROOF_META );
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
 			return false;
@@ -111,7 +111,7 @@ final class MobileVerificationService {
 			}
 			if ( 'update_user_metadata' === current_filter() && is_scalar( $value ) ) {
 				try {
-					if ( (string) $value === self::meta( (int) $user_id, $key ) ) {
+					if ( self::meta( (int) $user_id, $key ) === (string) $value ) {
 						return $check;
 					}
 				} catch ( Throwable $throwable ) {
@@ -148,7 +148,7 @@ final class MobileVerificationService {
 				return false;
 			}
 			$expected = self::signature( $user_id, $identifier, $epoch, $proof['at'] );
-			return hash_equals( $expected, $proof['mac'] ) && $epoch === self::meta( $user_id, self::EPOCH_META );
+			return hash_equals( $expected, $proof['mac'] ) && self::meta( $user_id, self::EPOCH_META ) === $epoch;
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
 			return false;
@@ -170,7 +170,7 @@ final class MobileVerificationService {
 	}
 
 	private static function record_locked( int $user_id, Identifier $identifier, string $epoch ): void {
-		if ( ! $identifier->is_mobile() || $epoch !== self::meta( $user_id, self::EPOCH_META )
+		if ( ! $identifier->is_mobile() || self::meta( $user_id, self::EPOCH_META ) !== $epoch
 			|| $identifier->get_value() !== self::current_mobile( $user_id ) || UserService::match( $identifier ) !== $user_id
 			|| is_wp_error( AuthenticationPolicy::session( $user_id, 'mobile_verification', $identifier ) ) ) {
 			throw new Exception( __( 'تأیید تلفن همراه معتبر نمی‌باشد. دوباره تلاش کنید.', 'pinova' ) );
@@ -210,14 +210,14 @@ final class MobileVerificationService {
 	}
 
 	private static function complete_locked( int $user_id, Identifier $identifier, string $epoch ): void {
-		if ( $user_id !== get_current_user_id() || ! self::can_assign( $user_id, $identifier ) || $epoch !== self::meta( $user_id, self::EPOCH_META ) ) {
+		if ( get_current_user_id() !== $user_id || ! self::can_assign( $user_id, $identifier ) || self::meta( $user_id, self::EPOCH_META ) !== $epoch ) {
 			throw new Exception( __( 'تأیید تلفن همراه معتبر نمی‌باشد.', 'pinova' ) );
 		}
 		// Rotate before replacement so an eligibility read started on the old number fails.
 		$epoch = bin2hex( random_bytes( 16 ) );
 		update_user_meta( $user_id, self::EPOCH_META, $epoch );
 		delete_user_meta( $user_id, self::PROOF_META );
-		if ( $epoch !== self::meta( $user_id, self::EPOCH_META ) ) {
+		if ( self::meta( $user_id, self::EPOCH_META ) !== $epoch ) {
 			throw new Exception( 'Mobile identity changed during verification.' );
 		}
 		self::$assigning = $user_id;
@@ -253,7 +253,7 @@ final class MobileVerificationService {
 		$raw     = self::meta( $user_id, self::PENDING_META );
 		$old     = null === $raw ? null : json_decode( $raw, true );
 		$binding = self::identity_digest( $user_id, $identifier );
-		if ( is_array( $old ) && $flow === ( $old['flow'] ?? null ) && $binding !== ( $old['target'] ?? null ) ) {
+		if ( is_array( $old ) && ( $old['flow'] ?? null ) === $flow && ( $old['target'] ?? null ) !== $binding ) {
 			throw new Exception( 'Wait for the existing mobile verification flow to expire.' );
 		}
 		$value = wp_json_encode(
@@ -263,7 +263,7 @@ final class MobileVerificationService {
 			]
 		);
 		update_user_meta( $user_id, self::PENDING_META, $value );
-		if ( $value !== self::meta( $user_id, self::PENDING_META ) ) {
+		if ( self::meta( $user_id, self::PENDING_META ) !== $value ) {
 			throw new Exception( 'Mobile flow binding could not be persisted.' );
 		}
 	}
@@ -296,7 +296,7 @@ final class MobileVerificationService {
 			return false;
 		}
 		try {
-			return $mobile !== self::current_mobile( $user_id );
+			return self::current_mobile( $user_id ) !== $mobile;
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
 			return true;

@@ -148,7 +148,7 @@ final class Load {
 		$matched     = false;
 		// wpForo exposes no conditional-update argument. Scope the guard to its first profile write.
 		// Added fields or a changed statement must fail closed, never fall through unconditionally.
-		$guard       = static function ( string $query ) use ( $prefix, $expected, $conditional, &$matched, &$guard ): string {
+		$guard = static function ( string $query ) use ( $prefix, $expected, $conditional, &$matched, &$guard ): string {
 			global $wp_current_filter;
 			if ( 1 !== count( array_keys( (array) $wp_current_filter, 'query', true ) ) || ! str_starts_with( $query, $prefix ) ) {
 				return $query;
@@ -157,7 +157,7 @@ final class Load {
 			$matched = $query === $expected;
 			return $matched ? $conditional : 'SELECT 0';
 		};
-		$arm         = static function ( array $fields ) use ( $guard ): array {
+		$arm   = static function ( array $fields ) use ( $guard ): array {
 			add_filter( 'query', $guard, PHP_INT_MAX );
 			return $fields;
 		};

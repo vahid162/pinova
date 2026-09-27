@@ -12,6 +12,7 @@ let forumRegister;
 let forumHome;
 let vendorMigration;
 let vendorDashboard;
+let vendorRegistration;
 
 function cli(script) {
     const expected = `pinova-browser-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
@@ -64,10 +65,14 @@ update_option('woocommerce_coming_soon', 'no');
 update_option('woocommerce_store_pages_only', 'no');
 WPF()->member->synchronize_user($id);
 add_option('pinova_browser_saved_options', ['integrations' => get_option('pinova_integrations', null), 'authorization' => WPF()->settings->authorization]);
+$registration = wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post_title' => 'Pinova browser vendor registration', 'post_content' => '[dokan-vendor-registration]']);
+if (!$registration || is_wp_error($registration)) { throw new Exception('Missing registration fixture page'); }
+update_option('pinova_browser_vendor_page', $registration);
 `);
-    const routes = readData(`echo 'PINOVA_BROWSER_DATA ' . wp_json_encode(['login' => wpforo_url('', 'login'), 'register' => wpforo_url('', 'register'), 'home' => wpforo_home_url(), 'migration' => wc_get_account_endpoint_url('account-migration'), 'dashboard' => dokan_get_navigation_url()]);`);
+    const routes = readData(`echo 'PINOVA_BROWSER_DATA ' . wp_json_encode(['login' => wpforo_url('', 'login'), 'register' => wpforo_url('', 'register'), 'home' => wpforo_home_url(), 'migration' => wc_get_account_endpoint_url('account-migration'), 'dashboard' => dokan_get_navigation_url(), 'vendor_registration' => get_permalink(get_option('pinova_browser_vendor_page'))]);`);
     forumLogin = routes.login; forumRegister = routes.register; forumHome = routes.home;
     vendorMigration = routes.migration; vendorDashboard = routes.dashboard;
+    vendorRegistration = routes.vendor_registration;
 });
 
 test.afterAll(() => {
@@ -93,6 +98,8 @@ if (is_array($saved)) {
     delete_option('pinova_browser_saved_options');
 }
 wp_unschedule_hook('pinova_otp_delivery');
+wp_delete_post((int)get_option('pinova_browser_vendor_page'), true);
+delete_option('pinova_browser_vendor_page');
 `);
 });
 
@@ -155,6 +162,15 @@ echo 'PINOVA_BROWSER_PROOF_OK';
             headers: { 'X-WP-Nonce': nonce }, data: { jwt: state.data.jwt, code },
         });
         expect(replay.status()).toBe(401);
+        // A persisted history restoration must discard the stopped transport and stale nonce.
+        const reloaded = page.waitForEvent('domcontentloaded');
+        await page.evaluate(() => {
+            window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+            window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+        });
+        await reloaded;
+        await expect(page.locator('.pinova-mobile-proof-content')).toBeVisible();
+        await expect(page.locator('.pinova-mobile-proof input[name="mobile"]')).toBeEditable();
     });
 }
 
@@ -222,14 +238,22 @@ echo 'PINOVA_BROWSER_DATA ' . wp_json_encode(['proof' => \Pinova\Services\Mobile
 test('native vendor conversion keeps the authenticated account and mobile proof', async ({ page }) => {
     fixture(String.raw`
 update_option('pinova_integrations', ['wpforo_enabled' => '1', 'dokan_enabled' => '1']);
-if (!\Pinova\Services\MobileVerificationService::is_verified($id)) { throw new Exception('Earlier real browser proof is required'); }
+update_user_meta($id, 'pinova_mobile', '${mobile}');
+$otp = \Pinova\Models\OTP::query()->create(['user_id' => $id, 'identifier' => '${mobile}', 'type' => 'login', 'code' => '${code}', 'flow_id' => bin2hex(random_bytes(16)), 'channels' => ['sms' => true]]);
+\Pinova\Services\OTPService::verify_with_flow(\Pinova\Services\OTPService::signed_state($otp), '${code}', ['login']);
 WPF()->member->set_secondary_groupids($id, [5]);
 `);
     await page.goto(vendorDashboard);
     await expect(page.locator('#authenticate')).toBeVisible();
     expect(new URL(page.url()).searchParams.get('back_url')).toBe(vendorDashboard);
+    const target = new URL('/my-account/?from=vendor&next=%2Fcheckout%3Fa%3D1#details', vendorMigration).href;
+    await page.goto(vendorRegistration + '?back_url=' + encodeURIComponent(target));
+    await expect(page.locator('#authenticate')).toBeVisible();
+    const onboarding = new URL(new URL(page.url()).searchParams.get('back_url'));
+    expect(onboarding.pathname).toBe(new URL(vendorMigration).pathname);
+    expect(onboarding.searchParams.get('back_url')).toBe(target);
     await login(page);
-    await page.goto(vendorMigration);
+    await page.goto(vendorRegistration + '?back_url=' + encodeURIComponent(target));
     const form = page.locator('form.update-customer-to-vendor');
     await expect(form).toBeVisible();
     const nonce = await form.locator('[name="dokan_nonce"]').inputValue();
@@ -239,7 +263,6 @@ WPF()->member->set_secondary_groupids($id, [5]);
     });
     expect(invalid.status()).toBe(200);
     expect(fixture(`if (dokan_is_user_seller($id)) { throw new Exception('Invalid nonce converted account'); } echo 'PINOVA_VENDOR_UNCHANGED';`)).toContain('PINOVA_VENDOR_UNCHANGED');
-    const target = new URL('/my-account/?from=vendor&next=%2Fcheckout%3Fa%3D1#details', vendorMigration).href;
     const converted = await page.request.post(vendorMigration, {
         form: { dokan_migration: '1', dokan_nonce: nonce, fname: 'Browser', lname: 'Fixture', shopname: 'Browser fixture store', shopurl: 'pinova-browser-fixture', phone: '09350000001', back_url: target },
         maxRedirects: 0,

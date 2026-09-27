@@ -12,10 +12,12 @@ use Pinova\Services\MobileVerificationService;
 final class Load {
 	public const STATE_META = '_pinova_wpforo_membership';
 
-	private static bool $booted     = false;
-	private static ?int $writing    = null;
-	private static array $suspended = [];
-	private static array $resets    = [];
+	private static bool $booted         = false;
+	private static ?int $writing        = null;
+	private static array $suspended     = [];
+	private static array $resets        = [];
+	private static array $locks         = [];
+	private static array $profile_locks = [];
 
 	public static function boot(): void {
 		if ( self::$booted ) {
@@ -30,6 +32,10 @@ final class Load {
 		add_action( 'pinova/user_registered', [ self::class, 'registered' ] );
 		add_action( 'pinova/mobile_verified', [ self::class, 'verified' ] );
 		add_filter( 'wpforo_before_update_profile_fields', [ self::class, 'profile_fields' ], PHP_INT_MAX, 2 );
+		add_action( 'wpforo_update_profile_fields', [ self::class, 'profile_written' ], PHP_INT_MAX );
+		foreach ( [ 'activate', 'unban', 'deactivate', 'ban' ] as $action ) {
+			add_action( 'wpforo_after_' . $action . '_user', [ self::class, 'native_status_changed' ], 0 );
+		}
 		add_filter( 'wpforo_permissions_forum_can', [ self::class, 'forum_can' ], PHP_INT_MAX, 2 );
 		add_filter( 'wpforo_add_topic_data_filter', [ self::class, 'posting_data' ], PHP_INT_MAX );
 		add_filter( 'wpforo_add_post_data_filter', [ self::class, 'posting_data' ], PHP_INT_MAX );
@@ -57,7 +63,45 @@ final class Load {
 	}
 
 	private static function state( int $user_id ): string {
-		return (string) get_user_meta( $user_id, self::STATE_META, true );
+		global $wpdb;
+		$rows = $wpdb->get_col( $wpdb->prepare( 'SELECT meta_value FROM %i WHERE user_id = %d AND meta_key = %s LIMIT 2', $wpdb->usermeta, $user_id, self::STATE_META ) );
+		return $wpdb->last_error || ! is_array( $rows ) || count( $rows ) > 1 ? 'held' : (string) ( $rows[0] ?? '' );
+	}
+
+	/** Serialize Pinova activation and native administrator status writes on this site/account. */
+	private static function lock( int $user_id ): bool {
+		if ( isset( self::$locks[ $user_id ] ) ) {
+			++self::$locks[ $user_id ]['depth'];
+			return true;
+		}
+		global $wpdb;
+		$key = 'pinova-forum:' . substr( hash( 'sha256', DB_NAME . ':' . $wpdb->usermeta . ':' . $user_id ), 0, 40 );
+		if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $key ) ) ) {
+			return false;
+		}
+		self::$locks[ $user_id ] = [ 'key' => $key, 'depth' => 1 ];
+		return true;
+	}
+
+	private static function unlock( int $user_id ): void {
+		if ( ! isset( self::$locks[ $user_id ] ) || --self::$locks[ $user_id ]['depth'] > 0 ) {
+			return;
+		}
+		global $wpdb;
+		$key = self::$locks[ $user_id ]['key'];
+		unset( self::$locks[ $user_id ] );
+		$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $key ) );
+	}
+
+	public static function profile_written( int $user_id ): void {
+		if ( ! empty( self::$profile_locks[ $user_id ] ) ) {
+			if ( array_pop( self::$profile_locks[ $user_id ] ) ) {
+				self::unlock( $user_id );
+			}
+			if ( [] === self::$profile_locks[ $user_id ] ) {
+				unset( self::$profile_locks[ $user_id ] );
+			}
+		}
 	}
 
 	private static function protected_user( int $user_id ): bool {
@@ -79,36 +123,112 @@ final class Load {
 			update_user_meta( $user_id, self::STATE_META, 'held' );
 			return;
 		}
-		self::write_status( $user_id, 'inactive' );
+		self::write_status( $user_id, 'inactive', 'active', 'pending' );
 	}
 
-	private static function write_status( int $user_id, string $status ): void {
+	/** Keep native filters, cache invalidation and hooks, but make our status write conditional. */
+	private static function write_status( int $user_id, string $status, string $previous, string $state ): bool {
+		global $wpdb;
+		$table       = WPF()->tables->profiles;
+		$expected    = $wpdb->prepare( 'UPDATE %i SET `status` = %s WHERE `userid` = %d', $table, $status, $user_id );
+		$conditional = $wpdb->prepare(
+			'UPDATE %i AS p INNER JOIN %i AS m ON m.user_id = p.userid AND m.meta_key = %s SET p.status = %s WHERE p.userid = %d AND p.status = %s AND m.meta_value = %s',
+			$table, $wpdb->usermeta, self::STATE_META, $status, $user_id, $previous, $state
+		);
+		$prefix  = $wpdb->prepare( 'UPDATE %i SET ', $table );
+		$matched = false;
+		// wpForo exposes no conditional-update argument. Scope the guard to its first profile write.
+		// Added fields or a changed statement must fail closed, never fall through unconditionally.
+		$guard = static function ( string $query ) use ( $prefix, $expected, $conditional, &$matched, &$guard ): string {
+			global $wp_current_filter;
+			if ( 1 !== count( array_keys( (array) $wp_current_filter, 'query', true ) ) || ! str_starts_with( $query, $prefix ) ) {
+				return $query;
+			}
+			remove_filter( 'query', $guard, PHP_INT_MAX );
+			$matched = $query === $expected;
+			return $matched ? $conditional : 'SELECT 0';
+		};
+		$arm = static function ( array $fields ) use ( $guard ): array {
+			add_filter( 'query', $guard, PHP_INT_MAX );
+			return $fields;
+		};
 		self::$writing = $user_id;
+		add_filter( 'wpforo_before_update_profile_fields', $arm, PHP_INT_MAX );
 		try {
-			WPF()->member->update_profile_fields( $user_id, [ 'status' => $status ], false );
+			$result = WPF()->member->update_profile_fields( $user_id, [ 'status' => $status ], false );
+			return $matched && 1 === (int) $result;
 		} finally {
+			remove_filter( 'wpforo_before_update_profile_fields', $arm, PHP_INT_MAX );
+			remove_filter( 'query', $guard, PHP_INT_MAX );
 			self::$writing = null;
 		}
 	}
 
+	/** Native member buttons and bulk/API methods do not use the profile-fields hook. */
+	public static function native_status_changed( int $user_id ): void {
+		if ( '' === self::state( $user_id ) ) {
+			return;
+		}
+		$hook = current_filter();
+		if ( in_array( $hook, [ 'wpforo_after_deactivate_user', 'wpforo_after_ban_user' ], true ) ) {
+			update_user_meta( $user_id, self::STATE_META, 'held' );
+			if ( 'wpforo_after_deactivate_user' === $hook ) {
+				self::write_status( $user_id, 'inactive', 'active', 'held' );
+			}
+		} elseif ( self::native_can_approve( $user_id, $hook ) ) {
+			update_user_meta( $user_id, self::STATE_META, 'approved' );
+		}
+	}
+
+	private static function native_can_approve( int $user_id, string $hook ): bool {
+		if ( self::administrator() ) {
+			return true;
+		}
+		$actor = get_current_user_id();
+		if ( ! $actor || $actor === $user_id || ! WPF()->usergroup->can( 'bm' ) ) {
+			return false;
+		}
+		return 'wpforo_after_unban_user' === $hook
+			? (bool) WPF()->perm->user_can_manage_user( $actor, $user_id ) : (bool) WPF()->usergroup->can( 'vm' );
+	}
+
+	private static function administrator(): bool {
+		return current_user_can( 'edit_users' ) || ( 0 < get_current_user_id() && isset( WPF()->usergroup ) && WPF()->usergroup->can( 'em' ) );
+	}
+
 	public static function verified( int $user_id ): void {
+		if ( ! IntegrationSettings::enabled( 'wpforo' ) || ! self::available() || ! self::lock( $user_id ) ) {
+			return;
+		}
+		try {
+			self::activate_pending( $user_id );
+		} finally {
+			self::unlock( $user_id );
+		}
+	}
+
+	private static function activate_pending( int $user_id ): void {
 		if ( ! IntegrationSettings::enabled( 'wpforo' ) || ! self::available()
 			|| 'pending' !== self::state( $user_id ) || ! wpforo_setting( 'authorization', 'user_register' )
 			|| wpforo_setting( 'authorization', 'manually_approval' ) || ! MobileVerificationService::is_verified( $user_id ) ) {
 			return;
 		}
 		if ( 'inactive' !== self::status( $user_id ) ) {
-			update_user_meta( $user_id, self::STATE_META, 'held' );
+			update_user_meta( $user_id, self::STATE_META, 'held', 'pending' );
 			return;
 		}
-		self::write_status( $user_id, 'active' );
-		if ( 'active' === self::status( $user_id ) ) {
-			update_user_meta( $user_id, self::STATE_META, 'verified' );
+		if ( self::write_status( $user_id, 'active', 'inactive', 'pending' ) && 'active' === self::status( $user_id ) ) {
+			update_user_meta( $user_id, self::STATE_META, 'verified', 'pending' );
 		}
 	}
 
 	/** Same-value administrative writes also revoke our authority to activate automatically. */
 	public static function profile_fields( array $fields, int $user_id ): array {
+		$locked = array_key_exists( 'status', $fields ) && '' !== self::state( $user_id );
+		if ( $locked && ! self::lock( $user_id ) ) {
+			wp_die( esc_html__( 'وضعیت عضویت در حال تغییر است. لطفاً دوباره تلاش کنید.', 'pinova' ), '', [ 'response' => 409 ] );
+		}
+		self::$profile_locks[ $user_id ][] = $locked;
 		if ( self::$writing === $user_id ) {
 			return $fields;
 		}
@@ -127,7 +247,7 @@ final class Load {
 			return $fields;
 		}
 		if ( array_key_exists( 'status', $fields ) && '' !== self::state( $user_id ) ) {
-			$administrator = current_user_can( 'edit_users' ) || ( 0 < get_current_user_id() && isset( WPF()->usergroup ) && WPF()->usergroup->can( 'em' ) );
+			$administrator = self::administrator();
 			if ( 'active' === $fields['status'] && ! $administrator ) {
 				$fields['status'] = self::status( $user_id );
 			} else {

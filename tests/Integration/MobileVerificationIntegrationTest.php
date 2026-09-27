@@ -99,6 +99,72 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 		self::assertFalse( Proof::is_verified( $id ) );
 	}
 
+	public function test_secondary_legacy_alias_can_login_without_proving_another_mobile(): void {
+		$id = self::factory()->user->create( [ 'user_login' => '989120000001', 'role' => 'subscriber' ] );
+		update_user_meta( $id, 'digits_phone', '09120000002' );
+		self::assertSame( $id, UserService::get_by_mobile( '09120000002' ) );
+		[ $user ] = $this->verify( $this->otp( $id, '09120000002' ) );
+		self::assertSame( $id, $user->ID );
+		self::assertFalse( Proof::is_verified( $id ) );
+		self::assertSame( '', get_user_meta( $id, Proof::PROOF_META, true ) );
+		self::assertSame( '+989120000001', Proof::current_mobile( $id ) );
+	}
+
+	/** @dataProvider alias_changes */
+	public function test_secondary_recovery_alias_remains_bound_to_its_current_unique_ownership( string $change ): void {
+		$id = self::factory()->user->create( [ 'user_login' => '989120000001', 'role' => 'subscriber' ] );
+		update_user_meta( $id, 'digits_phone', '09120000002' );
+		[ $user, $flow, $identity ] = $this->verify( $this->otp( $id, '09120000002', OTP::TYPE_FORGET ) );
+		$jwt = UserService::generate_jwt( $user->ID, $flow, $identity );
+		self::assertSame( [ $id, $flow, 'mobile' ], UserService::parse_jwt_with_flow( $jwt ) );
+		self::assertStringNotContainsString( '9120000002', (string) wp_json_encode( JWT::decode( $jwt ) ) );
+		self::assertFalse( Proof::is_verified( $id ) );
+		if ( 'remove' === $change ) {
+			delete_user_meta( $id, 'digits_phone' );
+		} elseif ( 'override' === $change ) {
+			update_user_meta( $id, 'pinova_mobile', '09120000001' );
+		} else {
+			$other = self::factory()->user->create();
+			update_user_meta( $other, 'digits_phone', '09120000002' );
+		}
+		$this->expectException( \Exception::class );
+		UserService::parse_jwt_with_flow( $jwt );
+	}
+
+	public static function alias_changes(): array {
+		return [ [ 'remove' ], [ 'override' ], [ 'conflict' ] ];
+	}
+
+	public function test_another_connection_claiming_a_mobile_blocks_assignment_and_registration(): void {
+		global $wpdb;
+		$id = $this->account();
+		wp_set_current_user( $id );
+		$target = '+989122222222';
+		$key = 'pinova-identity:' . substr( hash_hmac( 'sha256', DB_NAME . ':' . $wpdb->usermeta . ':' . $target, wp_salt( 'auth' ) ), 0, 40 );
+		$pdo = OTP::resolveConnection()->getPdo();
+		$lock = $pdo->prepare( 'SELECT GET_LOCK(?, 0)' );
+		$lock->execute( [ $key ] );
+		self::assertSame( 1, (int) $lock->fetchColumn() );
+		try {
+			foreach ( [ 'proof', 'registration' ] as $operation ) {
+				try {
+					if ( 'proof' === $operation ) {
+						$this->verify( $this->otp( $id, $target, OTP::TYPE_VERIFY_MOBILE ) );
+					} else {
+						UserService::create( $target );
+					}
+					self::fail( 'A concurrently claimed number must not be assigned.' );
+				} catch ( \Exception $exception ) {
+					self::assertSame( '+989121234567', UserService::get_persisted_mobile( $id ) );
+					self::assertNull( UserService::get_by_mobile( $target ) );
+				}
+			}
+		} finally {
+			$release = $pdo->prepare( 'SELECT RELEASE_LOCK(?)' );
+			$release->execute( [ $key ] );
+		}
+	}
+
 	public function test_change_delete_and_readding_old_number_cannot_revive_proof(): void {
 		$id = $this->account();
 		$this->verify( $this->otp( $id ) );

@@ -74,6 +74,27 @@ final class MobileVerificationService {
 		return hash_hmac( 'sha256', $user_id . ':' . $identifier->get_type() . ':' . $identifier->get_value(), wp_salt( 'auth' ) );
 	}
 
+	/** Recovery may use a valid secondary legacy alias without proving the canonical mobile. */
+	public static function matches_recovery_mobile( int $user_id, string $digest ): bool {
+		global $wpdb;
+		$login = $wpdb->get_var( $wpdb->prepare( 'SELECT user_login FROM %i WHERE ID = %d', $wpdb->users, $user_id ) );
+		if ( $wpdb->last_error || ! is_string( $login ) ) {
+			return false;
+		}
+		$values = [ $login ];
+		foreach ( self::mobile_keys() as $key ) {
+			$values[] = self::meta( $user_id, $key ) ?? '';
+		}
+		foreach ( array_unique( $values ) as $value ) {
+			$identity = new Identifier( $value );
+			if ( $identity->is_valid() && $identity->is_mobile() && hash_equals( self::identity_digest( $user_id, $identity ), $digest )
+				&& UserService::match( $identity ) === $user_id ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** Obtain a revocation generation before OTP consumption. */
 	public static function epoch( int $user_id ): string {
 		$epoch = self::meta( $user_id, self::EPOCH_META );
@@ -201,12 +222,26 @@ final class MobileVerificationService {
 
 	/** Called only after a purpose-bound, authenticated OTP was atomically consumed. */
 	public static function complete( int $user_id, Identifier $identifier, string $epoch ): void {
-		self::with_lock(
-			$user_id,
+		self::with_identity_lock(
+			$identifier->get_value(),
 			static function () use ( $user_id, $identifier, $epoch ): void {
-				self::complete_locked( $user_id, $identifier, $epoch );
+				self::with_lock( $user_id, static fn() => self::complete_locked( $user_id, $identifier, $epoch ) );
 			}
 		);
+	}
+
+	/** Serialize claims to one mobile across proof-only changes and public registration. */
+	public static function with_identity_lock( string $mobile, callable $callback ) {
+		global $wpdb;
+		$key = 'pinova-identity:' . substr( hash_hmac( 'sha256', DB_NAME . ':' . $wpdb->usermeta . ':' . $mobile, wp_salt( 'auth' ) ), 0, 40 );
+		if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $key ) ) ) {
+			throw new Exception( 'Mobile identity is busy.' );
+		}
+		try {
+			return $callback();
+		} finally {
+			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $key ) );
+		}
 	}
 
 	private static function complete_locked( int $user_id, Identifier $identifier, string $epoch ): void {

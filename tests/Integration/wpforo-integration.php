@@ -179,6 +179,57 @@ $proof( $historical );
 UserService::login( $historical, 'otp' );
 $check( 'inactive' === WPF()->member->get_status( $historical ) && '' === get_user_meta( $historical, Load::STATE_META, true ), 'historical inactive proof/login never enrolls or activates' );
 
+// A second database connection models an in-flight native administrator write.
+$racing = $account();
+global $wpdb;
+$lock_key = 'pinova-forum:' . substr( hash( 'sha256', DB_NAME . ':' . $wpdb->usermeta . ':' . $racing ), 0, 40 );
+$connection = OTP::resolveConnection()->getPdo();
+$acquire = $connection->prepare( 'SELECT GET_LOCK(?, 0)' );
+$acquire->execute( [ $lock_key ] );
+$check( 1 === (int) $acquire->fetchColumn(), 'independent administrator lock acquired' );
+try {
+	$proof( $racing );
+	$check( 'pending' === get_user_meta( $racing, Load::STATE_META, true ) && 'inactive' === WPF()->member->get_status( $racing ), 'verification cannot race an administrator write' );
+} finally {
+	$release = $connection->prepare( 'SELECT RELEASE_LOCK(?)' );
+	$release->execute( [ $lock_key ] );
+}
+$set_user( $admin );
+WPF()->member->update_profile_fields( $racing, [ 'status' => 'inactive' ], false );
+Load::verified( $racing );
+$check( 'held' === get_user_meta( $racing, Load::STATE_META, true ) && 'inactive' === WPF()->member->get_status( $racing ), 'administrator hold wins after contention and retry' );
+$check( '1' === (string) $wpdb->get_var( $wpdb->prepare( 'SELECT IS_FREE_LOCK(%s)', $lock_key ) ), 'native after-write hook releases account lock' );
+
+$native = $account();
+$set_user( $admin );
+$check( WPF()->member->deactivate( $native ), 'native administrator deactivate' );
+$proof( $native );
+$check( 'held' === get_user_meta( $native, Load::STATE_META, true ) && 'inactive' === WPF()->member->get_status( $native ), 'native same-value deactivate survives proof' );
+$check( WPF()->member->activate( $native ) && 'approved' === get_user_meta( $native, Load::STATE_META, true ) && ! Load::denied( $native ), 'native administrator approval grants forum eligibility' );
+$check( WPF()->member->ban( $native ) && 'held' === get_user_meta( $native, Load::STATE_META, true ) && Load::denied( $native ), 'native ban revokes forum eligibility' );
+$check( WPF()->member->unban( $native ) && 'approved' === get_user_meta( $native, Load::STATE_META, true ), 'authorized native unban preserves approval' );
+
+$autobanned = $account();
+$saved_manual = WPF()->settings->authorization['manually_approval'];
+WPF()->settings->authorization['manually_approval'] = true;
+$proof( $autobanned );
+WPF()->settings->authorization['manually_approval'] = false;
+$set_user( $autobanned );
+$ban_during_activation = static function ( array $fields, int $user_id ) use ( $autobanned ): array {
+	if ( $user_id === $autobanned && 'active' === ( $fields['status'] ?? '' ) ) {
+		WPF()->member->autoban( $user_id );
+	}
+	return $fields;
+};
+add_filter( 'wpforo_before_update_profile_fields', $ban_during_activation, 20, 2 );
+try {
+	Load::verified( $autobanned );
+	$check( 'banned' === WPF()->member->get_status( $autobanned ) && Load::denied( $autobanned ), 'atomic activation cannot overwrite direct native autoban' );
+} finally {
+	remove_filter( 'wpforo_before_update_profile_fields', $ban_during_activation, 20 );
+	WPF()->settings->authorization['manually_approval'] = $saved_manual;
+}
+
 $held = $account();
 $set_user( $admin );
 WPF()->member->update_profile_fields( $held, [ 'status' => 'inactive' ], false ); // Deliberate same-value hold.

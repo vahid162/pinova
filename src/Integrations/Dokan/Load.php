@@ -83,6 +83,16 @@ final class Load {
 		return function_exists( 'wc_get_account_endpoint_url' ) ? wc_get_account_endpoint_url( 'account-migration' ) : home_url( '/' );
 	}
 
+	/** Finish onboarding before following the user's final destination. */
+	private static function onboarding_url(): string {
+		$target = self::requested_target();
+		if ( '' === $target ) {
+			return self::migration_url();
+		}
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.urlencode_urlencode
+		return add_query_arg( 'back_url', rawurlencode( self::continuation( $target ) ), self::migration_url() );
+	}
+
 	public static function continuation( $target, ?string $fallback = null ): string {
 		$fallback = $fallback ?? ( function_exists( 'dokan_get_navigation_url' ) ? dokan_get_navigation_url() : home_url( '/' ) );
 		$safe     = Continuation::validate( $target, $fallback );
@@ -110,7 +120,7 @@ final class Load {
 		}
 		$user_id = get_current_user_id();
 		if ( ! $user_id ) {
-			Helper::redirect_to( Pinova::get_login_url( self::continuation( self::requested_target(), self::migration_url() ) ), 'login' );
+			Helper::redirect_to( Pinova::get_login_url( self::onboarding_url() ), 'login' );
 		}
 		$user = get_userdata( $user_id );
 		if ( ! $user || self::privileged( $user ) ) {
@@ -128,7 +138,7 @@ final class Load {
 			self::unavailable();
 		}
 		if ( ! self::can_convert( $user_id ) ) {
-			Helper::redirect_to( MobileVerificationService::url( self::continuation( self::requested_target(), self::migration_url() ) ), 'login' );
+			Helper::redirect_to( MobileVerificationService::url( self::onboarding_url() ), 'login' );
 		}
 		self::$authorized = $user_id;
 	}
@@ -217,7 +227,7 @@ final class Load {
 		}
 		// Preserve a directly requested dashboard subpage as well as an explicit return parameter.
 		$fallback = $registration ? self::migration_url() : self::continuation( wp_unslash( $_SERVER['REQUEST_URI'] ?? '' ) );
-		$target   = self::continuation( self::requested_target(), $fallback );
+		$target   = $registration ? self::onboarding_url() : self::continuation( self::requested_target(), $fallback );
 		if ( ! is_user_logged_in() ) {
 			Helper::redirect_to( Pinova::get_login_url( $target ), 'login' );
 		} elseif ( $registration ) {
@@ -232,7 +242,7 @@ final class Load {
 			|| ( 'dokan-dashboard' === $tag && is_user_logged_in() ) ) {
 			return $output;
 		}
-		$target = self::continuation( self::requested_target(), 'dokan-dashboard' === $tag ? null : self::migration_url() );
+		$target = 'dokan-dashboard' === $tag ? self::continuation( self::requested_target() ) : self::onboarding_url();
 		$url    = is_user_logged_in() ? $target : Pinova::get_login_url( $target );
 		return '<p><a class="button" href="' . esc_url( $url ) . '">' . esc_html__( 'ورود و ادامه', 'pinova' ) . '</a></p>';
 	}

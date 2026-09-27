@@ -151,5 +151,6 @@
     });
     const timer = setInterval(tick, 1000);
     window.addEventListener('pagehide', () => { alive = false; clearInterval(timer); stopWebOtp(); transport?.abort(); token = ''; code.value = ''; }, { once: true });
+    window.addEventListener('pageshow', (event) => { if (event.persisted) window.location.reload(); });
   });
 })();

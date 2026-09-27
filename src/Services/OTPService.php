@@ -343,7 +343,8 @@ class OTPService {
 			$user = new \WP_User( (int) $otp->user_id );
 		} else {
 			$user = UserService::get_or_create( $otp );
-			if ( $identifier->is_mobile() && in_array( $otp->type, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ], true ) ) {
+			if ( $identifier->is_mobile() && in_array( $otp->type, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ], true )
+				&& MobileVerificationService::current_mobile( $user->ID ) === $identifier->get_value() ) {
 				MobileVerificationService::record( $user->ID, $identifier, $proof_epoch ?? MobileVerificationService::epoch( $user->ID ) );
 			}
 		}

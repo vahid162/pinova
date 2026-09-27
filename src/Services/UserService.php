@@ -355,8 +355,6 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function create( $mobile, string $email = '', array $userdata = [], ?string $flow_id = null ): int {
-		global $wpdb;
-
 		if ( ! is_a( $mobile, Mobile::class ) ) {
 
 			$mobile = new Mobile( $mobile );
@@ -365,6 +363,14 @@ class UserService {
 				throw new Exception( 'تلفن همراه برای ثبت نام معتبر نمی‌باشد.' );
 			}
 		}
+		return MobileVerificationService::with_identity_lock(
+			$mobile->get_formatted(),
+			static fn(): int => self::create_locked( $mobile, $email, $userdata, $flow_id )
+		);
+	}
+
+	private static function create_locked( Mobile $mobile, string $email, array $userdata, ?string $flow_id ): int {
+		global $wpdb;
 
 		if ( ! self::mobile_is_available_for_user( $mobile, 0 ) ) {
 			throw new Exception( __( 'امکان ثبت‌نام با این شماره وجود ندارد.', 'pinova' ) );
@@ -631,18 +637,21 @@ class UserService {
 		$user_id = intval( $payload['user_id'] );
 		$origin  = $payload['origin'] ?? 'unknown';
 		if ( in_array( $origin, [ 'mobile', 'email' ], true ) ) {
+			if ( ! is_string( $payload['identity'] ?? null ) ) {
+				throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+			}
 			if ( 'mobile' === $origin ) {
-				$value = MobileVerificationService::current_mobile( $user_id ) ?? '';
+				$valid = MobileVerificationService::matches_recovery_mobile( $user_id, $payload['identity'] );
 			} else {
 				global $wpdb;
 				$value = $wpdb->get_var( $wpdb->prepare( 'SELECT user_email FROM %i WHERE ID = %d', $wpdb->users, $user_id ) );
 				if ( $wpdb->last_error || ! is_string( $value ) ) {
 					throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
 				}
+				$identity = new Identifier( $value );
+				$valid    = $identity->is_valid() && hash_equals( MobileVerificationService::identity_digest( $user_id, $identity ), $payload['identity'] );
 			}
-			$identity = new Identifier( $value );
-			if ( ! $identity->is_valid() || ! is_string( $payload['identity'] ?? null )
-				|| ! hash_equals( MobileVerificationService::identity_digest( $user_id, $identity ), $payload['identity'] ) ) {
+			if ( ! $valid ) {
 				throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
 			}
 		} elseif ( 'unknown' !== $origin ) {

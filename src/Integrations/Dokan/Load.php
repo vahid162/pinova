@@ -111,14 +111,16 @@ final class Load {
 		$user_id = get_current_user_id();
 		if ( ! $user_id ) {
 			Helper::redirect_to( Pinova::get_login_url( self::continuation( self::requested_target(), self::migration_url() ) ), 'login' );
-			return;
+		}
+		$user = get_userdata( $user_id );
+		if ( ! $user || self::privileged( $user ) ) {
+			self::unavailable();
 		}
 		// Existing and disabled vendors stay under Dokan's own policy and are never reactivated here.
 		if ( function_exists( 'dokan_is_user_seller' ) && dokan_is_user_seller( $user_id ) ) {
 			return;
 		}
-		$user = get_userdata( $user_id );
-		if ( ! IntegrationSettings::enabled( 'dokan' ) || ! $user || self::privileged( $user ) ) {
+		if ( ! IntegrationSettings::enabled( 'dokan' ) ) {
 			self::unavailable();
 		}
 		update_user_meta( $user_id, self::STATE_META, 'pending' );
@@ -127,7 +129,6 @@ final class Load {
 		}
 		if ( ! self::can_convert( $user_id ) ) {
 			Helper::redirect_to( MobileVerificationService::url( self::continuation( self::requested_target(), self::migration_url() ) ), 'login' );
-			return;
 		}
 		self::$authorized = $user_id;
 	}
@@ -138,7 +139,7 @@ final class Load {
 
 	/** Called by the native handler after its nonce check; do not replace its field requirements. */
 	public static function capture_forum( array $fields ): array {
-		if ( null === self::$authorized || self::$authorized !== get_current_user_id() ) {
+		if ( null === self::$authorized || get_current_user_id() !== self::$authorized ) {
 			return $fields;
 		}
 		if ( ! self::can_convert( self::$authorized ) ) {
@@ -163,7 +164,7 @@ final class Load {
 
 	/** Only the exact, authorized native conversion may restore this request's forum snapshot. */
 	public static function converted( int $user_id ): void {
-		if ( self::$authorized !== $user_id || $user_id !== get_current_user_id() || ! dokan_is_user_seller( $user_id ) ) {
+		if ( self::$authorized !== $user_id || get_current_user_id() !== $user_id || ! dokan_is_user_seller( $user_id ) ) {
 			return;
 		}
 		$forum = self::$forum;

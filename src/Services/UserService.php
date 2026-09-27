@@ -621,33 +621,33 @@ class UserService {
 			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
-		if ( isset( $payload['user_id'] ) ) {
-			$flow_id = $payload['flow_id'] ?? null;
-			if ( null === $flow_id || ( is_string( $flow_id ) && preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) ) {
-				$user_id = intval( $payload['user_id'] );
-				$origin  = $payload['origin'] ?? 'unknown';
-				if ( in_array( $origin, [ 'mobile', 'email' ], true ) ) {
-					if ( 'mobile' === $origin ) {
-						$value = MobileVerificationService::current_mobile( $user_id ) ?? '';
-					} else {
-						global $wpdb;
-						$value = $wpdb->get_var( $wpdb->prepare( 'SELECT user_email FROM %i WHERE ID = %d', $wpdb->users, $user_id ) );
-						if ( $wpdb->last_error || ! is_string( $value ) ) {
-							throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
-						}
-					}
-					$identity = new Identifier( $value );
-					if ( ! $identity->is_valid() || ! is_string( $payload['identity'] ?? null )
-						|| ! hash_equals( MobileVerificationService::identity_digest( $user_id, $identity ), $payload['identity'] ) ) {
-						throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
-					}
-				} elseif ( 'unknown' !== $origin ) {
+		if ( ! isset( $payload['user_id'] ) ) {
+			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+		}
+		$flow_id = $payload['flow_id'] ?? null;
+		if ( null !== $flow_id && ( ! is_string( $flow_id ) || ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) ) {
+			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+		}
+		$user_id = intval( $payload['user_id'] );
+		$origin  = $payload['origin'] ?? 'unknown';
+		if ( in_array( $origin, [ 'mobile', 'email' ], true ) ) {
+			if ( 'mobile' === $origin ) {
+				$value = MobileVerificationService::current_mobile( $user_id ) ?? '';
+			} else {
+				global $wpdb;
+				$value = $wpdb->get_var( $wpdb->prepare( 'SELECT user_email FROM %i WHERE ID = %d', $wpdb->users, $user_id ) );
+				if ( $wpdb->last_error || ! is_string( $value ) ) {
 					throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
 				}
-				return [ $user_id, $flow_id, $origin ];
 			}
+			$identity = new Identifier( $value );
+			if ( ! $identity->is_valid() || ! is_string( $payload['identity'] ?? null )
+				|| ! hash_equals( MobileVerificationService::identity_digest( $user_id, $identity ), $payload['identity'] ) ) {
+				throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+			}
+		} elseif ( 'unknown' !== $origin ) {
+			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
 		}
-
-		throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+		return [ $user_id, $flow_id, $origin ];
 	}
 }

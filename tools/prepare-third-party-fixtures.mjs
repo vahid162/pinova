@@ -8,6 +8,7 @@ if (process.env.PINOVA_TEST_PROFILE !== 'third-party') {
 }
 
 const baseline = JSON.parse(readFileSync(new URL('../tests/fixtures/third-party-baseline.json', import.meta.url), 'utf8'));
+const archives = [...baseline.plugins, baseline.pinova_baseline];
 const build = path.resolve('.build');
 const destination = path.join(build, 'third-party');
 if (existsSync(destination)) {
@@ -18,7 +19,7 @@ const temporary = mkdtempSync(path.join(build, 'third-party-download-'));
 
 try {
     // Verify every archive before extracting any plugin code.
-    for (const plugin of baseline.plugins) {
+    for (const plugin of archives) {
         const archive = path.join(temporary, `${plugin.slug}.zip`);
         execFileSync('curl', [
             '--fail', '--silent', '--show-error', '--location', '--proto', '=https',
@@ -30,7 +31,7 @@ try {
             throw new Error(`Checksum mismatch for ${plugin.slug}; no fixtures were extracted.`);
         }
     }
-    for (const plugin of baseline.plugins) {
+    for (const plugin of archives) {
         const archive = path.join(temporary, `${plugin.slug}.zip`);
         execFileSync('unzip', ['-q', archive, '-d', temporary], { stdio: 'inherit', timeout: 60_000 });
         if (!existsSync(path.join(temporary, plugin.slug, plugin.main))) {

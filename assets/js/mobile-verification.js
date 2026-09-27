@@ -29,8 +29,10 @@
     const stopWebOtp = () => { if (webOtp) webOtp.abort(); webOtp = null; };
     const tick = () => {
       const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-      countdown.textContent = token && remaining ? `ارسال دوباره تا ${remaining} ثانیه دیگر` : '';
-      resend.hidden = !token || remaining > 0 || complete;
+      const text = token && remaining ? `ارسال دوباره تا ${remaining} ثانیه دیگر` : '';
+      const hidden = !token || remaining > 0 || complete;
+      if (countdown.textContent !== text) countdown.textContent = text;
+      if (resend.hidden !== hidden) resend.hidden = hidden;
     };
     const setBusy = (value) => {
       busy = value;
@@ -93,6 +95,8 @@
           complete = true;
           token = '';
           code.value = '';
+          tick();
+          clearInterval(timer);
           stopWebOtp();
           content.hidden = true;
           status.tabIndex = -1;

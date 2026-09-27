@@ -1,6 +1,14 @@
 {
   "wordpress": "7.1.2",
   "woocommerce": "11.1.2",
+  "pinova_baseline": {
+    "slug": "pinova",
+    "main": "pinova.php",
+    "tag": "v1.3.0-rc5",
+    "commit": "7c309e6a747d9c0214c7416ffc586821cae3ab7d",
+    "url": "https://github.com/vahid162/pinova/releases/download/v1.3.0-rc5/pinova-1.3.0.zip",
+    "sha256": "207a3a2771d80160ce9a63e36a57230d67d7f58935c94e95feb0cc06969a920f"
+  },
   "plugins": [
     {
       "slug": "wpforo",

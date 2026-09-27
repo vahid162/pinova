@@ -20,6 +20,7 @@ function fixture(action) {
         '    marker=PINOVA_BASELINE_COMPLETE',
         '    if [[ " $* " == *"wpforo-integration.php"* ]]; then marker=PINOVA_WPFORO_COMPLETE; fi',
         '    if [[ " $* " == *"dokan-integration.php"* ]]; then marker=PINOVA_DOKAN_COMPLETE; fi',
+        '    if [[ " $* " == *"installed-upgrade.php"* ]]; then marker=PINOVA_UPGRADE_COMPLETE; fi',
         '    if [[ "${FAKE_MISSING_SUITE:-}" != "$marker" ]]; then printf "%s %s\\n" "$marker" "${@: -1}"; fi',
         'fi',
         'exit "${FAKE_EXIT:-0}"',
@@ -56,6 +57,8 @@ test('third-party runner requires process success and explicit scenario completi
         const result = execute();
         assert.equal(result.status, 0, result.stderr);
         assert.match(result.stdout, /PINOVA_BASELINE_COMPLETE normal/);
+        for (const phase of ['seed', 'upgrade', 'rollback', 'cleanup']) assert.match(result.stdout, new RegExp(`PINOVA_UPGRADE_COMPLETE ${phase}`));
+        assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_UPGRADE_COMPLETE' }).status, 0);
         assert.match(result.stdout, /PINOVA_BASELINE_COMPLETE manual-approval/);
         assert.match(result.stdout, /PINOVA_WPFORO_COMPLETE normal/);
         assert.match(result.stdout, /PINOVA_WPFORO_COMPLETE manual-approval/);

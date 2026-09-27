@@ -142,7 +142,7 @@ test('preparation verifies every archive before extraction and cleans later fail
             writeFileSync(helper, readFileSync(prepare));
             const synthetic = structuredClone(baseline);
             const digest = createHash('sha256').update('verified fixture').digest('hex');
-            for (const plugin of synthetic.plugins) plugin.sha256 = digest;
+            for (const plugin of [...synthetic.plugins, synthetic.pinova_baseline]) plugin.sha256 = digest;
             writeFileSync(path.join(helperRoot, 'tests/fixtures/third-party-baseline.json'), JSON.stringify(synthetic));
             const bin = path.join(directory, 'bin');
             mkdirSync(bin);
@@ -163,7 +163,7 @@ test('preparation verifies every archive before extraction and cleans later fail
                 'slug=$(basename "$2" .zip)',
                 'mkdir -p "$4/$slug"',
                 '[ "$FAKE_MODE:$slug" != missing-entrypoint:dokan-lite ] || exit 0',
-                'case "$slug" in wpforo) main=wpforo.php ;; dokan-lite) main=dokan.php ;; esac',
+                'case "$slug" in wpforo) main=wpforo.php ;; dokan-lite) main=dokan.php ;; pinova) main=pinova.php ;; esac',
                 'printf synthetic > "$4/$slug/$main"',
                 '',
             ].join('\n'), { mode: 0o700 });

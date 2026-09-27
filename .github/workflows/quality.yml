@@ -322,9 +322,13 @@ jobs:
           PINOVA_TEST_HPOS: ${{ matrix.hpos }}
 
   third-party-baseline:
-    name: Real wpForo and Dokan baseline
+    name: Real wpForo and Dokan / HPOS ${{ matrix.hpos }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        hpos: ['yes', 'no']
     env:
       PINOVA_TEST_PROFILE: third-party
       COMPOSE_PROJECT_NAME: pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
@@ -353,6 +357,10 @@ jobs:
           npx wp-env run wordpress sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
           npx wp-env run wordpress sudo apache2ctl -k graceful
           npx wp-env run cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
+      - name: Select real-plugin order storage
+        env:
+          HPOS_MODE: ${{ matrix.hpos }}
+        run: npx wp-env run cli wp option update woocommerce_custom_orders_table_enabled "$HPOS_MODE"
       - name: Characterize real activated plugin lifecycle
         run: bash tools/run-third-party-baseline.sh
       - name: Prepare real-plugin browser routes
@@ -366,7 +374,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: integration-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          name: integration-browser-hpos-${{ matrix.hpos }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             playwright-report/browser
             test-results/browser

@@ -133,8 +133,13 @@ class OTPService {
 				return;
 			}
 
-			$type = OTP::TYPE_VERIFY_MOBILE === $queued['purpose'] ? OTP::TYPE_VERIFY_MOBILE
-				: ( 'forget' === $queued['purpose'] ? OTP::TYPE_FORGET : ( $user_id ? OTP::TYPE_LOGIN : OTP::TYPE_REGISTER ) );
+			if ( OTP::TYPE_VERIFY_MOBILE === $queued['purpose'] ) {
+				$type = OTP::TYPE_VERIFY_MOBILE;
+			} elseif ( 'forget' === $queued['purpose'] ) {
+				$type = OTP::TYPE_FORGET;
+			} else {
+				$type = $user_id ? OTP::TYPE_LOGIN : OTP::TYPE_REGISTER;
+			}
 			if ( $queued['deadline'] <= time() ) {
 				return;
 			}

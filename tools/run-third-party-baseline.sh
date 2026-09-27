@@ -18,6 +18,17 @@ plugin_directory="$(basename "$repo_root")"
 result_file="$(mktemp)"
 trap 'rm -f -- "$result_file"' EXIT
 
+for phase in seed upgrade rollback cleanup; do
+	options=()
+	if [[ "$phase" == seed || "$phase" == rollback ]]; then
+		options=("--skip-plugins=$plugin_directory" "--require=tests/Integration/load-installed-baseline.php")
+	fi
+	npx --no-install wp-env run cli \
+		--env-cwd="wp-content/plugins/$plugin_directory" \
+		wp eval-file --use-include "${options[@]}" tests/Integration/installed-upgrade.php "$phase" | tee "$result_file"
+	grep -Fxq "PINOVA_UPGRADE_COMPLETE $phase" "$result_file"
+done
+
 for suite in third-party-baseline wpforo-integration dokan-integration; do
 	case "$suite" in
 		third-party-baseline) marker=PINOVA_BASELINE_COMPLETE ;;

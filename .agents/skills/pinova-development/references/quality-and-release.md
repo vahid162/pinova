@@ -46,6 +46,14 @@ Native-login tests cover the private native pipeline, role restriction, upstream
 
 Real browser acceptance covers the standalone account screen and checkout modal at supported responsive widths, landscape/reduced-height/enlarged-text states, configured OTP lengths, localized digits, paste/autofill/WebOTP, request locking, focus transitions, trapping/restoration, inertness, closing during requests, safe areas, theme stylesheet order, and horizontal overflow. Physical Chrome Android and iOS Safari acceptance remains a separate staging gate.
 
+### Real third-party characterization
+
+The opt-in `PINOVA_TEST_PROFILE=third-party` environment uses the package versions and SHA-256 values in `tests/fixtures/third-party-baseline.json`. These are characterization fixtures, not a declaration of the supported product matrix. On an isolated runner, run `node tools/prepare-third-party-fixtures.mjs` before `npm run env:configure`, with that profile set for both commands. The preparer verifies every archive before extracting any plugin. Missing fixtures, altered archive bytes, and conflicting version overrides must fail rather than silently fall back or skip tests. Use a fresh disposable checkout for each preparation.
+
+`tools/run-third-party-baseline.sh` is restricted to the exact GitHub-run-owned wp-env and runs `tests/Integration/third-party-baseline.php` through WP-CLI after normal plugin activation. This preserves the real third-party installation and hook lifecycle separately from the WordPress PHPUnit database bootstrap. The PHP fixture also requires the local environment marker and loopback URL, suppresses mail and outbound HTTP during its synthetic scenarios, and cleans up its own account. Its manual-approval case runs in a separate process because an upstream `exit()` cannot be caught with `finally`; success requires the expected redirect, observed cookie hook, and completion marker, not merely exit status zero.
+
+Baseline assertions deliberately record existing behavior, including behavior the integration will replace. Keep baseline observations distinct from policy acceptance. Calling the login service with an `otp` label in this fixture does not test OTP verification or prove browser cookie receipt. Real REST submissions, mobile proof, browser sessions, installed-package upgrades, scheduler timing, and vendor/forum authorization need their own acceptance coverage. Full-suite compatibility cannot be inferred from this smoke test. Cleanup uses the existing exact-run-scoped cleanup script, never a global Docker prune.
+
 ### Modal reliability and sensitivity
 
 Synchronize keyboard assertions with product-driven heading focus, not fixed sleeps or test-created focus. Keep whole-test retries disabled. The mutation audit must run healthy controls and verify that each isolated product mutation reaches its intended assertion; runner errors, unrelated failures, timeouts, skips, retries, and surviving mutations fail the gate.

@@ -321,6 +321,41 @@ jobs:
         env:
           PINOVA_TEST_HPOS: ${{ matrix.hpos }}
 
+  third-party-baseline:
+    name: Real wpForo and Dokan baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PINOVA_TEST_PROFILE: third-party
+      COMPOSE_PROJECT_NAME: pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
+      WP_ENV_HOME: /tmp/pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
+      WP_ENV_PORT: '8890'
+      WP_ENV_TESTS_PORT: '8891'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.1'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:2.10.3
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: npm ci --ignore-scripts
+      - name: Verify exact upstream archives before wp-env can load them
+        run: node tools/prepare-third-party-fixtures.mjs
+      - run: npm run env:configure
+      - run: npm run env:start -- --update
+      - name: Install PDO MySQL in the disposable CLI container
+        run: npx wp-env run cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
+      - name: Characterize real activated plugin lifecycle
+        run: bash tools/run-third-party-baseline.sh
+      - name: Remove only this job's disposable environment
+        if: always()
+        run: bash tools/cleanup-browser-env.sh
+
   quality-gate:
     name: Required Quality Gate
     if: always()
@@ -334,6 +369,7 @@ jobs:
       - browser-account-ui
       - php
       - integration
+      - third-party-baseline
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -348,6 +384,7 @@ jobs:
           BROWSER: ${{ needs.browser-account-ui.result }}
           PHP: ${{ needs.php.result }}
           INTEGRATION: ${{ needs.integration.result }}
+          THIRD_PARTY_BASELINE: ${{ needs.third-party-baseline.result }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           test "${PROJECT_GUIDANCE}" = success
@@ -363,3 +400,4 @@ jobs:
           test "${BROWSER}" = success
           test "${PHP}" = success
           test "${INTEGRATION}" = success
+          test "${THIRD_PARTY_BASELINE}" = success

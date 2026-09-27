@@ -18,10 +18,16 @@ plugin_directory="$(basename "$repo_root")"
 result_file="$(mktemp)"
 trap 'rm -f -- "$result_file"' EXIT
 
-for scenario in normal manual-approval; do
-	npx --no-install wp-env run cli \
-		--env-cwd="wp-content/plugins/$plugin_directory" \
-		wp eval-file --use-include tests/Integration/third-party-baseline.php "$scenario" | tee "$result_file"
-	# A successful process exit alone is insufficient: wpForo can call exit().
-	grep -Fxq "PINOVA_BASELINE_COMPLETE $scenario" "$result_file"
+for suite in third-party-baseline wpforo-integration; do
+	case "$suite" in
+		third-party-baseline) marker=PINOVA_BASELINE_COMPLETE ;;
+		wpforo-integration) marker=PINOVA_WPFORO_COMPLETE ;;
+	esac
+	for scenario in normal manual-approval; do
+		npx --no-install wp-env run cli \
+			--env-cwd="wp-content/plugins/$plugin_directory" \
+			wp eval-file --use-include "tests/Integration/$suite.php" "$scenario" | tee "$result_file"
+		# A successful process exit alone is insufficient: wpForo can call exit().
+		grep -Fxq "$marker $scenario" "$result_file"
+	done
 done

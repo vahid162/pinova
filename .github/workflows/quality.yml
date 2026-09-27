@@ -239,7 +239,7 @@ jobs:
       - run: composer install --no-interaction --no-progress --prefer-dist
       - run: composer test
       - run: composer phpstan
-      - if: matrix.php == '8.1'
+      - if: always() && matrix.php == '8.1'
         run: composer phpcs
       - if: matrix.php == '8.1'
         run: composer audit
@@ -348,10 +348,30 @@ jobs:
         run: node tools/prepare-third-party-fixtures.mjs
       - run: npm run env:configure
       - run: npm run env:start -- --update
-      - name: Install PDO MySQL in the disposable CLI container
-        run: npx wp-env run cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
+      - name: Install PDO MySQL in the disposable plugin containers
+        run: |
+          npx wp-env run wordpress sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
+          npx wp-env run wordpress sudo apache2ctl -k graceful
+          npx wp-env run cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
       - name: Characterize real activated plugin lifecycle
         run: bash tools/run-third-party-baseline.sh
+      - name: Prepare real-plugin browser routes
+        run: |
+          npx playwright install --with-deps chromium
+          npx wp-env run cli wp rewrite structure '/%postname%/' --hard
+          npx wp-env run cli wp rewrite flush --hard
+      - name: Verify real mobile proof in the browser
+        run: npx playwright test --config tests/browser/integrations.config.mjs
+      - name: Upload real-plugin browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: integration-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            playwright-report/browser
+            test-results/browser
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Remove only this job's disposable environment
         if: always()
         run: bash tools/cleanup-browser-env.sh

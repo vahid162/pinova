@@ -101,3 +101,6 @@ A local ZIP is intermediate evidence, never the installation handoff. A package 
 Before installation, identify the exact site, verify a database and plugin backup, define rollback, and preserve an authenticated administrator recovery path. Validate public login methods, OTP purposes, the private administrator route, security-plugin hooks, logout, privacy actions, WooCommerce, cron, logs, and database schema first on staging.
 
 After deployment, verify schema version, scheduled events, REST headers, authentication flows, logging volume/redaction, PHP and web-server errors, database growth, and response latency for the agreed observation window. Publishing or passing CI never authorizes installation, settings changes, database migration, or native-login gate activation by itself.
+
+
+The real-plugin runner also executes `tests/Integration/wpforo-integration.php` in normal and manual-approval modes. Each invocation requires its own completion marker; an upstream `exit()` is not success. The integration browser configuration exercises the real authenticated proof endpoints at desktop/mobile widths, with synthetic delivered OTP records. That credential seeding does not establish provider acceptance or physical SMS receipt; retain separate delivery tests and authorized recipient acceptance.

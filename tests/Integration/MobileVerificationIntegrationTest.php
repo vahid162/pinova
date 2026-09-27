@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pinova\Tests\Integration;
 
 use Pinova\API\MobileVerificationAPI;
+use Pinova\API\UserAPI;
 use Pinova\Helpers\JWT;
 use Pinova\Install;
 use Pinova\Integrations\Wordpress\Privacy;
@@ -123,7 +124,7 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 		$id = $this->account();
 		$this->verify( $this->otp( $id ) );
 		self::assertFalse( delete_metadata( 'user', 0, 'pinova_mobile', '', true ) );
-		self::assertSame( '09121234567', UserService::get_persisted_mobile( $id ) );
+		self::assertSame( '+989121234567', UserService::get_persisted_mobile( $id ) );
 		self::assertTrue( Proof::is_verified( $id ) );
 	}
 
@@ -180,7 +181,7 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( $before->user_activation_key, get_userdata( $id )->user_activation_key );
 		self::assertSame( $count, $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->users}" ) );
 		self::assertSame( 0, $cookies );
-		self::assertSame( '09129876543', UserService::get_persisted_mobile( $id ) );
+		self::assertSame( '+989129876543', UserService::get_persisted_mobile( $id ) );
 		self::assertTrue( Proof::is_verified( $id ) );
 	}
 
@@ -255,12 +256,24 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 	}
 
 	public function test_privacy_erasure_cancels_new_number_queue_and_removes_evidence(): void {
+		global $wpdb;
 		$id = $this->account();
 		$this->verify( $this->otp( $id ) );
 		$flow = RateLimitService::decoy_flow( '09121111111', OTP::TYPE_VERIFY_MOBILE, '192.0.2.139', $id );
 		$result = Privacy::erase_personal_data( get_userdata( $id )->user_email );
+		if ( ! $result['done'] ) {
+			// Eloquent wrote this OTP through its separate connection after the
+			// WordPress test transaction began. MariaDB can reject the first
+			// DELETE with ER_CHECKREAD; preserve the eraser's explicit retry contract.
+			self::assertTrue( $result['items_retained'] );
+			self::assertNotEmpty( $result['messages'] );
+			self::assertSame( 1, OTP::query()->where( 'user_id', $id )->count() );
+			self::assertSame( '+989121234567', UserService::get_persisted_mobile( $id ) );
+			$result = Privacy::erase_personal_data( get_userdata( $id )->user_email );
+		}
 		self::assertTrue( $result['done'] );
 		self::assertFalse( $result['items_retained'] );
+		self::assertSame( '0', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE user_id = %d', $wpdb->prefix . 'pinova_otp', $id ) ) );
 		self::assertNull( RateLimitService::claim_queued_otp( $flow[0] ) );
 		self::assertFalse( Proof::is_verified( $id ) );
 		self::assertSame( '', get_user_meta( $id, Proof::PROOF_META, true ) );
@@ -298,7 +311,7 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 			( new Account() )->validate_mobile_field( $errors, (object) [ 'ID' => $id ] );
 			self::assertContains( 'mobile_proof_required', $errors->get_error_codes() );
 			( new Account() )->save_mobile( $id );
-			self::assertSame( '09121234567', UserService::get_persisted_mobile( $id ) );
+			self::assertSame( '+989121234567', UserService::get_persisted_mobile( $id ) );
 		} finally {
 			unset( $_POST['pinova_mobile'] );
 		}
@@ -390,6 +403,40 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 		self::assertTrue( $result['done'] );
 		self::assertTrue( $result['items_removed'] );
 		self::assertSame( '', get_user_meta( $id, Proof::PROOF_META, true ) );
+	}
+
+	public function test_proof_continuation_preserves_one_decode_and_rejects_external_targets(): void {
+		$target = home_url( '/my-account/?next=%2Fcheckout%3Fa%3D1#details' );
+		parse_str( (string) wp_parse_url( Proof::url( $target ), PHP_URL_QUERY ), $query );
+		self::assertSame( $target, $query['back_url'] );
+		self::assertSame( '1', $query['pinova_verify_mobile'] );
+		parse_str( (string) wp_parse_url( Proof::url( 'https://outside.invalid/' ), PHP_URL_QUERY ), $query );
+		self::assertSame( home_url( '/' ), $query['back_url'] );
+	}
+
+	public function test_identity_change_during_native_reset_key_validation_prevents_password_reset(): void {
+		$id = $this->account();
+		$user = get_userdata( $id );
+		$before = $user->user_pass;
+		$key = get_password_reset_key( $user );
+		$jwt = UserService::generate_jwt( $id, null, new Identifier( '09121234567' ) );
+		$change = static function ( $expiry ) use ( $id ) {
+			update_user_meta( $id, 'pinova_mobile', '09129876543' );
+			return $expiry;
+		};
+		add_filter( 'password_reset_expiration', $change );
+		try {
+			$request = new WP_REST_Request( 'POST', '/pinova/auth/forgot/change' );
+			foreach ( [ 'jwt' => $jwt, 'reset_key' => $key, 'password_1' => 'New-test-password-2026!', 'password_2' => 'New-test-password-2026!' ] as $name => $value ) {
+				$request->set_param( $name, $value );
+			}
+			self::assertSame( 401, ( new UserAPI() )->forgot_change( $request )->get_status() );
+		} finally {
+			remove_filter( 'password_reset_expiration', $change );
+		}
+		clean_user_cache( $id );
+		self::assertSame( $before, get_userdata( $id )->user_pass );
+		self::assertSame( 0, get_current_user_id() );
 	}
 
 }

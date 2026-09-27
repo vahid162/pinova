@@ -66,7 +66,14 @@ final class MobileVerificationAPI extends RestAPI {
 				true,
 				__( 'اگر ادامه با این شماره مجاز باشد، کد تأیید ارسال می‌شود.', 'pinova' ),
 				[
-					'jwt' => JWT::encode( [ 'flow_id' => $flow[0], 'user_id' => $user_id, 'purpose' => OTP::TYPE_VERIFY_MOBILE ], $ttl ),
+					'jwt' => JWT::encode(
+						[
+							'flow_id' => $flow[0],
+							'user_id' => $user_id,
+							'purpose' => OTP::TYPE_VERIFY_MOBILE,
+						],
+						$ttl
+					),
 					'ttl' => $ttl,
 				]
 			);

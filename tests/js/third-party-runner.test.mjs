@@ -17,7 +17,9 @@ function fixture(action) {
         'touch "$FAKE_CALLS"',
         '[[ " $* " == *" wp eval-file --use-include "* ]] || exit 9',
         'if [[ "${FAKE_NO_MARKER:-}" != 1 ]]; then',
-        '    printf "PINOVA_BASELINE_COMPLETE %s\\n" "${@: -1}"',
+        '    marker=PINOVA_BASELINE_COMPLETE',
+        '    if [[ " $* " == *"wpforo-integration.php"* ]]; then marker=PINOVA_WPFORO_COMPLETE; fi',
+        '    if [[ "${FAKE_MISSING_SUITE:-}" != "$marker" ]]; then printf "%s %s\\n" "$marker" "${@: -1}"; fi',
         'fi',
         'exit "${FAKE_EXIT:-0}"',
         '',
@@ -26,7 +28,7 @@ function fixture(action) {
         ...process.env, CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1',
         COMPOSE_PROJECT_NAME: 'pinova-browser-123-1', WP_ENV_HOME: '/tmp/pinova-browser-123-1',
         PINOVA_TEST_PROFILE: 'third-party', PATH: `${temporary}:${process.env.PATH}`, FAKE_CALLS: calls,
-        FAKE_NO_MARKER: '', FAKE_EXIT: '',
+        FAKE_NO_MARKER: '', FAKE_EXIT: '', FAKE_MISSING_SUITE: '',
     };
     const execute = changes => spawnSync('bash', [runner], {
         cwd: root, env: { ...env, ...changes }, encoding: 'utf8', timeout: 10_000,
@@ -54,6 +56,9 @@ test('third-party runner requires process success and explicit scenario completi
         assert.equal(result.status, 0, result.stderr);
         assert.match(result.stdout, /PINOVA_BASELINE_COMPLETE normal/);
         assert.match(result.stdout, /PINOVA_BASELINE_COMPLETE manual-approval/);
+        assert.match(result.stdout, /PINOVA_WPFORO_COMPLETE normal/);
+        assert.match(result.stdout, /PINOVA_WPFORO_COMPLETE manual-approval/);
+        assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_WPFORO_COMPLETE' }).status, 0);
         assert.notEqual(execute({ FAKE_NO_MARKER: '1' }).status, 0);
         assert.notEqual(execute({ FAKE_EXIT: '7' }).status, 0);
     });

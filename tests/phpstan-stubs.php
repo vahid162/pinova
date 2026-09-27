@@ -12,6 +12,12 @@ namespace {
 	const DB_CHARSET = 'utf8mb4';
 	define( 'DB_COLLATE', (string) getenv( 'DB_COLLATE' ) );
 
+	/** @return \stdClass */
+	function WPF() { return new \stdClass(); }
+	function wpforo_setting( string $group, string $key ) {}
+	function wpforo_url( string $path = '', ?string $route = null ): string { return ''; }
+	function wpforo_home_url(): string { return ''; }
+
 	function PWSMS() {
 		return null;
 	}

@@ -50,13 +50,15 @@
         const body = await response.json();
         if (!body || typeof body !== 'object') throw new Error();
         if (!response.ok || body.success !== true) {
-          const error = new Error(typeof body.message === 'string' ? body.message : 'امکان پردازش درخواست وجود ندارد.');
+          const correlation = response.headers.get('X-Pinova-Correlation-ID');
+          const reference = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(correlation || '') ? ` (کد پیگیری: ${correlation})` : '';
+          const error = new Error((typeof body.message === 'string' ? body.message : 'امکان پردازش درخواست وجود ندارد.') + reference);
           error.serverResponse = true;
           error.retryAfter = Number(response.headers.get('Retry-After'));
           error.invalidCode = response.status === 401 && action === 'verify';
           throw error;
         }
-        if (action === 'request' && (!body.data || typeof body.data.jwt !== 'string' || body.data.jwt.length > 2048 ||
+        if (action === 'request' && (!body.data || typeof body.data.jwt !== 'string' || body.data.jwt.length < 1 || body.data.jwt.length > 2048 ||
           !Number.isInteger(body.data.ttl) || body.data.ttl < 1 || body.data.ttl > 3600)) throw new Error();
         return body;
       } catch (error) {

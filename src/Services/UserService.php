@@ -582,7 +582,10 @@ class UserService {
 	 * @return string
 	 */
 	public static function generate_jwt( int $user_id, ?string $flow_id = null, ?Identifier $identifier = null ): string {
-		$payload = [ 'user_id' => $user_id, 'purpose' => 'password_reset' ];
+		$payload = [
+			'user_id' => $user_id,
+			'purpose' => 'password_reset',
+		];
 		if ( null !== $identifier && ! $identifier->is_username() && $identifier->is_valid() ) {
 			$payload['origin']   = $identifier->get_type();
 			$payload['identity'] = MobileVerificationService::identity_digest( $user_id, $identifier );

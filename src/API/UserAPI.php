@@ -474,6 +474,21 @@ class UserAPI extends RestAPI {
 		}
 
 		try {
+			// Native reset-key validation and policy filters may have changed the bound identity.
+			UserService::parse_jwt_with_flow( $jwt );
+		} catch ( Exception $exception ) {
+			unset( $exception );
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_change',
+					'reason'    => 'invalid_token',
+				]
+			);
+			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+		}
+
+		try {
 			try {
 				do_action( 'pinova/password_reset_start', $user_id, $flow_id, $origin );
 				reset_password( $user, $password );

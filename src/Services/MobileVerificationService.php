@@ -4,6 +4,7 @@ namespace Pinova\Services;
 
 use Exception;
 use Pinova\Integrations\IntegrationSettings;
+use Pinova\Integrations\Continuation;
 use Pinova\Objects\Identifier;
 use Pinova\Objects\Mobile;
 use Throwable;
@@ -175,7 +176,13 @@ final class MobileVerificationService {
 			throw new Exception( __( 'تأیید تلفن همراه معتبر نمی‌باشد. دوباره تلاش کنید.', 'pinova' ) );
 		}
 		$timestamp = time();
-		$proof     = wp_json_encode( [ 'version' => 1, 'at' => $timestamp, 'mac' => self::signature( $user_id, $identifier, $epoch, $timestamp ) ] );
+		$proof     = wp_json_encode(
+			[
+				'version' => 1,
+				'at'      => $timestamp,
+				'mac'     => self::signature( $user_id, $identifier, $epoch, $timestamp ),
+			]
+		);
 		if ( ! is_string( $proof ) ) {
 			throw new Exception( 'Mobile evidence could not be encoded.' );
 		}
@@ -249,7 +256,12 @@ final class MobileVerificationService {
 		if ( is_array( $old ) && $flow === ( $old['flow'] ?? null ) && $binding !== ( $old['target'] ?? null ) ) {
 			throw new Exception( 'Wait for the existing mobile verification flow to expire.' );
 		}
-		$value = wp_json_encode( [ 'flow' => $flow, 'target' => $binding ] );
+		$value = wp_json_encode(
+			[
+				'flow'   => $flow,
+				'target' => $binding,
+			]
+		);
 		update_user_meta( $user_id, self::PENDING_META, $value );
 		if ( $value !== self::meta( $user_id, self::PENDING_META ) ) {
 			throw new Exception( 'Mobile flow binding could not be persisted.' );
@@ -291,8 +303,14 @@ final class MobileVerificationService {
 		}
 	}
 
-	public static function url(): string {
-		return add_query_arg( 'pinova_verify_mobile', '1', home_url( '/' ) );
+	public static function url( ?string $back_url = null ): string {
+		$url = add_query_arg( 'pinova_verify_mobile', '1', home_url( '/' ) );
+		if ( null !== $back_url ) {
+			// Encode the nested destination once; request parsing performs the corresponding decode.
+			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.urlencode_urlencode
+			$url = add_query_arg( 'back_url', urlencode( Continuation::validate( $back_url ) ), $url );
+		}
+		return $url;
 	}
 
 	public static function render_link(): void {

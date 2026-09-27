@@ -1,0 +1,12 @@
+@font-face{font-family:"Yekan Bakh";src:url('../fonts/yekanbakh/YekanBakhFaNum-Regular.woff2') format('woff2');font-weight:400;font-display:swap}
+.pinova-mobile-proof{font-family:"Yekan Bakh",sans-serif;max-width:30rem;margin:3rem auto;padding:max(1.5rem,env(safe-area-inset-top)) max(1.5rem,env(safe-area-inset-right)) max(1.5rem,env(safe-area-inset-bottom)) max(1.5rem,env(safe-area-inset-left));background:#fff;color:#202020;border:1px solid #767676;border-radius:12px;box-sizing:border-box;line-height:1.8}
+.pinova-mobile-proof *{box-sizing:border-box;font-family:inherit}
+.pinova-mobile-proof [hidden]{display:none!important}
+.pinova-mobile-proof input{display:block;width:100%;min-height:44px;padding:.6rem;border:1px solid #656565;border-radius:5px;margin:.4rem 0 1rem;background:#fff;color:#202020;font-size:1rem}
+.pinova-mobile-proof button{min-height:44px;padding:.6rem 1rem;background:#a74100;color:#fff;border:1px solid #a74100;border-radius:5px;cursor:pointer;font-size:1rem}
+.pinova-mobile-proof [type=submit]{width:100%}
+.pinova-mobile-proof .pinova-mobile-resend,.pinova-mobile-proof .pinova-mobile-edit{background:transparent;color:#713300;border:0;text-decoration:underline}
+.pinova-mobile-proof :focus-visible{outline:3px solid #164ec0;outline-offset:3px}
+.pinova-mobile-proof label{font-weight:bold}
+.pinova-mobile-proof a{color:#713300;text-decoration:underline}
+.pinova-mobile-proof .pinova-mobile-status{overflow-wrap:anywhere}

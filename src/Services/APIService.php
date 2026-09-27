@@ -17,6 +17,7 @@ class APIService {
 		new AdminAPI();
 		new GatewayAPI();
 		new UserAPI();
+		new \Pinova\API\MobileVerificationAPI();
 		new BlocksAPI();
 
 		// Integrations

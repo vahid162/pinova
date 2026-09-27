@@ -18,7 +18,7 @@ class ChannelService {
 	/**
 	 * @throws Exception
 	 */
-	public static function send( OTP $otp, int $code ): array {
+	public static function send( OTP $otp, int $code, ?string $queue_claim_token = null ): array {
 
 		$identifier = new Identifier( $otp->identifier );
 		$channels   = $otp->channels;
@@ -26,6 +26,12 @@ class ChannelService {
 		foreach ( $channels as $channel => &$success ) {
 
 			if ( in_array( $channel, [ 'sms', 'bale', 'call', 'email' ], true ) ) {
+				// A previous provider may outlive the flow or an erasure may cancel
+				// its claim. Keep accepted channels, but never start another send.
+				if ( $otp->expires_at->lessThanOrEqualTo( Carbon::now() ) ||
+					( null !== $queue_claim_token && ! RateLimitService::queued_otp_is_active( (string) $otp->flow_id, $queue_claim_token ) ) ) {
+					break;
+				}
 
 				try {
 					$success = self::send_channel( $channel, $identifier, $code, $otp->type );

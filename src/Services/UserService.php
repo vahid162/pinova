@@ -262,39 +262,44 @@ class UserService {
 		return false;
 	}
 
-	public static function login( int $user_id, ?string $login_method = null, ?string $flow_id = null ) {
-		clean_user_cache( $user_id );
-		wp_clear_auth_cookie();
-		wp_set_auth_cookie( $user_id, true );
-		wp_set_current_user( $user_id );
+	/** @return WP_User|WP_Error */
+	public static function login( int $user_id, ?string $login_method = null, ?string $flow_id = null, ?Identifier $identifier = null ) {
+		$method = $login_method ?: 'unknown';
+		try {
+			do_action( 'pinova/authentication_start', $user_id, $method );
+			$user = AuthenticationPolicy::session( $user_id, $method, $identifier );
+			if ( is_wp_error( $user ) ) {
+				return $user;
+			}
+			wp_clear_auth_cookie();
+			wp_set_auth_cookie( $user_id, true );
+			wp_set_current_user( $user_id );
 
-		if ( $login_method ) {
-			update_user_meta( $user_id, 'pinova_login_method', $login_method );
-		}
-
-		$user = get_userdata( $user_id );
-
-		if ( $user instanceof WP_User ) {
+			if ( $login_method ) {
+				update_user_meta( $user_id, 'pinova_login_method', $login_method );
+			}
 			do_action( 'wp_login', $user->user_login, $user );
+			do_action( 'pinova/user_logged_in', $user_id );
+			Logger::instance()->info(
+				'auth.session_created',
+				[
+					'user_id'     => $user_id,
+					'auth_method' => $method,
+					'flow_id'     => $flow_id,
+				]
+			);
+			return $user;
+		} finally {
+			do_action( 'pinova/authentication_end', $user_id, $method );
 		}
-
-		do_action( 'pinova/user_logged_in', $user_id );
-		Logger::instance()->info(
-			'auth.session_created',
-			[
-				'user_id'     => $user_id,
-				'auth_method' => $login_method ?: 'unknown',
-				'flow_id'     => $flow_id,
-			]
-		);
 	}
 
 	/**
-	 * Authenticate an already-resolved user through WordPress' native pipeline.
+	 * Keep native password/security hooks; make the final policy decision before wp_signon creates cookies.
 	 *
 	 * @return WP_User|WP_Error
 	 */
-	public static function authenticate_password( ?int $user_id, string $password, bool $remember = true ) {
+	public static function authenticate_password( ?int $user_id, string $password, bool $remember = true, ?Identifier $identifier = null ) {
 		$user = $user_id ? get_userdata( $user_id ) : false;
 
 		$credentials = [
@@ -303,7 +308,23 @@ class UserService {
 			'remember'      => $remember,
 		];
 
-		return wp_signon( $credentials, is_ssl() );
+		$policy = static function ( $authenticated ) use ( $user_id, $identifier ) {
+			if ( is_wp_error( $authenticated ) ) {
+				return $authenticated;
+			}
+			if ( ! $authenticated instanceof WP_User || $user_id !== $authenticated->ID ) {
+				return AuthenticationPolicy::denied();
+			}
+			return AuthenticationPolicy::session( $authenticated->ID, 'password', $identifier );
+		};
+		try {
+			do_action( 'pinova/authentication_start', (int) $user_id, 'password' );
+			add_filter( 'authenticate', $policy, PHP_INT_MAX );
+			return wp_signon( $credentials, is_ssl() );
+		} finally {
+			remove_filter( 'authenticate', $policy, PHP_INT_MAX );
+			do_action( 'pinova/authentication_end', (int) $user_id, 'password' );
+		}
 	}
 
 	public static function is_native_only( WP_User $user ): bool {
@@ -334,8 +355,6 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function create( $mobile, string $email = '', array $userdata = [], ?string $flow_id = null ): int {
-		global $wpdb;
-
 		if ( ! is_a( $mobile, Mobile::class ) ) {
 
 			$mobile = new Mobile( $mobile );
@@ -344,6 +363,14 @@ class UserService {
 				throw new Exception( 'تلفن همراه برای ثبت نام معتبر نمی‌باشد.' );
 			}
 		}
+		return MobileVerificationService::with_identity_lock(
+			$mobile->get_formatted(),
+			static fn(): int => self::create_locked( $mobile, $email, $userdata, $flow_id )
+		);
+	}
+
+	private static function create_locked( Mobile $mobile, string $email, array $userdata, ?string $flow_id ): int {
+		global $wpdb;
 
 		if ( ! self::mobile_is_available_for_user( $mobile, 0 ) ) {
 			throw new Exception( __( 'امکان ثبت‌نام با این شماره وجود ندارد.', 'pinova' ) );
@@ -451,7 +478,7 @@ class UserService {
 		foreach ( wp_roles()->roles as $slug => $role ) {
 			$capabilities = array_keys( array_filter( (array) ( $role['capabilities'] ?? [] ) ) );
 
-			if ( array_intersect( $denied_capabilities, $capabilities ) ) {
+			if ( 'seller' === $slug || array_intersect( $denied_capabilities, $capabilities ) ) {
 				continue;
 			}
 
@@ -471,7 +498,7 @@ class UserService {
 
 			$capabilities = array_keys( array_filter( (array) wp_roles()->roles[ $slug ]['capabilities'] ) );
 
-			if ( array_intersect( $denied_capabilities, $capabilities ) ) {
+			if ( 'seller' === $slug || array_intersect( $denied_capabilities, $capabilities ) ) {
 				continue;
 			}
 
@@ -530,6 +557,10 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function create_by_otp( OTP $otp ): int {
+		if ( OTP::TYPE_REGISTER !== $otp->type || null !== $otp->user_id ) {
+			throw new Exception( 'Only registration OTP may create an account.' );
+		}
+		AuthenticationPolicy::assert_otp( $otp );
 		return self::create( $otp->identifier, '', [], $otp->flow_id );
 	}
 
@@ -537,6 +568,10 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function get_or_create( OTP $otp ): WP_User {
+		if ( OTP::TYPE_VERIFY_MOBILE === $otp->type ) {
+			throw new Exception( 'Proof-only OTP cannot create or authenticate an account.' );
+		}
+		AuthenticationPolicy::assert_otp( $otp );
 
 		$user_id = $otp->user_id;
 
@@ -552,8 +587,15 @@ class UserService {
 	 *
 	 * @return string
 	 */
-	public static function generate_jwt( int $user_id, ?string $flow_id = null ): string {
-		$payload = [ 'user_id' => $user_id ];
+	public static function generate_jwt( int $user_id, ?string $flow_id = null, ?Identifier $identifier = null ): string {
+		$payload = [
+			'user_id' => $user_id,
+			'purpose' => 'password_reset',
+		];
+		if ( null !== $identifier && ! $identifier->is_username() && $identifier->is_valid() ) {
+			$payload['origin']   = $identifier->get_type();
+			$payload['identity'] = MobileVerificationService::identity_digest( $user_id, $identifier );
+		}
 		if ( null !== $flow_id ) {
 			$payload['flow_id'] = $flow_id;
 		}
@@ -572,7 +614,7 @@ class UserService {
 		return $user_id;
 	}
 
-	/** @return array{0:int,1:?string} */
+	/** @return array{0:int,1:?string,2:string} */
 	public static function parse_jwt_with_flow( string $jwt ): array {
 
 		try {
@@ -581,13 +623,40 @@ class UserService {
 			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
-		if ( isset( $payload['user_id'] ) ) {
-			$flow_id = $payload['flow_id'] ?? null;
-			if ( null === $flow_id || ( is_string( $flow_id ) && preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) ) {
-				return [ intval( $payload['user_id'] ), $flow_id ];
-			}
+		if ( isset( $payload['purpose'] ) && 'password_reset' !== $payload['purpose'] ) {
+			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
-		throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+		if ( ! isset( $payload['user_id'] ) ) {
+			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+		}
+		$flow_id = $payload['flow_id'] ?? null;
+		if ( null !== $flow_id && ( ! is_string( $flow_id ) || ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) ) {
+			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+		}
+		$user_id = intval( $payload['user_id'] );
+		$origin  = $payload['origin'] ?? 'unknown';
+		if ( in_array( $origin, [ 'mobile', 'email' ], true ) ) {
+			if ( ! is_string( $payload['identity'] ?? null ) ) {
+				throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+			}
+			if ( 'mobile' === $origin ) {
+				$valid = MobileVerificationService::matches_recovery_mobile( $user_id, $payload['identity'] );
+			} else {
+				global $wpdb;
+				$value = $wpdb->get_var( $wpdb->prepare( 'SELECT user_email FROM %i WHERE ID = %d', $wpdb->users, $user_id ) );
+				if ( $wpdb->last_error || ! is_string( $value ) ) {
+					throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+				}
+				$identity = new Identifier( $value );
+				$valid    = $identity->is_valid() && hash_equals( MobileVerificationService::identity_digest( $user_id, $identity ), $payload['identity'] );
+			}
+			if ( ! $valid ) {
+				throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+			}
+		} elseif ( 'unknown' !== $origin ) {
+			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+		}
+		return [ $user_id, $flow_id, $origin ];
 	}
 }

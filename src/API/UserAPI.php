@@ -14,6 +14,7 @@ use Pinova\Logging\EventThrottle;
 use Pinova\Logging\Logger;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
+use Pinova\Services\AuthenticationPolicy;
 use Pinova\Services\FirewallService;
 use Pinova\Services\OTPService;
 use Pinova\Services\RateLimitService;
@@ -240,7 +241,7 @@ class UserAPI extends RestAPI {
 			return self::password_failure( $started );
 		}
 
-		$authenticated = UserService::authenticate_password( $user_id, $password, true );
+		$authenticated = UserService::authenticate_password( $user_id, $password, true, $identifier );
 
 		if ( is_wp_error( $authenticated ) ) {
 			Logger::instance()->notice(
@@ -284,7 +285,7 @@ class UserAPI extends RestAPI {
 		$code = $request->get_param( 'code' );
 
 		try {
-			[ $user, $flow_id ] = OTPService::verify_with_flow( $jwt, $code, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ] );
+			[ $user, $flow_id, $identifier ] = OTPService::verify_with_flow( $jwt, $code, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ] );
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
@@ -296,7 +297,9 @@ class UserAPI extends RestAPI {
 			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
-		UserService::login( $user->ID, 'otp', $flow_id );
+		if ( is_wp_error( UserService::login( $user->ID, 'otp', $flow_id, $identifier ) ) ) {
+			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+		}
 
 		return self::response( true, __( 'ورود با موفقیت انجام شد.', 'pinova' ) );
 	}
@@ -316,7 +319,7 @@ class UserAPI extends RestAPI {
 		$code = $request->get_param( 'code' );
 
 		try {
-			[ $user, $flow_id ] = OTPService::verify_with_flow( $jwt, $code, [ OTP::TYPE_FORGET ] );
+			[ $user, $flow_id, $identifier ] = OTPService::verify_with_flow( $jwt, $code, [ OTP::TYPE_FORGET ] );
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
@@ -370,7 +373,7 @@ class UserAPI extends RestAPI {
 			true,
 			null,
 			[
-				'jwt'       => UserService::generate_jwt( $user->ID, $flow_id ),
+				'jwt'       => UserService::generate_jwt( $user->ID, $flow_id, $identifier ),
 				'reset_key' => $reset_key,
 			]
 		);
@@ -394,8 +397,8 @@ class UserAPI extends RestAPI {
 		$flow_id          = null;
 		$valid_state      = false;
 		try {
-			[ $user_id, $flow_id ] = UserService::parse_jwt_with_flow( $jwt );
-			$valid_state           = true;
+			[ $user_id, $flow_id, $origin ] = UserService::parse_jwt_with_flow( $jwt );
+			$valid_state                    = true;
 		} catch ( Exception $e ) {
 			unset( $e );
 		}
@@ -466,8 +469,32 @@ class UserAPI extends RestAPI {
 			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
 		}
 
+		if ( is_wp_error( AuthenticationPolicy::session( $user_id, 'recovery' ) ) ) {
+			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+		}
+
 		try {
-			reset_password( $user, $password );
+			// Native reset-key validation and policy filters may have changed the bound identity.
+			UserService::parse_jwt_with_flow( $jwt );
+		} catch ( Exception $exception ) {
+			unset( $exception );
+			EventThrottle::log(
+				'auth.password_reset_failed',
+				[
+					'operation' => 'forgot_change',
+					'reason'    => 'invalid_token',
+				]
+			);
+			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+		}
+
+		try {
+			try {
+				do_action( 'pinova/password_reset_start', $user_id, $flow_id, $origin );
+				reset_password( $user, $password );
+			} finally {
+				do_action( 'pinova/password_reset_end', $user_id, $flow_id, $origin );
+			}
 		} catch ( \Throwable $throwable ) {
 			EventThrottle::log(
 				'auth.password_reset_failed',
@@ -490,7 +517,9 @@ class UserAPI extends RestAPI {
 			]
 		);
 
-		UserService::login( $user_id, 'password', $flow_id );
+		if ( is_wp_error( UserService::login( $user_id, 'password', $flow_id ) ) ) {
+			return self::response( false, __( 'رمز عبور بازنشانی شد؛ برای ورود دوباره تلاش کنید.', 'pinova' ), [], 401 );
+		}
 
 		return self::response( true, __( 'رمزعبور با موفقیت بازنشانی شد و به سیستم وارد شدید.', 'pinova' ) );
 	}

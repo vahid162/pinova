@@ -5,6 +5,7 @@ namespace Pinova\Integrations\Woocommerce;
 use Pinova\Objects\Identifier;
 use Pinova\Services\FirewallService;
 use Pinova\Services\UserService;
+use Pinova\Services\MobileVerificationService;
 use stdClass;
 use WP_Error;
 
@@ -67,6 +68,11 @@ class Account {
 			return;
 		}
 
+		if ( MobileVerificationService::requires_proof_for_change( (int) $user->ID, $identifier->get_value() ) ) {
+			$errors->add( 'mobile_proof_required', __( 'برای تغییر شماره از پیوند تأیید یا تغییر تلفن همراه استفاده کنید.', 'pinova' ) );
+			return;
+		}
+
 		if ( FirewallService::is_blocked( $identifier->get_value() ) ) {
 			$errors->add( 'mobile_blocked', __( 'تلفن همراه وارد شده، مسدود می‌باشد.', 'pinova' ) );
 
@@ -100,7 +106,7 @@ class Account {
 			return;
 		}
 
-		if ( ! UserService::mobile_is_available_for_user( $identifier->get_value(), $user_id ) ) {
+		if ( MobileVerificationService::requires_proof_for_change( $user_id, $identifier->get_value() ) || ! UserService::mobile_is_available_for_user( $identifier->get_value(), $user_id ) ) {
 			return;
 		}
 

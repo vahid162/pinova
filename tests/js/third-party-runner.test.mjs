@@ -15,6 +15,7 @@ function fixture(action) {
     writeFileSync(path.join(temporary, 'npx'), [
         '#!/bin/bash',
         'touch "$FAKE_CALLS"',
+        '[[ " $* " == *" wp eval-file --use-include "* ]] || exit 9',
         'if [[ "${FAKE_NO_MARKER:-}" != 1 ]]; then',
         '    printf "PINOVA_BASELINE_COMPLETE %s\\n" "${@: -1}"',
         'fi',

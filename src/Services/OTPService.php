@@ -46,7 +46,7 @@ class OTPService {
 		}
 
 		try {
-			$successful_channels = ChannelService::send( $otp, $code );
+			$successful_channels = ChannelService::send( $otp, $code, $queue_claim_token );
 		} catch ( Throwable $e ) {
 			Logger::instance()->error(
 				'otp.delivery_failed',

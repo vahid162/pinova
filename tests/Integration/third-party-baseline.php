@@ -9,9 +9,13 @@ declare(strict_types=1);
 
 use Pinova\Services\UserService;
 
+$staging_url = getenv( 'PINOVA_STAGING_BASELINE_URL' );
+$local_target = 'local' === wp_get_environment_type() && in_array( wp_parse_url( home_url(), PHP_URL_HOST ), [ 'localhost', '127.0.0.1' ], true );
+$staging_target = 'staging' === wp_get_environment_type() && is_string( $staging_url ) && 'https' === wp_parse_url( $staging_url, PHP_URL_SCHEME )
+	&& hash_equals( untrailingslashit( $staging_url ), untrailingslashit( home_url() ) );
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI || ! defined( 'PINOVA_THIRD_PARTY_BASELINE' ) || true !== PINOVA_THIRD_PARTY_BASELINE
-	|| 'local' !== wp_get_environment_type() || ! in_array( wp_parse_url( home_url(), PHP_URL_HOST ), [ 'localhost', '127.0.0.1' ], true ) ) {
-	throw new RuntimeException( 'Third-party baseline requires its disposable loopback wp-env site.' );
+	|| ( ! $local_target && ! $staging_target ) ) {
+	throw new RuntimeException( 'Third-party baseline requires its disposable local site or explicitly selected staging URL.' );
 }
 
 $scenario = $args[0] ?? '';
@@ -85,7 +89,7 @@ register_shutdown_function(
 WPF()->member->synchronize_user( $user_id );
 WPF()->member->update_profile_fields( $user_id, [ 'status' => 'inactive', 'is_email_confirmed' => 0 ], false );
 $check( 'inactive' === WPF()->member->get_status( $user_id ), 'inactive fixture profile' );
-$check( 0 === (int) WPF()->member->get_member( $user_id )['is_email_confirmed'], 'unconfirmed fixture email' );
+$check( ! WPF()->member->get_is_email_confirmed( $user_id ), 'unconfirmed fixture email' );
 
 add_action( 'set_auth_cookie', static function () use ( &$cookie_seen ): void { $cookie_seen = true; } );
 add_filter(
@@ -108,11 +112,11 @@ $login_returned = true;
 $check( 'normal' === $scenario, 'manual approval must terminate the baseline login' );
 $check( $cookie_seen && $login_callback_seen, 'native authentication hooks executed' );
 $check( 'active' === WPF()->member->get_status( $user_id ), 'login activates inactive member without manual approval' );
-$check( 0 === (int) WPF()->member->get_member( $user_id )['is_email_confirmed'], 'login alone preserves email flag' );
+$check( ! WPF()->member->get_is_email_confirmed( $user_id ), 'login alone preserves email flag' );
 
 WPF()->member->update_profile_fields( $user_id, [ 'status' => 'inactive', 'is_email_confirmed' => 0 ], false );
 reset_password( $user, wp_generate_password( 32 ) );
-$check( 1 === (int) WPF()->member->get_member( $user_id )['is_email_confirmed'], 'upstream reset marks email confirmed even without an email' );
+$check( WPF()->member->get_is_email_confirmed( $user_id ), 'upstream reset marks email confirmed even without an email' );
 $check( 'active' === WPF()->member->get_status( $user_id ), 'upstream reset activates member' );
 
 $user->add_role( 'contributor' );

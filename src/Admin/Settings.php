@@ -2,6 +2,7 @@
 
 namespace Pinova\Admin;
 
+use Pinova\Integrations\IntegrationSettings;
 use Pinova\Integrations\Wordpress\NativeLoginGate;
 use Pinova\Services\SMSService;
 use Pinova\Services\UserService;
@@ -66,6 +67,10 @@ class Settings extends \Nabik\Utils\V1\Settings {
 				'title' => 'گزارش‌ها',
 			],
 			[
+				'id'    => IntegrationSettings::OPTION,
+				'title' => 'یکپارچه‌سازی‌ها',
+			],
+			[
 				'id'    => 'pinova_advanced',
 				'title' => 'پیشرفته',
 			],
@@ -90,7 +95,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 		$native_login_url = NativeLoginGate::url();
 
 		$settings_fields = [
-			'pinova_general'    => [
+			'pinova_general'            => [
 				[
 					'id'    => 'bale_group',
 					'label' => '',
@@ -135,7 +140,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'default' => function_exists( 'WC' ) && WC()->checkout()->is_registration_required() ? 'yes_redirect' : 'no',
 				],
 			],
-			'pinova_sms'        => [
+			'pinova_sms'                => [
 				function_exists( 'PWSMS' ) ? [] : [
 					'id'    => 'persian_woocommerce_sms',
 					'label' => '',
@@ -168,7 +173,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'desc'    => 'پس از ذخیره تغییرات، برای تست ارسال پیامک کد تایید، شماره تلفن همراه خود را وارد کنید.',
 				],
 			],
-			'pinova_messengers' => [
+			'pinova_messengers'         => [
 				[
 					'id'    => 'bale',
 					'label' => 'بله',
@@ -189,7 +194,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'default' => '',
 				],
 			],
-			'pinova_zohal'      => [
+			'pinova_zohal'              => [
 				[
 					'id'   => 'introduce',
 					'type' => 'html',
@@ -207,14 +212,14 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'desc'    => 'برای دریافت توکن زحل، <a href="https://l.nabik.net/zohal" target="_blank"> ثبت نام کرده و وارد شوید</a>، سپس از منو توسعه‌دهنگان یک توکن ایجاد کنید | <a href="https://www.aparat.com/v/dfnpr73" target="_blank">آموزش اتصال پینوا به زحل</a>',
 				],
 			],
-			'pinova_design'     => [
+			'pinova_design'             => [
 				[
 					'id'    => 'logo',
 					'type'  => 'photo',
 					'label' => 'لوگو',
 				],
 			],
-			'pinova_logging'    => [
+			'pinova_logging'            => [
 				[
 					'id'                => 'minimum_level',
 					'label'             => 'حداقل سطح ثبت',
@@ -246,7 +251,8 @@ class Settings extends \Nabik\Utils\V1\Settings {
 					'sanitize_callback' => [ self::class, 'sanitize_diagnostic_window' ],
 				],
 			],
-			'pinova_advanced'   => [
+			IntegrationSettings::OPTION => $this->integration_fields(),
+			'pinova_advanced'           => [
 				[
 					'id'    => 'pinova_mobile',
 					'type'  => 'html',
@@ -353,6 +359,13 @@ class Settings extends \Nabik\Utils\V1\Settings {
 	 * @return mixed
 	 */
 	public function sanitize_options( $options ) {
+		if ( 'sanitize_option_pinova_integrations' === current_filter() ) {
+			// options.php enforces the Settings API nonce; also reject unauthorized programmatic saves.
+			return IntegrationSettings::normalize(
+				current_user_can( 'manage_options' ) ? $options : get_option( IntegrationSettings::OPTION, [] )
+			);
+		}
+
 		if (
 			NativeLoginGate::is_runtime_invalidation_update()
 			&& function_exists( 'current_filter' )
@@ -386,6 +399,56 @@ class Settings extends \Nabik\Utils\V1\Settings {
 		}
 
 		return $sanitized;
+	}
+
+	/** @return array<int, array<string, mixed>> */
+	private function integration_fields(): array {
+		$theme = wp_get_theme();
+		return [
+			[
+				'id'   => 'identity_policy',
+				'type' => 'html',
+				'desc' => 'احراز هویت موبایلی پینوا مبنای هماهنگی است. تأیید ایمیل شرط ورود موبایلی نمی‌شود. مجوزهای انجمن و تأیید فروشندگان در اختیار افزونهٔ مربوط باقی می‌مانند. خاموش‌کردن هماهنگی، محدودیت حساب‌های در انتظار تأیید را حذف نمی‌کند.',
+			],
+			[
+				'id'      => 'wpforo_enabled',
+				'label'   => 'انجمن wpForo',
+				'type'    => 'checkbox',
+				'default' => false,
+				'desc'    => 'هماهنگی انجمن با ورود موبایلی پینوا فعال باشد.',
+			],
+			[
+				'id'    => 'wpforo_status',
+				'label' => 'وضعیت انجمن',
+				'type'  => 'html',
+				'desc'  => esc_html( IntegrationSettings::description( 'wpforo' ) ),
+			],
+			[
+				'id'      => 'dokan_enabled',
+				'label'   => 'فروشندگان Dokan',
+				'type'    => 'checkbox',
+				'default' => false,
+				'desc'    => 'هماهنگی دکان با ورود موبایلی پینوا فعال باشد.',
+			],
+			[
+				'id'    => 'dokan_status',
+				'label' => 'وضعیت دکان',
+				'type'  => 'html',
+				'desc'  => esc_html( IntegrationSettings::description( 'dokan' ) ),
+			],
+			[
+				'id'    => 'woocommerce_status',
+				'label' => 'ووکامرس',
+				'type'  => 'html',
+				'desc'  => function_exists( 'WC' ) ? 'اتصال حساب و تسویه‌حساب به‌صورت خودکار برقرار است.' : 'ووکامرس فعال نیست.',
+			],
+			[
+				'id'    => 'woodmart_status',
+				'label' => 'وودمارت',
+				'type'  => 'html',
+				'desc'  => 'woodmart' === $theme->get_template() ? 'قالب وودمارت فعال است؛ هماهنگی رابط ورود به‌صورت خودکار انجام می‌شود.' : 'قالب وودمارت فعال نیست.',
+			],
+		];
 	}
 
 	public static function sanitize_registration_role( $role ): string {

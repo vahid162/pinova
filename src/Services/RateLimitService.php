@@ -90,21 +90,28 @@ class RateLimitService {
 	 *
 	 * @return array{0:string,1:int} Flow ID and absolute UTC expiry.
 	 */
-	public static function decoy_flow( string $identifier, string $purpose, string $ip ): array {
+	public static function decoy_flow( string $identifier, string $purpose, string $ip, ?int $user_id = null ): array {
 		global $wpdb;
 		$identifier = self::canonical_identifier( $identifier );
 
-		if ( ! in_array( $purpose, [ 'authenticate', 'forget' ], true ) || ! function_exists( 'openssl_encrypt' ) ) {
+		if ( ! in_array( $purpose, [ 'authenticate', 'forget', 'verify_mobile' ], true ) || ! function_exists( 'openssl_encrypt' ) ) {
 			throw new RateLimitUnavailableException( 'OTP delivery encryption is unavailable.' );
 		}
 
+		if ( ( 'verify_mobile' === $purpose ) !== ( null !== $user_id && $user_id > 0 ) ) {
+			throw new RateLimitUnavailableException( 'Invalid OTP account binding.' );
+		}
+
 		$table      = $wpdb->prefix . 'pinova_rate_limits';
-		$bucket_key = hash_hmac( 'sha256', 'otp_decoy:' . $purpose . ':' . $identifier, wp_salt( 'auth' ) );
+		$bucket_key = hash_hmac( 'sha256', 'otp_decoy:' . $purpose . ':' . ( null === $user_id ? $identifier : $user_id ), wp_salt( 'auth' ) );
 		$flow_id    = bin2hex( random_bytes( 16 ) );
 		$expires_at = gmdate( 'Y-m-d H:i:s', time() + JWT::DEFAULT_TTL );
 		$existing   = $wpdb->get_row( $wpdb->prepare( 'SELECT `scope`, `payload`, `reset_at` FROM %i WHERE `bucket_key` = %s', $table, $bucket_key ) );
 		if ( $wpdb->last_error ) {
 			throw new RateLimitUnavailableException( 'The OTP delivery queue could not be read.' );
+		}
+		if ( null !== $user_id && ! $existing && ! MobileVerificationService::erase_pending( $user_id ) ) {
+			throw new RateLimitUnavailableException( 'An earlier mobile delivery is still active.' );
 		}
 		if ( $existing && ( str_starts_with( (string) $existing->payload, 'cancelled:' ) ||
 			( strtotime( $existing->reset_at . ' UTC' ) <= time() && str_starts_with( (string) $existing->payload, 'processing:' ) ) ) ) {
@@ -153,8 +160,11 @@ class RateLimitService {
 		if ( ! $row || ! preg_match( '/\A[a-f0-9]{32}\z/', (string) $row->scope ) || strtotime( $row->reset_at . ' UTC' ) <= time() || str_starts_with( (string) $row->payload, 'cancelled:' ) ) {
 			throw new RateLimitUnavailableException( 'The decoy flow could not be read.' );
 		}
+		if ( null !== $user_id ) {
+			MobileVerificationService::bind_flow( $user_id, $row->scope, new \Pinova\Objects\Identifier( $identifier ) );
+		}
 		$nonce      = random_bytes( 12 );
-		$plain      = wp_json_encode( [ $identifier, $purpose, $ip ] );
+		$plain      = wp_json_encode( null === $user_id ? [ $identifier, $purpose, $ip ] : [ $identifier, $purpose, $ip, $user_id ] );
 		$tag        = '';
 		$ciphertext = is_string( $plain )
 			? openssl_encrypt( $plain, 'aes-256-gcm', self::queue_key(), OPENSSL_RAW_DATA, $nonce, $tag, $row->scope )
@@ -174,7 +184,7 @@ class RateLimitService {
 		return [ $row->scope, (int) strtotime( $row->reset_at . ' UTC' ) ];
 	}
 
-	/** @return array{identifier:string,purpose:string,ip:string,deadline:int,claim_token:string}|null */
+	/** @return array{identifier:string,purpose:string,ip:string,deadline:int,claim_token:string,user_id:?int}|null */
 	public static function claim_queued_otp( string $flow_id ): ?array {
 		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) || ! self::lock_queued_otp( $flow_id ) ) {
 			return null;
@@ -195,7 +205,7 @@ class RateLimitService {
 		}
 	}
 
-	/** @return array{identifier:string,purpose:string,ip:string,deadline:int,claim_token:string}|null */
+	/** @return array{identifier:string,purpose:string,ip:string,deadline:int,claim_token:string,user_id:?int}|null */
 	private static function claim_queued_otp_locked( string $flow_id ): ?array {
 		global $wpdb;
 
@@ -238,12 +248,19 @@ class RateLimitService {
 		}
 		$plain = openssl_decrypt( substr( $binary, 28 ), 'aes-256-gcm', self::queue_key(), OPENSSL_RAW_DATA, substr( $binary, 0, 12 ), substr( $binary, 12, 16 ), $flow_id );
 		$data  = is_string( $plain ) ? json_decode( $plain, true ) : null;
-		if ( ! is_array( $data ) || 3 !== count( $data ) || ! is_string( $data[0] ?? null ) || ! is_string( $data[1] ?? null ) || ! is_string( $data[2] ?? null ) || ! in_array( $data[1], [ 'authenticate', 'forget' ], true ) ) {
+		if ( ! is_array( $data ) || ! in_array( count( $data ), [ 3, 4 ], true ) || ! is_string( $data[0] ?? null ) || ! is_string( $data[1] ?? null ) || ! is_string( $data[2] ?? null ) || ! in_array( $data[1], [ 'authenticate', 'forget', 'verify_mobile' ], true ) ) {
+			self::finish_queued_otp( $flow_id, $claim_token );
+			return null;
+		}
+
+		if ( ( 'verify_mobile' === $data[1] && ( 4 !== count( $data ) || ! is_int( $data[3] ) || $data[3] < 1 ) )
+			|| ( 'verify_mobile' !== $data[1] && 3 !== count( $data ) ) ) {
 			self::finish_queued_otp( $flow_id, $claim_token );
 			return null;
 		}
 
 		return [
+			'user_id'     => $data[3] ?? null,
 			'identifier'  => $data[0],
 			'purpose'     => $data[1],
 			'ip'          => $data[2],
@@ -324,7 +341,6 @@ class RateLimitService {
 
 	/** @param string[] $identifiers */
 	public static function delete_queued_for_identifiers( array $identifiers ): bool {
-		global $wpdb;
 
 		$keys = [];
 		foreach ( $identifiers as $identifier ) {
@@ -333,6 +349,29 @@ class RateLimitService {
 				$keys[] = hash_hmac( 'sha256', 'otp_decoy:' . $purpose . ':' . $identifier, wp_salt( 'auth' ) );
 			}
 		}
+		return self::delete_queued_keys( $keys );
+	}
+
+	/** Cancel the one account-bound proof queue, including an unassigned new number. */
+	public static function delete_queued_for_user( int $user_id, ?string $flow = null ): bool {
+		global $wpdb;
+		$keys = [ hash_hmac( 'sha256', 'otp_decoy:verify_mobile:' . $user_id, wp_salt( 'auth' ) ) ];
+		// The opaque account binding survives salt rotation, unlike the bucket HMAC.
+		if ( null !== $flow ) {
+			if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow ) ) {
+				return false;
+			}
+			$previous = $wpdb->get_col( $wpdb->prepare( 'SELECT bucket_key FROM %i WHERE scope = %s LIMIT 2', $wpdb->prefix . 'pinova_rate_limits', $flow ) );
+			if ( $wpdb->last_error || ! is_array( $previous ) || count( $previous ) > 1 ) {
+				return false;
+			}
+			$keys = array_unique( array_merge( $keys, $previous ) );
+		}
+		return self::delete_queued_keys( $keys );
+	}
+
+	private static function delete_queued_keys( array $keys ): bool {
+		global $wpdb;
 		if ( ! $keys ) {
 			return true;
 		}

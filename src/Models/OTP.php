@@ -26,9 +26,10 @@ use Pinova\Helpers\IP;
  */
 class OTP extends Model {
 
-	const TYPE_LOGIN    = 'login';
-	const TYPE_REGISTER = 'register';
-	const TYPE_FORGET   = 'forget';
+	const TYPE_LOGIN         = 'login';
+	const TYPE_REGISTER      = 'register';
+	const TYPE_FORGET        = 'forget';
+	const TYPE_VERIFY_MOBILE = 'verify_mobile';
 
 	protected $table = 'pinova_otp';
 

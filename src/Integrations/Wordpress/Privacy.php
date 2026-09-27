@@ -7,6 +7,7 @@ use Pinova\Logging\LogRepository;
 use Pinova\Objects\Identifier;
 use Pinova\Objects\Mobile;
 use Pinova\Services\UserService;
+use Pinova\Services\MobileVerificationService;
 use Pinova\Services\RateLimitService;
 use WP_Error;
 use WP_User;
@@ -158,6 +159,25 @@ final class Privacy {
 			return self::erase_unowned_email_data( $email );
 		}
 
+		try {
+			return MobileVerificationService::with_lock(
+				$user->ID,
+				static function () use ( $user, $email_address ): array {
+					return self::erase_account_data( $user, $email_address );
+				}
+			);
+		} catch ( \Throwable $throwable ) {
+			unset( $throwable );
+			return [
+				'items_removed'  => false,
+				'items_retained' => true,
+				'messages'       => [ __( 'بخشی از داده‌های پینوا حذف نشد. لطفاً عملیات پاک‌سازی را دوباره اجرا کنید.', 'pinova' ) ],
+				'done'           => false,
+			];
+		}
+	}
+
+	private static function erase_account_data( WP_User $user, string $email_address ): array {
 		$mobile_lookup = UserService::get_persisted_mobile_result( $user->ID );
 		if ( ! $mobile_lookup['success'] ) {
 			return [
@@ -178,6 +198,8 @@ final class Privacy {
 				'done'           => false,
 			];
 		}
+		$proof_before     = MobileVerificationService::private_data_present( $user->ID );
+		$proof_cleared    = MobileVerificationService::revoke( $user->ID ) && MobileVerificationService::erase_pending( $user->ID );
 		$identifiers      = $identity_result['identifiers'];
 		$queue_cleared    = RateLimitService::delete_queued_for_identifiers( $identifiers );
 		$otp_result       = self::delete_otp_records( $user->ID, $identifiers );
@@ -189,14 +211,16 @@ final class Privacy {
 			'success' => true,
 		];
 
-		if ( $otp_result['success'] && $queue_cleared && $logs['success'] && $logs['done'] ) {
+		if ( $proof_cleared && $otp_result['success'] && $queue_cleared && $logs['success'] && $logs['done'] ) {
 			$mobile_result = self::delete_physical_mobile( $user->ID );
 		}
 
-		$success = $otp_result['success'] && $queue_cleared && $mobile_result['success'] && $logs['success'];
+		$success       = $proof_cleared && $otp_result['success'] && $queue_cleared && $mobile_result['success'] && $logs['success'];
+		$proof_after   = MobileVerificationService::private_data_present( $user->ID );
+		$proof_removed = ( $proof_before['proof'] && ! $proof_after['proof'] ) || ( $proof_before['pending'] && ! $proof_after['pending'] );
 
 		return [
-			'items_removed'  => $mobile_result['removed'] > 0 || $otp_result['removed'] > 0 || $logs['processed'] > 0,
+			'items_removed'  => $proof_removed || $mobile_result['removed'] > 0 || $otp_result['removed'] > 0 || $logs['processed'] > 0,
 			'items_retained' => ! $success,
 			'messages'       => $success ? [] : [ __( 'بخشی از داده‌های پینوا حذف نشد. لطفاً عملیات پاک‌سازی را دوباره اجرا کنید.', 'pinova' ) ],
 			'done'           => $success && $logs['done'],
@@ -498,8 +522,8 @@ final class Privacy {
 				)
 			)
 		);
-		$where       = [];
-		$values      = [ $table ];
+		$where  = [];
+		$values = [ $table ];
 		if ( $user_id > 0 ) {
 			$where[]  = '`user_id` = %d';
 			$values[] = $user_id;

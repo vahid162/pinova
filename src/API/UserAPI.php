@@ -319,7 +319,7 @@ class UserAPI extends RestAPI {
 		$code = $request->get_param( 'code' );
 
 		try {
-			[ $user, $flow_id ] = OTPService::verify_with_flow( $jwt, $code, [ OTP::TYPE_FORGET ] );
+			[ $user, $flow_id, $identifier ] = OTPService::verify_with_flow( $jwt, $code, [ OTP::TYPE_FORGET ] );
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
@@ -373,7 +373,7 @@ class UserAPI extends RestAPI {
 			true,
 			null,
 			[
-				'jwt'       => UserService::generate_jwt( $user->ID, $flow_id ),
+				'jwt'       => UserService::generate_jwt( $user->ID, $flow_id, $identifier ),
 				'reset_key' => $reset_key,
 			]
 		);
@@ -397,7 +397,7 @@ class UserAPI extends RestAPI {
 		$flow_id          = null;
 		$valid_state      = false;
 		try {
-			[ $user_id, $flow_id ] = UserService::parse_jwt_with_flow( $jwt );
+			[ $user_id, $flow_id, $origin ] = UserService::parse_jwt_with_flow( $jwt );
 			$valid_state           = true;
 		} catch ( Exception $e ) {
 			unset( $e );
@@ -475,10 +475,10 @@ class UserAPI extends RestAPI {
 
 		try {
 			try {
-				do_action( 'pinova/password_reset_start', $user_id, $flow_id );
+				do_action( 'pinova/password_reset_start', $user_id, $flow_id, $origin );
 				reset_password( $user, $password );
 			} finally {
-				do_action( 'pinova/password_reset_end', $user_id, $flow_id );
+				do_action( 'pinova/password_reset_end', $user_id, $flow_id, $origin );
 			}
 		} catch ( \Throwable $throwable ) {
 			EventThrottle::log(

@@ -120,6 +120,9 @@ $check( WPF()->member->get_is_email_confirmed( $user_id ), 'upstream reset marks
 $check( 'active' === WPF()->member->get_status( $user_id ), 'upstream reset activates member' );
 
 $user->add_role( 'contributor' );
+WPF()->settings->authorization['role_synch'] = true;
+$check( WPF()->member->set_secondary_groupids( $user_id, [ 5 ] ), 'synthetic secondary forum group' );
+$check( [ 5 ] === array_map( 'intval', WPF()->member->get_secondary_groupids( $user_id ) ), 'secondary forum group persisted' );
 dokan_user_update_to_seller(
 	$user,
 	[
@@ -133,6 +136,7 @@ dokan_user_update_to_seller(
 );
 $converted = get_userdata( $user_id );
 $check( [ 'seller' ] === array_values( $converted->roles ), 'Dokan replaces all earlier roles' );
+$check( '' === (string) WPF()->member->get_secondary_groupids( $user_id, false ), 'native seller role synchronization clears secondary forum groups' );
 $check( $original_login === $converted->user_login, 'core account identity stays unchanged' );
 $required = apply_filters( 'woocommerce_save_account_details_required_fields', [ 'account_email' => 'Email', 'account_first_name' => 'First name' ] );
 $check( ! isset( $required['account_email'] ) && isset( $required['account_first_name'] ), 'Pinova makes account email optional for a seller too' );

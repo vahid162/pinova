@@ -551,6 +551,9 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function create_by_otp( OTP $otp ): int {
+		if ( OTP::TYPE_REGISTER !== $otp->type || null !== $otp->user_id ) {
+			throw new Exception( 'Only registration OTP may create an account.' );
+		}
 		AuthenticationPolicy::assert_otp( $otp );
 		return self::create( $otp->identifier, '', [], $otp->flow_id );
 	}
@@ -559,6 +562,9 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function get_or_create( OTP $otp ): WP_User {
+		if ( OTP::TYPE_VERIFY_MOBILE === $otp->type ) {
+			throw new Exception( 'Proof-only OTP cannot create or authenticate an account.' );
+		}
 		AuthenticationPolicy::assert_otp( $otp );
 
 		$user_id = $otp->user_id;
@@ -575,8 +581,12 @@ class UserService {
 	 *
 	 * @return string
 	 */
-	public static function generate_jwt( int $user_id, ?string $flow_id = null ): string {
-		$payload = [ 'user_id' => $user_id ];
+	public static function generate_jwt( int $user_id, ?string $flow_id = null, ?Identifier $identifier = null ): string {
+		$payload = [ 'user_id' => $user_id, 'purpose' => 'password_reset' ];
+		if ( null !== $identifier && ! $identifier->is_username() && $identifier->is_valid() ) {
+			$payload['origin']   = $identifier->get_type();
+			$payload['identity'] = MobileVerificationService::identity_digest( $user_id, $identifier );
+		}
 		if ( null !== $flow_id ) {
 			$payload['flow_id'] = $flow_id;
 		}
@@ -595,7 +605,7 @@ class UserService {
 		return $user_id;
 	}
 
-	/** @return array{0:int,1:?string} */
+	/** @return array{0:int,1:?string,2:string} */
 	public static function parse_jwt_with_flow( string $jwt ): array {
 
 		try {
@@ -604,10 +614,34 @@ class UserService {
 			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
+		if ( isset( $payload['purpose'] ) && 'password_reset' !== $payload['purpose'] ) {
+			throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+		}
+
 		if ( isset( $payload['user_id'] ) ) {
 			$flow_id = $payload['flow_id'] ?? null;
 			if ( null === $flow_id || ( is_string( $flow_id ) && preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) ) {
-				return [ intval( $payload['user_id'] ), $flow_id ];
+				$user_id = intval( $payload['user_id'] );
+				$origin  = $payload['origin'] ?? 'unknown';
+				if ( in_array( $origin, [ 'mobile', 'email' ], true ) ) {
+					if ( 'mobile' === $origin ) {
+						$value = MobileVerificationService::current_mobile( $user_id ) ?? '';
+					} else {
+						global $wpdb;
+						$value = $wpdb->get_var( $wpdb->prepare( 'SELECT user_email FROM %i WHERE ID = %d', $wpdb->users, $user_id ) );
+						if ( $wpdb->last_error || ! is_string( $value ) ) {
+							throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+						}
+					}
+					$identity = new Identifier( $value );
+					if ( ! $identity->is_valid() || ! is_string( $payload['identity'] ?? null )
+						|| ! hash_equals( MobileVerificationService::identity_digest( $user_id, $identity ), $payload['identity'] ) ) {
+						throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+					}
+				} elseif ( 'unknown' !== $origin ) {
+					throw new Exception( __( 'حساب کاربری معتبر نمی‌باشد.', 'pinova' ) );
+				}
+				return [ $user_id, $flow_id, $origin ];
 			}
 		}
 

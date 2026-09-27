@@ -115,7 +115,15 @@ class OTPService {
 			if ( ! $identifier->is_valid() || $identifier->is_username() ) {
 				return;
 			}
-			[ $user_id, $mobile_unclaimed ] = UserService::match_with_registration_policy( $identifier );
+			if ( OTP::TYPE_VERIFY_MOBILE === $queued['purpose'] ) {
+				$user_id = (int) $queued['user_id'];
+				if ( ! MobileVerificationService::can_assign( $user_id, $identifier ) ) {
+					return;
+				}
+				$mobile_unclaimed = false;
+			} else {
+				[ $user_id, $mobile_unclaimed ] = UserService::match_with_registration_policy( $identifier );
+			}
 
 			$user = $user_id ? get_userdata( $user_id ) : false;
 			if ( $user instanceof \WP_User && UserService::is_native_only( $user ) ) {
@@ -125,7 +133,8 @@ class OTPService {
 				return;
 			}
 
-			$type = 'forget' === $queued['purpose'] ? OTP::TYPE_FORGET : ( $user_id ? OTP::TYPE_LOGIN : OTP::TYPE_REGISTER );
+			$type = OTP::TYPE_VERIFY_MOBILE === $queued['purpose'] ? OTP::TYPE_VERIFY_MOBILE
+				: ( 'forget' === $queued['purpose'] ? OTP::TYPE_FORGET : ( $user_id ? OTP::TYPE_LOGIN : OTP::TYPE_REGISTER ) );
 			if ( $queued['deadline'] <= time() ) {
 				return;
 			}
@@ -242,6 +251,12 @@ class OTPService {
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
+		if ( OTP::TYPE_VERIFY_MOBILE === $otp->type && ( (int) $otp->user_id !== get_current_user_id()
+			|| ! isset( $payload['user_id'] ) || (int) $payload['user_id'] !== (int) $otp->user_id
+			|| OTP::TYPE_VERIFY_MOBILE !== ( $payload['purpose'] ?? null ) ) ) {
+			throw new Exception( __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ) );
+		}
+
 		if ( ! $otp->hasType( $expected_types ) ) {
 			EventThrottle::log(
 				'otp.verify_failed',
@@ -301,6 +316,11 @@ class OTPService {
 			throw $exception;
 		}
 
+		$proof_epoch = null;
+		if ( $identifier->is_mobile() && null !== $otp->user_id && OTP::TYPE_FORGET !== $otp->type ) {
+			$proof_epoch = MobileVerificationService::epoch( (int) $otp->user_id );
+		}
+
 		if ( ! $otp->markVerified() ) {
 			EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'claim_rejected' ] );
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
@@ -313,7 +333,16 @@ class OTPService {
 			$log_context
 		);
 
-		return [ UserService::get_or_create( $otp ), $record_flow, $identifier ];
+		if ( OTP::TYPE_VERIFY_MOBILE === $otp->type ) {
+			MobileVerificationService::complete( (int) $otp->user_id, $identifier, (string) $proof_epoch );
+			$user = new \WP_User( (int) $otp->user_id );
+		} else {
+			$user = UserService::get_or_create( $otp );
+			if ( $identifier->is_mobile() && in_array( $otp->type, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ], true ) ) {
+				MobileVerificationService::record( $user->ID, $identifier, $proof_epoch ?? MobileVerificationService::epoch( $user->ID ) );
+			}
+		}
+		return [ $user, $record_flow, $identifier ];
 	}
 
 	public static function signed_state( OTP $otp, ?int $ttl = null ): string {
@@ -323,6 +352,10 @@ class OTPService {
 			$payload = [ 'otp_id' => $otp->id ];
 		}
 
+		if ( OTP::TYPE_VERIFY_MOBILE === $otp->type ) {
+			$payload['user_id'] = (int) $otp->user_id;
+			$payload['purpose'] = OTP::TYPE_VERIFY_MOBILE;
+		}
 		return JWT::encode( $payload, $ttl );
 	}
 

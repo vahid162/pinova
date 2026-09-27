@@ -20,7 +20,7 @@ final class AuthenticationPolicy {
 			if ( ! $user instanceof WP_User || UserService::is_native_only( $user ) || FirewallService::is_ip_blocked() ) {
 				return self::denied();
 			}
-			if ( null !== $identifier && ( ! $identifier->is_valid() || $user_id !== UserService::match( $identifier ) ) ) {
+			if ( null !== $identifier && ( ! $identifier->is_valid() || UserService::match( $identifier ) !== $user_id ) ) {
 				return self::denied();
 			}
 			$mobile_result = UserService::get_persisted_mobile_result( $user_id );
@@ -56,13 +56,16 @@ final class AuthenticationPolicy {
 	/** Revalidate the exact account and purpose before consuming an OTP or creating a user. */
 	public static function assert_otp( OTP $otp ): void {
 		$identifier = new Identifier( $otp->identifier );
-		if ( null !== $otp->user_id ) {
+		if ( OTP::TYPE_VERIFY_MOBILE === $otp->type ) {
+			$allowed = null !== $otp->user_id && (int) $otp->user_id === get_current_user_id()
+				&& MobileVerificationService::can_assign( (int) $otp->user_id, $identifier );
+		} elseif ( null !== $otp->user_id ) {
 			$allowed = in_array( $otp->type, [ OTP::TYPE_LOGIN, OTP::TYPE_FORGET ], true )
 				&& ! is_wp_error( self::session( (int) $otp->user_id, OTP::TYPE_FORGET === $otp->type ? 'recovery' : 'otp', $identifier ) );
 		} else {
 			try {
 				[ $matched, $unclaimed ] = UserService::match_with_registration_policy( $identifier );
-				$allowed = OTP::TYPE_REGISTER === $otp->type && $identifier->is_mobile()
+				$allowed                 = OTP::TYPE_REGISTER === $otp->type && $identifier->is_mobile()
 					&& null === $matched && $unclaimed && Pinova::users_can_register()
 					&& ! FirewallService::is_ip_blocked() && ! FirewallService::is_blocked( $identifier->get_value() )
 					&& true === apply_filters( 'pinova/authentication_policy', true, null, 'register', $identifier );

@@ -58,6 +58,7 @@ if ( ! ( new \Pinova\Version() )->migrate() ) {
 }
 
 \Pinova\Pinova::instance();
+\Pinova\Services\MobileVerificationService::boot();
 
 \Pinova\Integrations\Wordpress\Load::instance();
 

@@ -9,6 +9,7 @@ use Pinova\Objects\Mobile;
 use Pinova\Pinova;
 use Pinova\Services\FirewallService;
 use Pinova\Services\UserService;
+use Pinova\Services\MobileVerificationService;
 use stdClass;
 use WP_Error;
 use WP_User;
@@ -63,6 +64,7 @@ class UserProfile {
 					<input class="regular-text ltr" type="tel" name="user_mobile" id="user_mobile" required
 							value="<?php echo esc_attr( $phone ); ?>"
 					>
+					<p><a href="<?php echo esc_url( MobileVerificationService::url() ); ?>"><?php esc_html_e( 'تأیید یا تغییر تلفن همراه', 'pinova' ); ?></a></p>
 					<p class="description" id="mobile-description">
 						<?php esc_html_e( 'تغییر تلفن همراه، نام کاربری وردپرس را تغییر نمی‌دهد. پس از ذخیره، شمارهٔ جدید برای ورود پینوا استفاده می‌شود.', 'pinova' ); ?>
 					</p>
@@ -86,6 +88,11 @@ class UserProfile {
 		if ( ! $mobile->is_mobile() ) {
 			$errors->add( 'user_mobile_invalid', __( 'لطفا یک تلفن همراه معتبر وارد نمایید.', 'pinova' ) );
 
+			return $errors;
+		}
+
+		if ( MobileVerificationService::requires_proof_for_change( $user_id, $mobile->get_value() ) ) {
+			$errors->add( 'mobile_proof_required', __( 'برای تغییر شماره از پیوند تأیید تلفن همراه استفاده کنید.', 'pinova' ) );
 			return $errors;
 		}
 

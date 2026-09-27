@@ -179,7 +179,7 @@ class OTPService {
 
 	/**
 	 * @param string[] $expected_types
-	 * @return array{0:\WP_User,1:?string}
+	 * @return array{0:\WP_User,1:?string,2:Identifier}
 	 * @throws Exception
 	 */
 	public static function verify_with_flow( string $jwt, string $code, array $expected_types ): array {
@@ -294,6 +294,13 @@ class OTPService {
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
+		try {
+			AuthenticationPolicy::assert_otp( $otp );
+		} catch ( Exception $exception ) {
+			EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'policy_rejected' ] );
+			throw $exception;
+		}
+
 		if ( ! $otp->markVerified() ) {
 			EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'claim_rejected' ] );
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
@@ -306,7 +313,7 @@ class OTPService {
 			$log_context
 		);
 
-		return [ UserService::get_or_create( $otp ), $record_flow ];
+		return [ UserService::get_or_create( $otp ), $record_flow, $identifier ];
 	}
 
 	public static function signed_state( OTP $otp, ?int $ttl = null ): string {

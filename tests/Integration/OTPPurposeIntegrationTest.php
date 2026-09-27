@@ -212,7 +212,7 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 	public function test_otp_verification_and_session_use_the_record_flow(): void {
 		global $wpdb;
 
-		$user_id      = self::factory()->user->create( [ 'role' => 'subscriber' ] );
+		$user_id      = self::factory()->user->create( [ 'role' => 'subscriber', 'user_email' => 'flow-session@example.test' ] );
 		$otp          = $this->create_otp( $user_id, 'flow-session@example.test', OTP::TYPE_LOGIN );
 		$otp->flow_id = str_repeat( 'c', 32 );
 		$otp->save();
@@ -326,6 +326,7 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 	}
 
 	public function test_registration_otp_remains_valid_for_the_login_endpoint(): void {
+		update_option( 'pinova_general', [ 'wordpress_users_can_register' => '1' ] );
 		$mobile = '09351234568';
 		$otp    = $this->create_otp( 0, $mobile, OTP::TYPE_REGISTER );
 
@@ -436,8 +437,18 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 	 * @dataProvider verification_identifiers
 	 */
 	public function test_successful_verification_logs_identifier_not_code_fingerprint( string $identifier ): void {
-		$user_id = self::factory()->user->create( [ 'role' => 'subscriber' ] );
-		$otp     = $this->create_otp( $user_id, $identifier, OTP::TYPE_FORGET );
+		$identity = new Identifier( $identifier );
+		$userdata = [ 'role' => 'subscriber' ];
+		if ( $identity->is_email() ) {
+			$userdata['user_email'] = $identifier;
+		} elseif ( $identity->is_username() ) {
+			$userdata['user_login'] = $identifier;
+		}
+		$user_id = self::factory()->user->create( $userdata );
+		if ( $identity->is_mobile() ) {
+			update_user_meta( $user_id, 'pinova_mobile', $identity->get_value() );
+		}
+		$otp = $this->create_otp( $user_id, $identifier, OTP::TYPE_FORGET );
 
 		$user = OTPService::verify( JWT::encode( [ 'otp_id' => $otp->id ] ), '1234', [ OTP::TYPE_FORGET ] );
 

@@ -138,3 +138,5 @@ The administrator viewer and bounded incident export accept an exact flow-ID fil
 - incident tooling: exact filters, malformed-filter rejection, export capability/nonce, seven-day/row/byte caps, historical-secret redaction, settings-key-only audit, current-request fallback truthfulness, and deterministic package metadata;
 - compatibility: WordPress 6.8/latest and WooCommerce/HPOS pairs in the repository matrix;
 - packaging: production ZIP includes `psr/log` and runtime logger classes but excludes tests and agent documentation.
+
+Pre-consumption OTP policy rejections use the existing `otp.verify_failed` event with bounded reason `policy_rejected`. They do not issue a password-reset key or claim successful verification. Public responses remain generic; the event never includes policy configuration, raw identifiers, or token contents.

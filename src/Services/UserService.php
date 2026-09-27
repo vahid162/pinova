@@ -262,39 +262,44 @@ class UserService {
 		return false;
 	}
 
-	public static function login( int $user_id, ?string $login_method = null, ?string $flow_id = null ) {
-		clean_user_cache( $user_id );
-		wp_clear_auth_cookie();
-		wp_set_auth_cookie( $user_id, true );
-		wp_set_current_user( $user_id );
+	/** @return WP_User|WP_Error */
+	public static function login( int $user_id, ?string $login_method = null, ?string $flow_id = null, ?Identifier $identifier = null ) {
+		$method = $login_method ?: 'unknown';
+		try {
+			do_action( 'pinova/authentication_start', $user_id, $method );
+			$user = AuthenticationPolicy::session( $user_id, $method, $identifier );
+			if ( is_wp_error( $user ) ) {
+				return $user;
+			}
+			wp_clear_auth_cookie();
+			wp_set_auth_cookie( $user_id, true );
+			wp_set_current_user( $user_id );
 
-		if ( $login_method ) {
-			update_user_meta( $user_id, 'pinova_login_method', $login_method );
-		}
-
-		$user = get_userdata( $user_id );
-
-		if ( $user instanceof WP_User ) {
+			if ( $login_method ) {
+				update_user_meta( $user_id, 'pinova_login_method', $login_method );
+			}
 			do_action( 'wp_login', $user->user_login, $user );
+			do_action( 'pinova/user_logged_in', $user_id );
+			Logger::instance()->info(
+				'auth.session_created',
+				[
+					'user_id'     => $user_id,
+					'auth_method' => $method,
+					'flow_id'     => $flow_id,
+				]
+			);
+			return $user;
+		} finally {
+			do_action( 'pinova/authentication_end', $user_id, $method );
 		}
-
-		do_action( 'pinova/user_logged_in', $user_id );
-		Logger::instance()->info(
-			'auth.session_created',
-			[
-				'user_id'     => $user_id,
-				'auth_method' => $login_method ?: 'unknown',
-				'flow_id'     => $flow_id,
-			]
-		);
 	}
 
 	/**
-	 * Authenticate an already-resolved user through WordPress' native pipeline.
+	 * Keep native password/security hooks; make the final policy decision before wp_signon creates cookies.
 	 *
 	 * @return WP_User|WP_Error
 	 */
-	public static function authenticate_password( ?int $user_id, string $password, bool $remember = true ) {
+	public static function authenticate_password( ?int $user_id, string $password, bool $remember = true, ?Identifier $identifier = null ) {
 		$user = $user_id ? get_userdata( $user_id ) : false;
 
 		$credentials = [
@@ -303,7 +308,23 @@ class UserService {
 			'remember'      => $remember,
 		];
 
-		return wp_signon( $credentials, is_ssl() );
+		$policy = static function ( $authenticated ) use ( $user_id, $identifier ) {
+			if ( is_wp_error( $authenticated ) ) {
+				return $authenticated;
+			}
+			if ( ! $authenticated instanceof WP_User || $user_id !== $authenticated->ID ) {
+				return AuthenticationPolicy::denied();
+			}
+			return AuthenticationPolicy::session( $authenticated->ID, 'password', $identifier );
+		};
+		try {
+			do_action( 'pinova/authentication_start', (int) $user_id, 'password' );
+			add_filter( 'authenticate', $policy, PHP_INT_MAX );
+			return wp_signon( $credentials, is_ssl() );
+		} finally {
+			remove_filter( 'authenticate', $policy, PHP_INT_MAX );
+			do_action( 'pinova/authentication_end', (int) $user_id, 'password' );
+		}
 	}
 
 	public static function is_native_only( WP_User $user ): bool {
@@ -451,7 +472,7 @@ class UserService {
 		foreach ( wp_roles()->roles as $slug => $role ) {
 			$capabilities = array_keys( array_filter( (array) ( $role['capabilities'] ?? [] ) ) );
 
-			if ( array_intersect( $denied_capabilities, $capabilities ) ) {
+			if ( 'seller' === $slug || array_intersect( $denied_capabilities, $capabilities ) ) {
 				continue;
 			}
 
@@ -471,7 +492,7 @@ class UserService {
 
 			$capabilities = array_keys( array_filter( (array) wp_roles()->roles[ $slug ]['capabilities'] ) );
 
-			if ( array_intersect( $denied_capabilities, $capabilities ) ) {
+			if ( 'seller' === $slug || array_intersect( $denied_capabilities, $capabilities ) ) {
 				continue;
 			}
 
@@ -530,6 +551,7 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function create_by_otp( OTP $otp ): int {
+		AuthenticationPolicy::assert_otp( $otp );
 		return self::create( $otp->identifier, '', [], $otp->flow_id );
 	}
 
@@ -537,6 +559,7 @@ class UserService {
 	 * @throws Exception
 	 */
 	public static function get_or_create( OTP $otp ): WP_User {
+		AuthenticationPolicy::assert_otp( $otp );
 
 		$user_id = $otp->user_id;
 

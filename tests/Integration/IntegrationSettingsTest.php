@@ -38,6 +38,7 @@ final class IntegrationSettingsTest extends \WP_UnitTestCase {
 		$previous = $_GET;
 		try {
 			$_GET['tab'] = IntegrationSettings::OPTION;
+			$this->settings->admin_init();
 			ob_start();
 			$this->settings->show_forms();
 			$html = (string) ob_get_clean();
@@ -45,7 +46,9 @@ final class IntegrationSettingsTest extends \WP_UnitTestCase {
 			$_GET = $previous;
 		}
 		self::assertStringContainsString( 'action="options.php"', $html );
-		self::assertStringContainsString( 'name="option_page" value="pinova_integrations"', $html );
+		self::assertMatchesRegularExpression( '/name=[\'"]option_page[\'"] value=[\'"]pinova_integrations[\'"]/', $html );
+		self::assertStringContainsString( 'name="pinova_integrations[wpforo_enabled]"', $html );
+		self::assertStringContainsString( 'name="pinova_integrations[dokan_enabled]"', $html );
 		self::assertMatchesRegularExpression( '/name="_wpnonce" value="([^"]+)"/', $html );
 		preg_match( '/name="_wpnonce" value="([^"]+)"/', $html, $matches );
 		self::assertNotFalse( wp_verify_nonce( $matches[1], 'pinova_integrations-options' ) );

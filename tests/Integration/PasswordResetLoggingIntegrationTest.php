@@ -133,7 +133,14 @@ final class PasswordResetLoggingIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( $status, $response->get_status() );
 		self::assertFalse( $response->get_data()['success'] );
 		self::assertSame( 0, get_current_user_id() );
-		$this->assert_reset_event( 'auth.password_reset_failed', $reason );
+		if ( 'native_only_policy' === $reason ) {
+			self::assertNull( $otp->fresh()->verified_at );
+			$rows = array_values( array_filter( LogRepository::paginate()['rows'], static fn( array $row ): bool => 'otp.verify_failed' === $row['event'] ) );
+			self::assertCount( 1, $rows );
+			self::assertSame( 'policy_rejected', json_decode( $rows[0]['context'], true )['reason'] );
+		} else {
+			$this->assert_reset_event( 'auth.password_reset_failed', $reason );
+		}
 		$this->assert_no_secrets( [ $user->user_login, $user->user_email, $jwt, 'private-key-generation-exception', 'private-policy-detail', '"7294"' ] );
 	}
 

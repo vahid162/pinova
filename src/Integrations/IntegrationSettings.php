@@ -57,7 +57,10 @@ final class IntegrationSettings {
 	 * @param array{woocommerce: string, wpforo: string, dokan: string, dokan_pro: bool} $versions Loaded dependencies.
 	 */
 	private static function dependency_status( string $slug, array $versions ): string {
-		$supported = [ 'wpforo' => '3.2.1', 'dokan' => '5.1.3' ];
+		$supported = [
+			'wpforo' => '3.2.1',
+			'dokan'  => '5.1.3',
+		];
 		if ( ! isset( $supported[ $slug ] ) ) {
 			return 'unsupported';
 		}
@@ -72,7 +75,7 @@ final class IntegrationSettings {
 
 	/** Read-only Persian status; no third-party settings or user state are changed. */
 	public static function description( string $slug ): string {
-		$labels = [
+		$labels   = [
 			'missing'     => 'وابستگی لازم نصب و فعال نیست؛ هماهنگی اجرا نمی‌شود.',
 			'unsupported' => 'ترکیب نسخه‌ها پشتیبانی نمی‌شود؛ هماهنگی اجرا نمی‌شود.',
 			'off'         => 'وابستگی‌ها سازگارند؛ هماهنگی خاموش است.',

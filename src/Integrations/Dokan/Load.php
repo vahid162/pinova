@@ -160,6 +160,9 @@ final class Load {
 			&& [] === self::$role_hooks ) {
 			global $wp_filter;
 			$callback = 'wpforo_update_usergroup_on_role_change';
+			if ( ! is_callable( $callback ) ) {
+				return $fields;
+			}
 			foreach ( [ 'add_user_role', 'set_user_role' ] as $hook ) {
 				$priority = has_action( $hook, $callback );
 				if ( false === $priority ) {
@@ -183,9 +186,11 @@ final class Load {
 	public static function clear_attempt(): void {
 		foreach ( self::$role_hooks as $hook => [ $wrapper, $priority, $accepted ] ) {
 			remove_action( $hook, $wrapper, $priority );
-			add_action( $hook, 'wpforo_update_usergroup_on_role_change', $priority, $accepted );
+			if ( is_callable( 'wpforo_update_usergroup_on_role_change' ) ) {
+				add_action( $hook, 'wpforo_update_usergroup_on_role_change', $priority, $accepted );
+			}
 		}
-		self::$role_hooks = [];
+		self::$role_hooks  = [];
 		self::$authorized = null;
 	}
 

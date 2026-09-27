@@ -101,6 +101,8 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 
 	public function test_secondary_legacy_alias_can_login_without_proving_another_mobile(): void {
 		$id = self::factory()->user->create( [ 'user_login' => '989120000001', 'role' => 'subscriber' ] );
+		// WooCommerce creation may persist Pinova's virtual username fallback; model an actual pre-override legacy account.
+		delete_user_meta( $id, 'pinova_mobile' );
 		self::assertNotFalse( update_user_meta( $id, 'digits_phone', '09120000002' ), 'Legacy alias must be physically persisted.' );
 		global $wpdb;
 		self::assertSame( '09120000002', $wpdb->get_var( $wpdb->prepare( 'SELECT meta_value FROM %i WHERE user_id = %d AND meta_key = %s', $wpdb->usermeta, $id, 'digits_phone' ) ) );
@@ -118,6 +120,8 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 	/** @dataProvider alias_changes */
 	public function test_secondary_recovery_alias_remains_bound_to_its_current_unique_ownership( string $change ): void {
 		$id = self::factory()->user->create( [ 'user_login' => '989120000001', 'role' => 'subscriber' ] );
+		// WooCommerce creation may persist Pinova's virtual username fallback; model an actual pre-override legacy account.
+		delete_user_meta( $id, 'pinova_mobile' );
 		self::assertNotFalse( update_user_meta( $id, 'digits_phone', '09120000002' ), 'Legacy alias must be physically persisted.' );
 		global $wpdb;
 		self::assertSame( '09120000002', $wpdb->get_var( $wpdb->prepare( 'SELECT meta_value FROM %i WHERE user_id = %d AND meta_key = %s', $wpdb->usermeta, $id, 'digits_phone' ) ) );

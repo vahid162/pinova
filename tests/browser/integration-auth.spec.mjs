@@ -179,6 +179,58 @@ echo 'PINOVA_BROWSER_PROOF_OK';
     });
 }
 
+test('proof UI clears edited secrets, accepts WebOTP once, and cancels pending navigation', async ({ page }) => {
+    await page.addInitScript(() => {
+        window.OTPCredential = class {};
+        window.pinovaTestOtp = [];
+        Object.defineProperty(navigator.credentials, 'get', { configurable: true, value: ({ signal }) => new Promise((resolve, reject) => {
+            window.pinovaTestOtp.push({ resolve, signal });
+            signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        }) });
+    });
+    await login(page);
+    await page.goto('/?pinova_verify_mobile=1');
+    const root = page.locator('.pinova-mobile-proof');
+    let requests = 0;
+    let verifications = 0;
+    let pendingVerify;
+    await page.route('**/pinova/mobile/*', async route => {
+        if (route.request().url().endsWith('/request')) {
+            requests += 1;
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, message: 'Fixture', data: { jwt: 'synthetic-ui-state', ttl: 1 } }) });
+        } else {
+            verifications += 1;
+            pendingVerify = route;
+        }
+    });
+    await root.locator('input[name="mobile"]').fill(mobile);
+    await root.locator('[type="submit"]').click();
+    await expect(root.locator('input[name="code"]')).toBeEditable();
+    await root.locator('input[name="code"]').fill('12');
+    await root.locator('.pinova-mobile-edit').click();
+    await expect(root.locator('input[name="code"]')).toHaveValue('');
+    await expect(root.locator('input[name="mobile"]')).toBeEditable();
+    expect(await page.evaluate(() => window.pinovaTestOtp[0].signal.aborted)).toBe(true);
+    await root.locator('[type="submit"]').click();
+    await expect(root.locator('.pinova-mobile-resend')).toBeVisible();
+    await root.locator('.pinova-mobile-resend').click();
+    await expect.poll(() => requests).toBe(3);
+    await expect(root.locator('form')).toHaveAttribute('aria-busy', 'false');
+    await root.locator('input[name="code"]').fill('000000');
+    await expect.poll(() => verifications).toBe(1);
+    const rejectedVerify = pendingVerify;
+    // Autofill may arrive while the manual verification is still pending.
+    await page.evaluate(() => window.pinovaTestOtp.at(-1).resolve({ code: '۴۸۲۱۶۳' }));
+    await rejectedVerify.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ success: false, message: 'Invalid fixture code' }) });
+    await expect.poll(() => verifications).toBe(2);
+    await expect(root.locator('.pinova-mobile-proof-content')).toHaveAttribute('inert', '');
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false })));
+    await expect(root.locator('input[name="code"]')).toHaveValue('');
+    await pendingVerify.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, message: 'STALE_SUCCESS' }) }).catch(() => {});
+    await expect(root.locator('.pinova-mobile-status')).not.toHaveText('STALE_SUCCESS');
+    expect(verifications).toBe(2);
+});
+
 test('real forum GET and registration POST reach Pinova before native mutation', async ({ page }) => {
     cli(`update_option('pinova_integrations', ['wpforo_enabled' => '1', 'dokan_enabled' => '0']);`);
     const target = new URL('/my-account/?next=%2Fcheckout%3Fa%3D1#forum', forumHome).href;
@@ -228,11 +280,18 @@ try {
     \Pinova\Models\OTP::query()->create(['identifier' => $queued['identifier'], 'ip_address' => $queued['ip'], 'type' => 'register', 'code' => '${code}', 'flow_id' => '${payload.flow_id}', 'channels' => ['sms' => true]]);
 } finally { \Pinova\Services\RateLimitService::finish_queued_otp('${payload.flow_id}', $queued['claim_token']); }
 `);
+        let verificationBody;
+        // Capture the real upstream body before the application navigates away and Chromium discards it.
+        await page.route('**/pinova/user/login/otp', async route => {
+            const upstream = await route.fetch();
+            verificationBody = await upstream.json();
+            await route.fulfill({ response: upstream });
+        });
         const verified = page.waitForResponse(response => response.url().includes('/pinova/user/login/otp') && response.request().method() === 'POST');
         await page.locator('#pinova-login-otp').fill(code);
         const response = await verified;
         expect(response.status()).toBe(200);
-        expect((await response.json()).success).toBe(true);
+        expect(verificationBody.success).toBe(true);
         await expect.poll(() => new URL(page.url()).pathname).not.toMatch(/^\/login\/?$/);
         expect((await page.context().cookies()).some(cookie => cookie.name.startsWith('wordpress_logged_in_'))).toBe(true);
         const outcome = readData(String.raw`

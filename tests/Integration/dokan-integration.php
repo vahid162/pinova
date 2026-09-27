@@ -28,6 +28,8 @@ $check = static function ( bool $condition, string $label ): void {
 $check( defined( 'DOKAN_PLUGIN_VERSION' ) && '5.1.3' === DOKAN_PLUGIN_VERSION && defined( 'WC_VERSION' ) && '11.1.2' === WC_VERSION
 	&& defined( 'WPFORO_VERSION' ) && '3.2.1' === WPFORO_VERSION && ! defined( 'DOKAN_PRO_PLUGIN_VERSION' ), 'exact characterized dependencies' );
 $check( WPF()->is_installed(), 'real forum installation' );
+$check( in_array( get_option( 'woocommerce_custom_orders_table_enabled' ), [ 'yes', 'no' ], true )
+	&& \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled() === ( 'yes' === get_option( 'woocommerce_custom_orders_table_enabled' ) ), 'actual order storage matches selected HPOS mode' );
 add_filter( 'pre_wp_mail', '__return_true' );
 add_filter( 'pre_http_request', static fn() => new WP_Error( 'pinova_fixture_no_network' ) );
 $_SERVER['REMOTE_ADDR'] = '192.0.2.157';

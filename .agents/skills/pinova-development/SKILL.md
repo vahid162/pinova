@@ -11,7 +11,7 @@ Work from a repository checkout or disposable worktree, never from an installed 
 
 ## Start every task
 
-1. Read the root [`AGENTS.md`](../../../AGENTS.md). Inspect `git status --short --branch`, the current branch, recent commits, tags, and GitHub release state. Verify snapshots against Git.
+1. Read the root [`AGENTS.md`](../../../AGENTS.md) and complete its live GitHub reconciliation step before continuing. Inspect `git status --short --branch`, the current branch, recent commits, tags, and GitHub release state. Verify snapshots against Git.
 2. Read the references needed for the task:
    - [`references/project-map.md`](references/project-map.md) for architecture, legacy identifier behavior, persistence, and source routing.
    - [`references/quality-and-release.md`](references/quality-and-release.md) for CI, tests, packaging, staging, and releases.

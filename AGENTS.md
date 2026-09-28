@@ -12,9 +12,10 @@ After this file, read `.agents/skills/pinova-development/SKILL.md` and only the 
 
 1. Classify the request as review, diagnosis, implementation, migration, packaging/release, or production deployment. Authority for one class does not imply authority for another.
 2. Inspect the clean/dirty state, active branch, worktrees, remotes, and exact base ref. Preserve unrelated changes and every worktree or environment owned by another task.
-3. For implementation, branch from the intended remote ref in a dedicated worktree. Never develop in an installed plugin directory.
-4. Establish the compute boundary before dependency installation, static analysis, packaging, containers, or browser tests. A separate path or container does not isolate CPU, RAM, swap, I/O, or Docker.
-5. Read the public `README.md` and WordPress `readme.txt` when behavior, installation, compatibility, privacy, or packaging is involved.
+3. Reconcile the live GitHub state before starting new work. Inspect open pull requests, requested reviews, and failed, pending, or required CI that may affect `main` or the intended base. Do not rely on stale notifications. Triage relevant items and resolve routine repository-maintenance backlog first: merge a reviewed PR when its applicable checks pass, or close it when it is clearly stale or superseded. Dependency updates require scope, compatibility, lockfile, security, and relevant regression checks before merge. Never bypass required checks or reviews. This authority does not include releases, deployments, production changes, GitHub settings, force-pushes, or history rewrites.
+4. For implementation, branch from the intended remote ref in a dedicated worktree. Never develop in an installed plugin directory.
+5. Establish the compute boundary before dependency installation, static analysis, packaging, containers, or browser tests. A separate path or container does not isolate CPU, RAM, swap, I/O, or Docker.
+6. Read the public `README.md` and WordPress `readme.txt` when behavior, installation, compatibility, privacy, or packaging is involved.
 
 ## Durable documentation boundaries
 

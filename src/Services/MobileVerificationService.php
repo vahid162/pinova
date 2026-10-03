@@ -356,8 +356,8 @@ final class MobileVerificationService {
 		if ( ! is_user_logged_in() ) {
 			return '<p>' . esc_html__( 'برای تأیید تلفن همراه ابتدا وارد حساب خود شوید.', 'pinova' ) . '</p>';
 		}
-		wp_enqueue_script( 'pinova-mobile-verification', PINOVA_URL . 'assets/js/mobile-verification.js', [], PINOVA_VERSION, true );
-		wp_enqueue_style( 'pinova-mobile-verification', PINOVA_URL . 'assets/css/mobile-verification.css', [], PINOVA_VERSION );
+		wp_enqueue_script( 'pinova-mobile-verification', PINOVA_URL . 'assets/js/mobile-verification.js', [], PINOVA_VERSION . '.1', true );
+		wp_enqueue_style( 'pinova-mobile-verification', PINOVA_URL . 'assets/css/mobile-verification.css', [], PINOVA_VERSION . '.1' );
 		ob_start();
 		require PINOVA_DIR . '/templates/mobile-verification.php';
 		return (string) ob_get_clean();

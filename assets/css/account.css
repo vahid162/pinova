@@ -567,6 +567,18 @@ body.pinova-account-page input:focus-visible {
   border-color: #e9aaa5;
 }
 
+.pinova-auth-reference {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.pinova-auth-reference bdi {
+  display: block;
+  font-family: monospace;
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+
 .pinova-auth-loader {
   position: absolute;
   inset: 12px;

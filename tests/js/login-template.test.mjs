@@ -104,12 +104,13 @@ test('keyboard controls, image alternatives, and live feedback are explicit', ()
 });
 
 test('changed standalone assets use an account-specific cache revision', () => {
-    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.5'/);
+    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.7'/);
 
     for (const asset of [
         'assets/css/style.css',
         'assets/css/account.css',
         'assets/js/pages/login-form.js',
+        'assets/js/global.js',
     ]) {
         assert.match(
             template,
@@ -117,7 +118,6 @@ test('changed standalone assets use an account-specific cache revision', () => {
         );
     }
 
-    assert.match(template, /assets\/js\/global\.js\?ver=' \. PINOVA_VERSION/);
 });
 
 test('dead links and public native-login references are absent', () => {
@@ -387,4 +387,11 @@ test('account stylesheet uses the GPANTE palette and unambiguous actions', () =>
     assert.match(accountCss, /button\.pinova-auth-resend-button\s*{/);
     assert.match(accountCss, /\.pinova-auth-code-slots\s*{[^}]*repeat\(var\(--pinova-code-length\)/is);
     assert.match(accountCss, /unicode-bidi:\s*plaintext/i);
+});
+
+
+test('support references are isolated from the message and displayed left to right', () => {
+    assert.match(template, /<div pinova-text="status.message" dir="auto"><\/div>/);
+    assert.match(template, /<bdi dir="ltr" pinova-text="status.reference"><\/bdi>/);
+    assert.match(template, /کد پیگیری برای پشتیبانی:/);
 });

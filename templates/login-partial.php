@@ -565,4 +565,4 @@ echo $custom_styles;
 		</div>
 	</section>
 </div>
-<script src="<?php echo esc_url( PINOVA_URL ); ?>assets/js/global.js?ver=<?php echo esc_attr( PINOVA_VERSION ); ?>"></script>
+<script src="<?php echo esc_url( PINOVA_URL ); ?>assets/js/global.js?ver=<?php echo esc_attr( PINOVA_VERSION . '.7' ); ?>"></script>

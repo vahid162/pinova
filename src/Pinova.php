@@ -172,7 +172,7 @@ class Pinova {
 		wp_enqueue_style( 'pinova-notyf', PINOVA_URL . 'assets/css/notyf.min.css', [], PINOVA_VERSION );
 
 		wp_enqueue_script( 'pinova-notyf', PINOVA_URL . 'assets/js/notyf.min.js', [], PINOVA_VERSION, true );
-		wp_enqueue_script( 'pinova-global', PINOVA_URL . 'assets/js/global.js', [ 'pinova-notyf' ], PINOVA_VERSION, true );
+		wp_enqueue_script( 'pinova-global', PINOVA_URL . 'assets/js/global.js', [ 'pinova-notyf' ], PINOVA_VERSION . '.7', true );
 		wp_enqueue_script( 'pinova-admin', PINOVA_URL . 'assets/js/admin.js', [ 'jquery', 'pinova-global' ], PINOVA_VERSION, true );
 		wp_localize_script(
 			'pinova-global',

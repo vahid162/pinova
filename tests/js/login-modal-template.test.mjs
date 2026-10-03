@@ -129,7 +129,7 @@ test('modal uses the shared branded account stylesheet with a cache revision', (
         wooLoader,
         /wp_enqueue_script\(\s*'pinova-login-modal'[\s\S]*\[\s*'pinova-global'\s*\]/,
     );
-    assert.match(wooLoader, /PINOVA_VERSION\s*\.\s*'\.6'/);
+    assert.match(wooLoader, /PINOVA_VERSION\s*\.\s*'\.7'/);
 });
 
 test('modal is rendered outside the checkout form and replaceable fragments', () => {
@@ -192,4 +192,11 @@ test('modal control CSS scopes positioning and anchors close to the safe card co
 
     // The standalone account page retains its existing shared back-control rule.
     assert.match(accountCss, /^\.pinova-auth-icon-button \{[\s\S]*?inset-inline-start: 0;[\s\S]*?transform: translateY\(-50%\);/m);
+});
+
+
+test('support references are isolated from the message and displayed left to right', () => {
+    assert.match(template, /<div pinova-text="status.message" dir="auto"><\/div>/);
+    assert.match(template, /<bdi dir="ltr" pinova-text="status.reference"><\/bdi>/);
+    assert.match(template, /کد پیگیری برای پشتیبانی:/);
 });

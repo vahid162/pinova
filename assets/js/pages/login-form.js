@@ -19,6 +19,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
         ],
         status: {
             message: '',
+            reference: '',
             tone: 'info'
         },
         otpSubmittedCodes: {
@@ -531,14 +532,16 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
         },
 
         //other function
-        setStatus(message, tone = 'error'){
-            this.status.message = message || 'خطایی رخ داده است!';
+        setStatus(message, tone = 'error', reference = ''){
+            this.status.message = message || 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید.';
             this.status.tone = tone;
+            this.status.reference = reference || '';
         },
 
         clearStatus(){
             this.status.message = '';
             this.status.tone = 'info';
+            this.status.reference = '';
         },
 
         beginRequest(){
@@ -621,11 +624,11 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
         },
 
         handleRequestFailure(result){
-            this.setStatus(result && result.message ? result.message : 'خطایی رخ داده است!');
+            this.setStatus(result?.userMessage || result?.message || 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید.', 'error', result?.userMessage ? result.http?.correlationId : '');
         },
 
         handleRequestException(error){
-            this.setStatus(error?.pinovaMessage || 'ارتباط با سرور برقرار نشد. لطفاً دوباره تلاش کنید.');
+            this.setStatus(error?.pinovaUserMessage || error?.pinovaMessage || 'ارتباط با سرور برقرار نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.', 'error', error?.pinovaCorrelationId);
         },
 
         clearStepSecrets(stepName){

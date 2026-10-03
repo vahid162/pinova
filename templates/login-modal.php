@@ -77,12 +77,17 @@ $home_url  = home_url( '/' );
 							<div
 								pinova-cloak
 								pinova-show="status.message"
-								pinova-text="status.message"
 								pinova-bind:class="`pinova-auth-status is-${status.tone}`"
 								role="status"
 								aria-live="polite"
 								aria-atomic="true"
-							></div>
+							>
+								<div pinova-text="status.message" dir="auto"></div>
+								<div class="pinova-auth-reference" pinova-show="status.reference">
+									<span>کد پیگیری برای پشتیبانی:</span>
+									<bdi dir="ltr" pinova-text="status.reference"></bdi>
+								</div>
+							</div>
 
 							<template pinova-if="stepName === 'authenticate'">
 								<form id="pinova-modal-authenticate" class="pinova-auth-form" pinova-on:submit.prevent="submit()" novalidate>

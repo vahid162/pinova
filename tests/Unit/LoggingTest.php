@@ -13,6 +13,15 @@ use Pinova\Logging\SafeContext;
 
 final class LoggingTest extends TestCase {
 
+	public function test_queue_timing_fields_are_numeric_and_secrets_remain_denied(): void {
+		$context = new SafeContext();
+		self::assertSame(
+			[ 'queue_delay_seconds' => 120, 'remaining_seconds' => 60 ],
+			$context->sanitize( [ 'queue_delay_seconds' => 120, 'remaining_seconds' => 60, 'jwt' => 'private-token', 'identifier' => 'private@example.test' ] )
+		);
+		self::assertSame( [], $context->sanitize( [ 'queue_delay_seconds' => -1, 'remaining_seconds' => 'private-token' ] ) );
+	}
+
 	public function test_source_checkout_does_not_fabricate_build_metadata_or_accept_caller_spoofing(): void {
 		self::assertSame( [ 'package_identity' => 'source' ], BuildMetadata::info() );
 

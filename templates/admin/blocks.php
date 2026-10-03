@@ -10,7 +10,7 @@ wp_enqueue_script( 'persian-datepicker-script', PINOVA_URL . 'assets/js/persian-
 wp_enqueue_script( 'persian-date-script', PINOVA_URL . 'assets/js/persian-date.min.js', [ 'jquery' ], PINOVA_VERSION, true );
 
 wp_enqueue_script( 'notyf-script', PINOVA_URL . 'assets/js/notyf.min.js', [], PINOVA_VERSION, true );
-wp_enqueue_script( 'global-script', PINOVA_URL . 'assets/js/global.js', [ 'notyf-script' ], PINOVA_VERSION, true );
+wp_enqueue_script( 'global-script', PINOVA_URL . 'assets/js/global.js', [ 'notyf-script' ], PINOVA_VERSION . '.7', true );
 wp_enqueue_script( 'pinova-blocks', PINOVA_URL . 'assets/js/pages/blocks.js', [ 'global-script' ], PINOVA_VERSION, [ 'type' => 'module' ] );
 
 wp_localize_script(

@@ -28,6 +28,7 @@ final class LogRepository {
 		'logging.write_failed',
 		'otp.channel_send_failed',
 		'otp.created',
+		'otp.queued',
 		'otp.delivery_failed',
 		'otp.verified',
 		'otp.verify_failed',

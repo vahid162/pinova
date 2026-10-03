@@ -3,7 +3,6 @@
 namespace Pinova\Channels;
 
 use Exception;
-use Pinova\Helpers\JWT;
 use Pinova\Models\OTP;
 use Pinova\Pinova;
 
@@ -24,7 +23,6 @@ class Email implements ChannelInterface {
 			),
 			'{{site_url}}'            => esc_url( site_url() ),
 			'{{site_name}}'           => esc_html( $site_name ),
-			'{{expires_in_minutes}}'  => JWT::DEFAULT_TTL / 60,
 			'{{code}}'                => $code,
 			'{{web_icon}}'            => esc_url( PINOVA_URL . 'assets/images/icons/web.png' ),
 			'{{email_title}}'         => esc_html( $copy['title'] ),

@@ -180,6 +180,15 @@ class RateLimitService {
 		if ( false === $queued ) {
 			throw new RateLimitUnavailableException( 'The OTP delivery queue could not be written.' );
 		}
+		if ( 1 === $queued ) {
+			Logger::instance()->info(
+				'otp.queued',
+				[
+					'flow_id'           => $row->scope,
+					'remaining_seconds' => max( 0, (int) strtotime( $row->reset_at . ' UTC' ) - time() ),
+				]
+			);
+		}
 
 		return [ $row->scope, (int) strtotime( $row->reset_at . ' UTC' ) ];
 	}

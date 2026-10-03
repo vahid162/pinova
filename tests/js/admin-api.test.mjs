@@ -149,10 +149,10 @@ test('gateway malformed response before window load shows one real server refere
         } },
         async text() { return '<html>bad gateway</html>'; },
     }));
-    assert.deepEqual(notices, ['در پردازش درخواست خطایی رخ داده است! کد پیگیری: real-server-ref']);
+    assert.deepEqual(notices, ['پاسخ معتبری از سرور دریافت نشد. کمی بعد دوباره تلاش کنید. کد پیگیری: real-server-ref']);
 });
 
 test('gateway network failure before window load shows one error without a made-up reference', async () => {
     const notices = await gatewayBeforeWindowLoad(async () => { throw new TypeError('Failed to fetch'); });
-    assert.deepEqual(notices, ['در پردازش درخواست خطایی رخ داده است!']);
+    assert.deepEqual(notices, ['پاسخ معتبری از سرور دریافت نشد. کمی بعد دوباره تلاش کنید.']);
 });

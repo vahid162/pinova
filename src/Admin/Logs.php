@@ -65,6 +65,9 @@ final class Logs {
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'گزارش‌های پینوا', 'pinova' ); ?></h1>
+			<?php if ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON ) : ?>
+				<div class="notice notice-warning inline"><p><?php esc_html_e( 'اجرای خودکار cron وردپرس غیرفعال است. برای ارسال به‌موقع کد، اجرای cron سرور را دست‌کم هر دقیقه تنظیم کنید. اعتبار کد از زمان درخواست شروع می‌شود؛ ثبت صف به‌تنهایی به معنی ارسال یا دریافت پیامک نیست.', 'pinova' ); ?></p></div>
+			<?php endif; ?>
 			<p>
 				<?php
 				/* translators: %d: number of days logs are retained. */

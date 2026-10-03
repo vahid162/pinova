@@ -14,6 +14,9 @@ jobs:
         with:
           node-version: '24.21.0'
       - run: npm install --global npm@11.19.0 --ignore-scripts
+      - name: Remove only the stale registry cache entry before lock resolution
+        run: |
+          node --input-type=module -e "import fs from 'node:fs'; const lock=JSON.parse(fs.readFileSync('package-lock.json')); delete lock.packages['node_modules/http-cache-semantics']; fs.writeFileSync('package-lock.json', JSON.stringify(lock,null,2)+'\n');"
       - run: npm install --package-lock-only --ignore-scripts
       - run: npm ci --ignore-scripts
       - run: node tools/verify-http-cache-patch.mjs

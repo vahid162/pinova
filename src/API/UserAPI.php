@@ -181,7 +181,7 @@ class UserAPI extends RestAPI {
 			);
 		} catch ( RateLimitUnavailableException $e ) {
 			self::minimum_response_time( $started );
-			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 503 );
+			return self::response( false, __( 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید. اگر مشکل ادامه داشت، کد پیگیری را به پشتیبانی بدهید.', 'pinova' ), [], 503 );
 		} catch ( Throwable $throwable ) {
 			EventThrottle::log(
 				'auth.request_failed',
@@ -191,7 +191,7 @@ class UserAPI extends RestAPI {
 				]
 			);
 			self::minimum_response_time( $started );
-			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 503 );
+			return self::response( false, __( 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید. اگر مشکل ادامه داشت، کد پیگیری را به پشتیبانی بدهید.', 'pinova' ), [], 503 );
 		}
 
 		[ $data['jwt'], $data['ttl'] ] = self::decoy_otp_state( $decoy_flow );
@@ -222,7 +222,7 @@ class UserAPI extends RestAPI {
 				[ 'Retry-After' => $e->get_retry_after() ]
 			);
 		} catch ( RateLimitUnavailableException $e ) {
-			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 503 );
+			return self::response( false, __( 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید. اگر مشکل ادامه داشت، کد پیگیری را به پشتیبانی بدهید.', 'pinova' ), [], 503 );
 		}
 
 		$user_id = UserService::match( $identifier );
@@ -290,15 +290,15 @@ class UserAPI extends RestAPI {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
 			self::minimum_response_time( $started );
-			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, self::otp_failure_message(), [], 401 );
 		}
 
 		if ( UserService::is_native_only( $user ) ) {
-			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, self::otp_failure_message(), [], 401 );
 		}
 
 		if ( is_wp_error( UserService::login( $user->ID, 'otp', $flow_id, $identifier ) ) ) {
-			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, self::otp_failure_message(), [], 401 );
 		}
 
 		return self::response( true, __( 'ورود با موفقیت انجام شد.', 'pinova' ) );
@@ -324,7 +324,7 @@ class UserAPI extends RestAPI {
 			return self::response( false, $e->getMessage(), [], 403 );
 		} catch ( Exception $e ) {
 			self::minimum_response_time( $started );
-			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, self::otp_failure_message(), [], 401 );
 		}
 
 		if ( UserService::is_native_only( $user ) ) {
@@ -337,7 +337,7 @@ class UserAPI extends RestAPI {
 					'flow_id'   => $flow_id,
 				]
 			);
-			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, self::otp_failure_message(), [], 401 );
 		}
 
 		clean_user_cache( $user->ID );
@@ -353,7 +353,7 @@ class UserAPI extends RestAPI {
 					'flow_id'   => $flow_id,
 				]
 			);
-			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
+			return self::response( false, __( 'بازنشانی رمز انجام نشد. کمی بعد دوباره تلاش کنید. اگر مشکل ادامه داشت، با پشتیبانی تماس بگیرید.', 'pinova' ), [], 500 );
 		}
 
 		if ( is_wp_error( $reset_key ) ) {
@@ -366,7 +366,7 @@ class UserAPI extends RestAPI {
 					'flow_id'   => $flow_id,
 				]
 			);
-			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
+			return self::response( false, __( 'بازنشانی رمز انجام نشد. کمی بعد دوباره تلاش کنید. اگر مشکل ادامه داشت، با پشتیبانی تماس بگیرید.', 'pinova' ), [], 500 );
 		}
 
 		return self::response(
@@ -424,7 +424,7 @@ class UserAPI extends RestAPI {
 					'reason'    => 'invalid_token',
 				]
 			);
-			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, __( 'درخواست بازنشانی رمز پذیرفته نشد. بازیابی رمز را از ابتدا شروع کنید.', 'pinova' ), [], 401 );
 		}
 
 		$user = get_user_by( 'id', $user_id );
@@ -438,7 +438,7 @@ class UserAPI extends RestAPI {
 					'flow_id'   => $flow_id,
 				]
 			);
-			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, __( 'درخواست بازنشانی رمز پذیرفته نشد. بازیابی رمز را از ابتدا شروع کنید.', 'pinova' ), [], 401 );
 		}
 
 		if ( UserService::is_native_only( $user ) ) {
@@ -451,7 +451,7 @@ class UserAPI extends RestAPI {
 					'flow_id'   => $flow_id,
 				]
 			);
-			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, __( 'درخواست بازنشانی رمز پذیرفته نشد. بازیابی رمز را از ابتدا شروع کنید.', 'pinova' ), [], 401 );
 		}
 
 		$user = check_password_reset_key( $reset_key, $user->user_login );
@@ -466,11 +466,11 @@ class UserAPI extends RestAPI {
 					'flow_id'   => $flow_id,
 				]
 			);
-			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, __( 'درخواست بازنشانی رمز پذیرفته نشد. بازیابی رمز را از ابتدا شروع کنید.', 'pinova' ), [], 401 );
 		}
 
 		if ( is_wp_error( AuthenticationPolicy::session( $user_id, 'recovery' ) ) ) {
-			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, __( 'درخواست بازنشانی رمز پذیرفته نشد. بازیابی رمز را از ابتدا شروع کنید.', 'pinova' ), [], 401 );
 		}
 
 		try {
@@ -485,7 +485,7 @@ class UserAPI extends RestAPI {
 					'reason'    => 'invalid_token',
 				]
 			);
-			return self::response( false, __( 'درخواست بازنشانی معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+			return self::response( false, __( 'درخواست بازنشانی رمز پذیرفته نشد. بازیابی رمز را از ابتدا شروع کنید.', 'pinova' ), [], 401 );
 		}
 
 		try {
@@ -505,7 +505,7 @@ class UserAPI extends RestAPI {
 					'flow_id'   => $flow_id,
 				]
 			);
-			return self::response( false, __( 'امکان بازنشانی رمز عبور وجود ندارد.', 'pinova' ), [], 500 );
+			return self::response( false, __( 'بازنشانی رمز انجام نشد. کمی بعد دوباره تلاش کنید. اگر مشکل ادامه داشت، با پشتیبانی تماس بگیرید.', 'pinova' ), [], 500 );
 		}
 
 		EventThrottle::log(
@@ -608,7 +608,7 @@ class UserAPI extends RestAPI {
 	private static function password_failure( float $started ): WP_REST_Response {
 		self::minimum_response_time( $started );
 
-		return self::response( false, __( 'اطلاعات ورود معتبر نمی‌باشد.', 'pinova' ), [], 401 );
+		return self::response( false, __( 'ورود انجام نشد. اطلاعات ورود را بررسی کنید یا از گزینهٔ بازیابی رمز استفاده کنید.', 'pinova' ), [], 401 );
 	}
 
 	private static function minimum_response_time( float $started ): void {

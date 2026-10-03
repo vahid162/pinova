@@ -59,7 +59,7 @@ class AdminAPI extends RestAPI {
 				throw new RuntimeException( 'The SMS provider did not accept the test message.' );
 			}
 
-			$message = __( 'کد تأیید با موفقیت پیامک شد.', 'pinova' );
+			$message = __( 'سرویس پیامک درخواست ارسال آزمایشی را پذیرفت. دریافت پیامک را روی گوشی مقصد بررسی کنید.', 'pinova' );
 			$success = true;
 			Logger::instance()->audit(
 				'notice',
@@ -72,7 +72,7 @@ class AdminAPI extends RestAPI {
 			);
 
 		} catch ( Throwable $e ) {
-			$message = __( 'خطای داخلی هنگام ارسال پیامک رخ داده است.', 'pinova' );
+			$message = __( 'نتیجهٔ ارسال پیامک آزمایشی تأیید نشد. تنظیمات درگاه و گزارش‌های پینوا را بررسی کنید.', 'pinova' );
 			$success = false;
 			Logger::instance()->audit(
 				'error',

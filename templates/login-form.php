@@ -13,7 +13,7 @@ $site_name             = get_bloginfo( 'name' );
 $home_url              = home_url( '/' );
 $privacy_url           = get_privacy_policy_url();
 $logo_url              = Pinova::get_option( 'design.logo', admin_url( 'images/wordpress-logo.svg' ) );
-$account_asset_version = PINOVA_VERSION . '.5';
+$account_asset_version = PINOVA_VERSION . '.7';
 
 ?>
 <!DOCTYPE html>
@@ -89,12 +89,17 @@ $account_asset_version = PINOVA_VERSION . '.5';
 			<div
 				pinova-cloak
 				pinova-show="status.message"
-				pinova-text="status.message"
 				pinova-bind:class="`pinova-auth-status is-${status.tone}`"
 				role="status"
 				aria-live="polite"
 				aria-atomic="true"
-			></div>
+			>
+				<div pinova-text="status.message" dir="auto"></div>
+				<div class="pinova-auth-reference" pinova-show="status.reference">
+					<span>کد پیگیری برای پشتیبانی:</span>
+					<bdi dir="ltr" pinova-text="status.reference"></bdi>
+				</div>
+			</div>
 
 			<template pinova-if="stepName === 'authenticate'">
 				<form id="authenticate" class="pinova-auth-form" pinova-on:submit.prevent="submit()" novalidate>
@@ -283,6 +288,6 @@ $account_asset_version = PINOVA_VERSION . '.5';
 	</div>
 </noscript>
 
-<script src="<?php echo esc_url( PINOVA_URL . 'assets/js/global.js?ver=' . PINOVA_VERSION ); ?>"></script>
+<script src="<?php echo esc_url( PINOVA_URL . 'assets/js/global.js?ver=' . $account_asset_version ); ?>"></script>
 </body>
 </html>

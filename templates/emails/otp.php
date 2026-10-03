@@ -42,7 +42,7 @@
 							</table>
 
 							<p style="margin:0 0 18px 0;font-size:14px;">
-								این کد تا {{expires_in_minutes}} دقیقه آینده معتبر خواهد بود. {{purpose_instruction}}
+								اعتبار این کد از زمان درخواست شروع می‌شود. اگر مهلت صفحهٔ درخواست تمام شده است، کد جدید بگیرید. {{purpose_instruction}}
 							</p>
 
 							<p style="margin:0 0 18px 0;font-size:14px;">

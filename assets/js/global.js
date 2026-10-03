@@ -62,7 +62,7 @@ function pinovaGetQueryParam(key) {
     return urlParams.get(key);
 }
 
-const PINOVA_API_GENERIC_ERROR = 'در پردازش درخواست خطایی رخ داده است!';
+const PINOVA_API_GENERIC_ERROR = 'پاسخ معتبری از سرور دریافت نشد. کمی بعد دوباره تلاش کنید.';
 
 function pinovaApiGetHeader(response, name) {
     if (!response.headers || typeof response.headers.get !== 'function') {
@@ -159,8 +159,9 @@ function pinovaApiNormalizeResponse(response, responseData) {
     }
 
     if (result.success === false) {
+        result.userMessage = pinovaApiSafeMessage(result.message) || PINOVA_API_GENERIC_ERROR;
         result.message = pinovaApiWithReference(
-            pinovaApiSafeMessage(result.message) || PINOVA_API_GENERIC_ERROR,
+            result.userMessage,
             http.correlationId
         );
     }
@@ -247,6 +248,8 @@ async function pinovaApiRequest(url, options = {}) {
         // Only a received server header may create a user-facing reference.
         if (serverCorrelationId && err && typeof err === 'object') {
             err.pinovaMessage = message;
+            err.pinovaUserMessage = PINOVA_API_GENERIC_ERROR;
+            err.pinovaCorrelationId = serverCorrelationId;
         }
         console.error('Pinova API request failed.');
         if (notifyOnError && pinovaNotyf) {

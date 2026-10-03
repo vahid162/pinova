@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pinova\Tests\Integration;
 
+use Carbon\Carbon;
 use Pinova\Install;
 use Pinova\Models\OTP;
 use Pinova\Services\ChannelService;
@@ -51,6 +52,7 @@ final class EmailPurposeIntegrationTest extends WP_UnitTestCase {
 					'code'       => '1234',
 					'type'       => $purpose,
 					'channels'   => [ 'email' => false ],
+					'expires_at' => Carbon::now()->addSeconds( 20 ),
 				]
 			);
 
@@ -66,6 +68,8 @@ final class EmailPurposeIntegrationTest extends WP_UnitTestCase {
 		self::assertStringContainsString( $expected_instruction, $captured['message'] ?? '' );
 		self::assertStringNotContainsString( $unexpected_copy, $captured['message'] ?? '' );
 		self::assertStringNotContainsString( '{{purpose_', $captured['message'] ?? '' );
+		self::assertStringContainsString( 'اعتبار این کد از زمان درخواست شروع می‌شود.', $captured['message'] ?? '' );
+		self::assertStringNotContainsString( 'دقیقه آینده', $captured['message'] ?? '' );
 	}
 
 	/**

@@ -110,6 +110,8 @@ jobs:
           retention-days: 7
       - name: Recreate npm dependencies from package-lock.json
         run: npm ci --ignore-scripts
+      - name: Verify the installed development cache security patch
+        run: node tools/verify-http-cache-patch.mjs
       - name: Audit locked npm dependencies
         run: npm audit --audit-level=low
 

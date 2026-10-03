@@ -43,18 +43,19 @@
     const request = async (action, data) => {
       transport = new AbortController();
       const timeout = setTimeout(() => transport?.abort(), 20000);
+      let reference = '';
       try {
         const response = await fetch(root.dataset.endpoint + action, {
           method: 'POST', credentials: 'same-origin', signal: transport.signal,
           headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': root.dataset.nonce },
           body: JSON.stringify(data),
         });
+        const correlation = response.headers.get('X-Pinova-Correlation-ID');
+        reference = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(correlation || '') ? `\nکد پیگیری برای پشتیبانی:\n\u2066${correlation}\u2069` : '';
         const body = await response.json();
         if (!body || typeof body !== 'object') throw new Error();
         if (!response.ok || body.success !== true) {
-          const correlation = response.headers.get('X-Pinova-Correlation-ID');
-          const reference = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(correlation || '') ? ` (کد پیگیری: ${correlation})` : '';
-          const error = new Error((typeof body.message === 'string' ? body.message : 'امکان پردازش درخواست وجود ندارد.') + reference);
+          const error = new Error((typeof body.message === 'string' ? body.message : 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید.') + reference);
           error.serverResponse = true;
           error.retryAfter = Number(response.headers.get('Retry-After'));
           error.invalidCode = response.status === 401 && action === 'verify';
@@ -65,7 +66,7 @@
         return body;
       } catch (error) {
         if (error.serverResponse) throw error;
-        throw new Error('ارتباط با سرور برقرار نشد. دوباره تلاش کنید.');
+        throw new Error('پاسخ معتبری از سرور دریافت نشد. اتصال اینترنت را بررسی کنید و کمی بعد دوباره تلاش کنید.' + reference);
       } finally {
         clearTimeout(timeout);
         transport = null;

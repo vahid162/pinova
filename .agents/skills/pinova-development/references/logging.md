@@ -38,6 +38,8 @@ Retention defaults to 14 days, is clamped to 1–90 days, and is deleted in boun
 
 ## Privacy and context allowlist
 
+Queue timing permits nonnegative integer `queue_delay_seconds` and `remaining_seconds`. The former includes provider processing until record creation is logged, so it is not a precise cron-only latency measurement. `otp.queued` is emitted only when the encrypted payload is first stored; retries retaining that payload do not duplicate it. It uses fixed-slot EventThrottle sampling keyed by source and opaque flow, with one event per slot and 100 site-wide per 15 minutes, so public decoy requests cannot amplify logs without bound. Sampling or logger failure never blocks issuance; missing queue events are not proof that scheduling failed. A valid signed flow with no matching record is retained in the failure event, but invalid/expired tokens never supply log metadata. `token_expired` distinguishes authenticated expiry from malformed/signature-invalid tokens without parsing exception messages. Public failure responses remain uniform.
+
 Context is deny-by-default. `SafeContext` accepts only documented numeric IDs/counts, short code-like values, bounded code lists, approved keyed fingerprints, and exception class/code. It discards unknown keys. Historical event and correlation columns are also untrusted: the administrator viewer, incident export, and WordPress privacy export show only catalogued event codes and canonical WordPress-generated UUIDv4 request correlation IDs. Unknown events become `logging.unknown_event`; malformed or legacy-shaped correlation values become empty. This preserves ordinary support correlation while refusing syntax-valid secrets in historical columns. A deliberately UUIDv4-shaped historical secret cannot be distinguished from a generated ID by shape alone and remains a residual risk until rows have verifiable provenance.
 
 `changed_keys` accepts at most 20 names from the first-party settings field allowlist; it never contains values. Only strict 32-character lowercase hexadecimal `flow_id` values pass `SafeContext`, and `Logger` moves them into the dedicated column before JSON persistence. Packaged `build_commit` (40 lowercase hexadecimal characters), `package_identity` (`pinova-release-zip`), and an optional validated `release_tag` are trusted package metadata, not arbitrary `SafeContext` input. Source checkouts carry only `package_identity=source`.
@@ -79,7 +81,8 @@ Adding a context key requires all of:
 | `logging.cleared` | warning | An administrator manually cleared existing records |
 | `logging.incident_exported` | notice | An authorized administrator generated a bounded incident export; logs actor ID, count, scope, and result, never export content |
 | `settings.updated` | notice | An authorized persisted Pinova settings change; logs actor ID, first-party changed key names, section, and success only |
-| `otp.created` | info | OTP record was created and at least one channel succeeded |
+| `otp.queued` | info | An encrypted delivery payload was first queued; contains only the flow and remaining deadline, never account classification or delivery claims |
+| `otp.created` | info | OTP record was created and at least one channel succeeded; queued delivery includes total elapsed time since the signed request and remaining lifetime |
 | `otp.delivery_failed` | error | No usable OTP delivery completed |
 | `otp.channel_send_failed` | warning | One configured channel threw or failed |
 | `otp.verify_failed` | notice/warning | Verification failed because the token, record, code, purpose, state, block, or IP was invalid; IP mismatch is warning |
@@ -140,3 +143,5 @@ The administrator viewer and bounded incident export accept an exact flow-ID fil
 - packaging: production ZIP includes `psr/log` and runtime logger classes but excludes tests and agent documentation.
 
 Pre-consumption OTP policy rejections use the existing `otp.verify_failed` event with bounded reason `policy_rejected`. They do not issue a password-reset key or claim successful verification. Public responses remain generic; the event never includes policy configuration, raw identifiers, or token contents.
+
+When automatic WordPress cron is disabled, the Logs page explains that an external runner must execute at least once per minute for the 180-second OTP deadline. Pinova does not override `DISABLE_WP_CRON` or change server cron. Queue scheduling is not proof of dispatch or receipt; compare `otp.queued` and `otp.created` by their dedicated flow columns. Absence of creation alone does not identify a scheduler defect, because decoy/policy-denied requests are deliberately queued too.

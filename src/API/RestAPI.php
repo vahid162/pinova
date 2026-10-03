@@ -15,6 +15,10 @@ abstract class RestAPI {
 
 	abstract public function register_routes();
 
+	protected static function otp_failure_message(): string {
+		return __( 'تأیید کد انجام نشد. آخرین کد دریافتی را بررسی کنید. اگر مشکل ادامه داشت، پس از پایان شمارش معکوس کد جدید بگیرید.', 'pinova' );
+	}
+
 	/** Attach the request reference even when WordPress rejects before our callback. */
 	public static function correlation_header( \WP_HTTP_Response $response, \WP_REST_Server $server, WP_REST_Request $request ): \WP_HTTP_Response {
 		// WordPress matches REST routes case-insensitively.

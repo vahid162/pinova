@@ -149,8 +149,10 @@ try {
         page.on('request', request => { if (request.url().includes('/pinova/mobile/verify')) submissions += 1; });
         const rejected = page.waitForResponse(response => response.url().includes('/pinova/mobile/verify') && response.request().method() === 'POST');
         await form.locator('input[name="code"]').fill('000000');
-        expect((await rejected).status()).toBe(401);
-        await expect(form.locator('.pinova-mobile-status')).toContainText('معتبر نمی');
+        const rejectedResponse = await rejected;
+        expect(rejectedResponse.status()).toBe(401);
+        await expect(form.locator('.pinova-mobile-status')).toContainText('تأیید کد انجام نشد.');
+        await expect(form.locator('.pinova-mobile-status')).toContainText(rejectedResponse.headers()['x-pinova-correlation-id']);
         await expect(form.locator('h2')).toBeFocused();
         const verified = page.waitForResponse(response => response.url().includes('/pinova/mobile/verify') && response.request().method() === 'POST');
         await form.locator('input[name="code"]').fill('۴۸۲۱۶۳');

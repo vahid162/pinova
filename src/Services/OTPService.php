@@ -4,6 +4,7 @@ namespace Pinova\Services;
 
 use Carbon\Carbon;
 use Exception;
+use Pinova\Exceptions\ExpiredTokenException;
 use Pinova\Exceptions\BlockedException;
 use Pinova\Exceptions\SendOTPException;
 use Pinova\Helpers\IP;
@@ -75,6 +76,8 @@ class OTPService {
 				'identifier_type'        => $identifier->get_type(),
 				'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
 				'channels'               => $successful_channels,
+				'queue_delay_seconds'    => null === $state_deadline ? null : max( 0, JWT::DEFAULT_TTL - ( $state_deadline - time() ) ),
+				'remaining_seconds'      => null === $state_deadline ? null : max( 0, $state_deadline - time() ),
 			]
 		);
 
@@ -204,7 +207,7 @@ class OTPService {
 			EventThrottle::log(
 				'otp.verify_failed',
 				[
-					'reason'    => 'invalid_token',
+					'reason'    => $e instanceof ExpiredTokenException ? 'token_expired' : 'invalid_token',
 					'exception' => $e,
 				]
 			);
@@ -233,6 +236,7 @@ class OTPService {
 				'otp.verify_failed',
 				[
 					'reason'    => 'record_not_found',
+					'flow_id'   => $payload['flow_id'] ?? null,
 					'exception' => $e,
 				]
 			);

@@ -8,7 +8,7 @@ Before installing dependencies or running quality tools, determine whether the c
 
 ## Quality suite
 
-Git source checkouts intentionally exclude `vendor/`. On a resource-isolated development host, recreate PHP dependencies with `composer install --no-interaction --prefer-dist` from `composer.lock`. Use the Node and npm versions declared by `package.json`, and recreate JavaScript dependencies with `npm ci --ignore-scripts` from `package-lock.json`. Do not use `npm install` in CI or release preparation. Run lightweight gates before pushing:
+Git source checkouts intentionally exclude `vendor/`. On a resource-isolated development host, recreate PHP dependencies with `composer install --no-interaction --prefer-dist` from `composer.lock`. Use the Node and npm versions declared by `package.json`, and recreate JavaScript dependencies with `npm ci --ignore-scripts` from `package-lock.json`. Do not use `npm install` in validation CI or release preparation. A separately scoped dependency-maintenance runner may use `npm install --package-lock-only --ignore-scripts` to prepare a reviewed lockfile; the result must then pass `npm ci --ignore-scripts`, the normal audit threshold and the full suite before merge. Run lightweight gates before pushing:
 
 ```bash
 php tools/check-ai-governance.php
@@ -24,7 +24,9 @@ composer phpcs
 composer audit
 ```
 
-GitHub Actions additionally runs WordPress Plugin Check against a disposable site, `actionlint` against every workflow, ShellCheck against repository shell scripts, Dependency Review on pull requests, and a supply-chain job that validates and audits the lockfiles. The supply-chain job must compare the production-only Composer install with `composer.lock`, reject unapproved production licenses, and use `npm ci --ignore-scripts`. The readme/metadata gate keeps the WordPress readme below 10 KiB, aligns stable version, license, WordPress, and PHP requirements with the plugin header and Composer metadata, and requires `readme.txt` to carry only the current release notes while `CHANGELOG.md` retains full history.
+GitHub Actions additionally runs WordPress Plugin Check against a disposable site, `actionlint` against every workflow, ShellCheck against repository shell scripts, Dependency Review on pull requests, and a supply-chain job that validates and audits the lockfiles. Private development-only dependency patches must retain the original license, pin an exact reviewed upstream source commit and source hash, explain their unofficial version, and prove installed bytes plus the security regression before audit. They may not suppress advisories or lower audit thresholds and must remain excluded from the release package.
+
+The supply-chain job must compare the production-only Composer install with `composer.lock`, reject unapproved production licenses, and use `npm ci --ignore-scripts`. The readme/metadata gate keeps the WordPress readme below 10 KiB, aligns stable version, license, WordPress, and PHP requirements with the plugin header and Composer metadata, and requires `readme.txt` to carry only the current release notes while `CHANGELOG.md` retains full history.
 
 Run only the subset that is safe on the current host. GitHub Actions remains authoritative for the complete compatibility matrix.
 

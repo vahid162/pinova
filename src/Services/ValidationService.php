@@ -17,7 +17,7 @@ class ValidationService {
 		$identifier = new Identifier( $param );
 
 		if ( ! $identifier->is_valid() ) {
-			return new WP_Error( 'pinova_invalid_identifier', __( 'ایمیل، تلفن همراه یا نام کاربری معتبر نمی‌باشد.', 'pinova' ) );
+			return new WP_Error( 'pinova_invalid_identifier', __( 'شمارهٔ موبایل، ایمیل یا نام کاربری را با فرمت درست وارد کنید.', 'pinova' ) );
 		}
 
 		$is_blocked = FirewallService::is_blocked( $identifier->get_value() );
@@ -36,7 +36,7 @@ class ValidationService {
 		$mobile = new Identifier( $param );
 
 		if ( ! $mobile->is_mobile() ) {
-			return new WP_Error( 'pinova_invalid_mobile', __( 'تلفن همراه معتبر نمی‌باشد.', 'pinova' ) );
+			return new WP_Error( 'pinova_invalid_mobile', __( 'شمارهٔ موبایل را کامل و با فرمت درست وارد کنید.', 'pinova' ) );
 		}
 
 		$is_blocked = FirewallService::is_blocked( $mobile->get_value() );
@@ -60,7 +60,7 @@ class ValidationService {
 		$email = new Identifier( $param );
 
 		if ( ! $email->is_email() ) {
-			return new WP_Error( 'pinova_invalid_email', __( 'ایمیل معتبر نمی‌باشد.', 'pinova' ) );
+			return new WP_Error( 'pinova_invalid_email', __( 'نشانی ایمیل را با فرمت درست وارد کنید.', 'pinova' ) );
 		}
 
 		$is_blocked = FirewallService::is_blocked( $email->get_value() );
@@ -89,7 +89,7 @@ class ValidationService {
 		$code = Number::en( $param );
 
 		if ( ! preg_match( '/^[0-9]+$/', $code ) ) {
-			return new WP_Error( 'pinova_invalid_code', __( 'کد وارد شده نامعتبر است.', 'pinova' ) );
+			return new WP_Error( 'pinova_invalid_code', __( 'کد تأیید را فقط با رقم وارد کنید.', 'pinova' ) );
 		}
 
 		$request->set_param( 'code', $code );

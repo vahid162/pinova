@@ -130,7 +130,7 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 		}
 
 		self::assertSame( 200, $response->get_status() );
-		self::assertSame( 'کد تأیید با موفقیت پیامک شد.', $response->get_data()['message'] );
+		self::assertSame( 'سرویس پیامک درخواست ارسال آزمایشی را پذیرفت. دریافت پیامک را روی گوشی مقصد بررسی کنید.', $response->get_data()['message'] );
 		$this->assert_latest_event( 'admin.sms_test_succeeded', 'notice' );
 	}
 
@@ -151,7 +151,7 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 		}
 
 		self::assertSame( 503, $response->get_status() );
-		self::assertSame( 'خطای داخلی هنگام ارسال پیامک رخ داده است.', $response->get_data()['message'] );
+		self::assertSame( 'نتیجهٔ ارسال پیامک آزمایشی تأیید نشد. تنظیمات درگاه و گزارش‌های پینوا را بررسی کنید.', $response->get_data()['message'] );
 		$this->assert_latest_event( 'admin.sms_test_failed', 'error' );
 	}
 
@@ -190,7 +190,7 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 		}
 
 		self::assertSame( 503, $response->get_status() );
-		self::assertSame( 'خطای داخلی هنگام ارسال پیامک رخ داده است.', $response->get_data()['message'] );
+		self::assertSame( 'نتیجهٔ ارسال پیامک آزمایشی تأیید نشد. تنظیمات درگاه و گزارش‌های پینوا را بررسی کنید.', $response->get_data()['message'] );
 		self::assertStringNotContainsString( 'secret-token', wp_json_encode( $response->get_data() ) );
 		$this->assert_latest_event( 'admin.sms_test_failed', 'error' );
 	}

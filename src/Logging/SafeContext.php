@@ -21,6 +21,8 @@ final class SafeContext {
 		'count',
 		'duration_ms',
 		'http_status',
+		'queue_delay_seconds',
+		'remaining_seconds',
 		'resource_id',
 		'retry_after',
 		'user_id',

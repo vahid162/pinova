@@ -85,7 +85,7 @@ final class MobileVerificationAPI extends RestAPI {
 			return self::response( false, __( 'تعداد درخواست‌ها بیش از حد مجاز است. کمی بعد دوباره تلاش کنید.', 'pinova' ), [], 429, [ 'Retry-After' => $exception->get_retry_after() ] );
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
-			return self::response( false, __( 'امکان پردازش درخواست وجود ندارد.', 'pinova' ), [], 503 );
+			return self::response( false, __( 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید. اگر مشکل ادامه داشت، کد پیگیری را به پشتیبانی بدهید.', 'pinova' ), [], 503 );
 		}
 	}
 
@@ -97,7 +97,7 @@ final class MobileVerificationAPI extends RestAPI {
 		$code = $request->get_param( 'code' );
 		if ( ! is_string( $jwt ) || strlen( $jwt ) > 2048 || ! is_string( $code )
 			|| ! preg_match( '/\A[0-9]{' . OTPService::code_length() . '}\z/', $code ) || null !== $request->get_param( 'flow_id' ) ) {
-			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ), [], 400 );
+			return self::response( false, self::otp_failure_message(), [], 400 );
 		}
 		try {
 			MobileVerificationService::with_lock(
@@ -109,7 +109,7 @@ final class MobileVerificationAPI extends RestAPI {
 			return self::response( true, __( 'تلفن همراه این حساب تأیید شد.', 'pinova' ) );
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
-			return self::response( false, __( 'کد تأیید معتبر نمی‌باشد. شماره یا کد را بررسی کنید.', 'pinova' ), [], 401 );
+			return self::response( false, self::otp_failure_message(), [], 401 );
 		}
 	}
 }

@@ -10,3 +10,5 @@
 .pinova-mobile-proof label{font-weight:bold}
 .pinova-mobile-proof a{color:#713300;text-decoration:underline}
 .pinova-mobile-proof .pinova-mobile-status{overflow-wrap:anywhere}
+
+.pinova-mobile-proof .pinova-mobile-status { white-space: pre-line; overflow-wrap: anywhere; }

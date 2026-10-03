@@ -3,6 +3,7 @@
 namespace Pinova\Helpers;
 
 use Exception;
+use Pinova\Exceptions\ExpiredTokenException;
 
 class JWT {
 
@@ -78,7 +79,7 @@ class JWT {
 		}
 
 		if ( isset( $payload['exp'] ) && time() >= $payload['exp'] ) {
-			throw new Exception( 'Token expired' );
+			throw new ExpiredTokenException( 'Token expired' );
 		}
 
 		return $payload;

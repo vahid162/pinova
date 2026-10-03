@@ -342,3 +342,25 @@ test('server-backed transport failures retain their safe reference in the live s
     assert.equal(state.status.message, error.pinovaMessage);
     assert.doesNotMatch(state.status.message, /private parser detail/);
 });
+
+
+test('separates the safe explanation from the support reference and clears stale references', () => {
+    const { state } = harness();
+    const reference = '4b3e97ad-6845-4d82-a381-237af90cb5f1';
+    state.handleRequestFailure({
+        success: false,
+        message: `تأیید انجام نشد. کد پیگیری: ${reference}`,
+        userMessage: 'تأیید انجام نشد.',
+        http: { status: 401, correlationId: reference },
+    });
+    assert.equal(state.status.message, 'تأیید انجام نشد.');
+    assert.equal(state.status.reference, reference);
+    state.handleRequestException(new Error('private transport detail'));
+    assert.equal(state.status.reference, '');
+    assert.doesNotMatch(state.status.message, /private transport detail/);
+    state.handleRequestException({ pinovaUserMessage: 'پاسخ معتبر دریافت نشد.', pinovaCorrelationId: reference });
+    assert.equal(state.status.message, 'پاسخ معتبر دریافت نشد.');
+    assert.equal(state.status.reference, reference);
+    state.clearStatus();
+    assert.equal(state.status.reference, '');
+});

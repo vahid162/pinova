@@ -13,6 +13,10 @@ final class EventThrottle {
 	private const SOURCE_SLOTS   = 1024;
 
 	private const EVENTS = [
+		'otp.queued'                    => [
+			'scope' => 'log_otp_queued',
+			'level' => 'info',
+		],
 		'auth.request_failed'           => [
 			'scope' => 'log_auth_request_failed',
 			'level' => 'error',
@@ -53,6 +57,8 @@ final class EventThrottle {
 			$source = '' === $ip ? 'unknown' : inet_pton( $ip );
 			if ( 'otp.verify_failed' === $event ) {
 				$source .= '|' . (string) ( $context['reason'] ?? 'unknown' );
+			} elseif ( 'otp.queued' === $event ) {
+				$source .= '|' . (string) ( $context['flow_id'] ?? '' );
 			}
 			$hash = hash_hmac( 'sha256', (string) $source, wp_salt( 'auth' ) );
 			$slot = hexdec( substr( $hash, 0, 4 ) ) % self::SOURCE_SLOTS;
@@ -64,7 +70,7 @@ final class EventThrottle {
 				return;
 			}
 
-			$event_context = 'otp.verify_failed' === $event
+			$event_context = in_array( $event, [ 'otp.verify_failed', 'otp.queued' ], true )
 				? $context
 				: $context + [ 'ip_fingerprint' => $logger->fingerprint( $ip, 'ip' ) ];
 			$logger->log( $level, $event, $event_context );

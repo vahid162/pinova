@@ -6,6 +6,7 @@ use Pinova\Exceptions\RateLimitException;
 use Pinova\Exceptions\RateLimitUnavailableException;
 use Pinova\Helpers\JWT;
 use Pinova\Logging\Logger;
+use Pinova\Logging\EventThrottle;
 
 class RateLimitService {
 	private const OTP_CLAIM_LEASE = 60;
@@ -179,6 +180,15 @@ class RateLimitService {
 		);
 		if ( false === $queued ) {
 			throw new RateLimitUnavailableException( 'The OTP delivery queue could not be written.' );
+		}
+		if ( 1 === $queued ) {
+			EventThrottle::log(
+				'otp.queued',
+				[
+					'flow_id'           => $row->scope,
+					'remaining_seconds' => max( 0, (int) strtotime( $row->reset_at . ' UTC' ) - time() ),
+				]
+			);
 		}
 
 		return [ $row->scope, (int) strtotime( $row->reset_at . ' UTC' ) ];

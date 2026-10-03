@@ -137,6 +137,15 @@ async function openCheckout(page) {
     await page.waitForFunction(() => Boolean(
         document.querySelector('#pinovaLoginModal')?._x_dataStack?.[0],
     ));
+
+    // The fixture's added-to-cart notice receives delayed native WooCommerce focus.
+    // Finish that initial page behavior before measuring Pinova's modal focus return.
+    const initialNotice = page.locator(
+        '.woocommerce-message[role="alert"], .woocommerce-error[role="alert"], .wc-block-components-notice-banner[role="alert"]',
+    ).first();
+    if (await initialNotice.count()) {
+        await expect(initialNotice).toBeFocused();
+    }
 }
 
 test.beforeAll(() => {
@@ -603,12 +612,31 @@ test('checkout modal remains dismissible while an authentication request is pend
         await expect(closeButton).toBeVisible();
         await expect(closeButton).toBeEnabled();
 
+        await expect.poll(() => page.evaluate(() => {
+            const state = document.querySelector('#pinovaLoginModal')._x_dataStack[0];
+            return state.returnFocusElement === document.querySelector('.showlogin');
+        })).toBe(true);
+
         // WooCommerce may replace the login-toggle fragment while the request is pending.
         // Focus restoration must resolve the live replacement rather than the detached opener.
         await opener.evaluate(element => element.replaceWith(element.cloneNode(true)));
         await closeButton.click();
 
         await expect(modalViewport).toBeHidden();
+        await expect.poll(() => page.evaluate(() => {
+            const opener = document.querySelector('.showlogin');
+            const modal = document.querySelector('#pinovaLoginModal');
+            const state = modal._x_dataStack[0];
+            return {
+                focused: document.activeElement === opener,
+                active: document.activeElement?.tagName,
+                activeClass: document.activeElement?.className,
+                inert: Boolean(opener?.closest('[inert]')),
+                hidden: Boolean(opener?.closest('[aria-hidden="true"]')),
+                modalOpen: state.modalIsOpen,
+                focusSequence: state.focusSequence,
+            };
+        }), { message: 'Closing a busy modal must restore focus to the replacement checkout link' }).toMatchObject({ focused: true, inert: false, hidden: false, modalOpen: false });
         await expect(opener).toBeFocused();
 
         const closedState = await page.evaluate(() => {

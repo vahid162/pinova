@@ -8,7 +8,7 @@ const globalScript = await readFile(
     'utf8'
 );
 
-const GENERIC_ERROR = 'در پردازش درخواست خطایی رخ داده است!';
+const GENERIC_ERROR = 'پاسخ معتبری از سرور دریافت نشد. کمی بعد دوباره تلاش کنید.';
 
 function response(status, payload, extraHeaders = {}) {
     const headers = new Map(
@@ -259,6 +259,7 @@ for (const status of [200, 400, 401, 403, 429, 500, 503]) {
         const result = await request('pinova/user/authenticate');
 
         assert.equal(result.message, `خطا کد پیگیری: ${reference}`);
+        assert.equal(result.userMessage, 'خطا');
         assert.equal(result.http.correlationId, reference);
     });
 }
@@ -271,6 +272,8 @@ test('retains the server reference when the response body cannot be parsed', asy
 
     await assert.rejects(() => request('pinova/user/authenticate'), error => {
         assert.equal(error.pinovaMessage, `${GENERIC_ERROR} کد پیگیری: ${reference}`);
+        assert.equal(error.pinovaUserMessage, GENERIC_ERROR);
+        assert.equal(error.pinovaCorrelationId, reference);
         return true;
     });
     assert.deepEqual(notifications, [{ type: 'error', message: `${GENERIC_ERROR} کد پیگیری: ${reference}` }]);

@@ -33,6 +33,7 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		parent::set_up();
 		global $wpdb;
 		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', 'log_otp_verify_failed' ) );
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE `scope` = %s', $wpdb->prefix . 'pinova_rate_limits', 'log_otp_queued' ) );
 
 		$this->had_remote_address = isset( $_SERVER['REMOTE_ADDR'] );
 		$this->remote_address     = (string) ( $_SERVER['REMOTE_ADDR'] ?? '' );
@@ -567,6 +568,50 @@ final class OTPPurposeIntegrationTest extends WP_UnitTestCase {
 		self::assertGreaterThanOrEqual( 120, $context['queue_delay_seconds'] );
 		self::assertLessThanOrEqual( 60, $context['remaining_seconds'] );
 		self::assertStringNotContainsString( $email, $created['context'] );
+	}
+
+	/** @dataProvider unavailable_queue_log_modes */
+	public function test_failed_queue_observation_does_not_block_issuance( bool $throw ): void {
+		global $wpdb;
+		self::factory()->user->create( [ 'user_email' => 'queue-log-failure@example.test', 'role' => 'subscriber' ] );
+		$before = $wpdb->suppress_errors;
+		$fail = static function ( string $query ) use ( $throw ): string {
+			if ( str_contains( $query, 'INSERT IGNORE INTO' ) && str_contains( $query, 'log_otp_queued' ) ) {
+				if ( $throw ) {
+					throw new \RuntimeException( 'private-queue-log-failure' );
+				}
+				return 'INSERT INTO pinova_test_missing_throttle_table (invalid_column) VALUES (1)';
+			}
+			return $query;
+		};
+		add_filter( 'query', $fail );
+		try {
+			$request = new WP_REST_Request( 'POST', '/pinova/user/authenticate' );
+			$request->set_param( 'identifier', new Identifier( 'queue-log-failure@example.test' ) );
+			$request->set_param( 'forget', false );
+			$request->set_param( 'force_otp', true );
+			$response = ( new UserAPI() )->authenticate( $request );
+		} finally {
+			remove_filter( 'query', $fail );
+		}
+		self::assertSame( $before, $wpdb->suppress_errors );
+		self::assertSame( 200, $response->get_status() );
+		$flow = JWT::decode( $response->get_data()['data']['jwt'] )['flow_id'];
+		self::assertSame( 0, LogRepository::paginate( 1, 10, '', [ 'event' => 'otp.queued' ] )['total'] );
+		self::assertNotFalse( wp_next_scheduled( 'pinova_otp_delivery', [ $flow ] ) );
+		$claim = \Pinova\Services\RateLimitService::claim_queued_otp( $flow );
+		self::assertNotNull( $claim );
+		try {
+			self::assertSame( 'queue-log-failure@example.test', $claim['identifier'] );
+			self::assertSame( 'authenticate', $claim['purpose'] );
+		} finally {
+			\Pinova\Services\RateLimitService::finish_queued_otp( $flow, $claim['claim_token'] );
+		}
+	}
+
+	/** @return array<string, array{bool}> */
+	public function unavailable_queue_log_modes(): array {
+		return [ 'false query result' => [ false ], 'throwable query' => [ true ] ];
 	}
 
 	private function assert_verification_log( OTP $otp, string $event, array $extra = [] ): void {

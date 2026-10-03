@@ -23,7 +23,7 @@ final class EventThrottleIntegrationTest extends WP_UnitTestCase {
 		global $wpdb;
 		$this->original_server = $_SERVER;
 		$_SERVER['REMOTE_ADDR'] = '192.0.2.80';
-		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded', 'log_otp_verify_failed', 'log_auth_request_failed')" );
+		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded', 'log_otp_verify_failed', 'log_auth_request_failed', 'log_otp_queued')" );
 		LogRepository::delete_all();
 		update_option( 'pinova_logging', [ 'minimum_level' => 'info', 'diagnostic_until' => 0 ] );
 	}
@@ -84,6 +84,24 @@ final class EventThrottleIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 100, LogRepository::paginate()['total'] );
 		$site_key = hash( 'sha256', 'pinova:event-throttle:log_reset_succeeded:site' );
 		self::assertSame( '100', $wpdb->get_var( $wpdb->prepare( "SELECT hits FROM {$wpdb->prefix}pinova_rate_limits WHERE bucket_key = %s", $site_key ) ) );
+	}
+
+	public function test_distinct_queued_flows_share_the_site_budget(): void {
+		global $wpdb;
+		$slots = [];
+		for ( $index = 1; count( $slots ) < 105; ++$index ) {
+			$flow = md5( 'queued-flow-' . $index );
+			$source = inet_pton( $_SERVER['REMOTE_ADDR'] ) . '|' . $flow;
+			$slot = hexdec( substr( hash_hmac( 'sha256', $source, wp_salt( 'auth' ) ), 0, 4 ) ) % 1024;
+			if ( isset( $slots[ $slot ] ) ) {
+				continue;
+			}
+			$slots[ $slot ] = true;
+			EventThrottle::log( 'otp.queued', [ 'flow_id' => $flow, 'remaining_seconds' => 180 ] );
+		}
+		self::assertSame( 100, LogRepository::paginate()['total'] );
+		$site_key = hash( 'sha256', 'pinova:event-throttle:log_otp_queued:site' );
+		self::assertSame( '100', $wpdb->get_var( $wpdb->prepare( 'SELECT `hits` FROM %i WHERE `bucket_key` = %s', $wpdb->prefix . 'pinova_rate_limits', $site_key ) ) );
 	}
 
 	public function test_fixed_source_slot_collisions_only_suppress_observation(): void {

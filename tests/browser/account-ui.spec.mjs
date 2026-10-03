@@ -588,6 +588,26 @@ test('checkout modal remains dismissible while an authentication request is pend
 
     await openCheckout(page);
     await installThemeButtonPosition(page, 'after-account');
+    await page.evaluate(() => {
+        window.__pinovaFocusEvents = [];
+        const record = type => {
+            const opener = document.querySelector('.showlogin');
+            window.__pinovaFocusEvents.push({
+                type, time: performance.now(), documentFocused: document.hasFocus(),
+                visibility: document.visibilityState, active: document.activeElement?.tagName,
+                activeClass: document.activeElement?.className, activeIsLiveOpener: document.activeElement === opener,
+                openerConnected: Boolean(opener?.isConnected), openerCount: document.querySelectorAll('.showlogin').length,
+            });
+            if (window.__pinovaFocusEvents.length > 100) window.__pinovaFocusEvents.shift();
+        };
+        record('installed');
+        for (const event of ['focusin', 'focusout', 'visibilitychange']) document.addEventListener(event, () => record(event), true);
+        for (const event of ['focus', 'blur']) window.addEventListener(event, () => record('window:' + event));
+        new MutationObserver(records => {
+            if (records.some(record => [...record.removedNodes].some(node => node.nodeType === 1 && (node.matches?.('.showlogin') || node.querySelector?.('.showlogin'))))) record('opener-removed');
+        }).observe(document.body, { childList: true, subtree: true });
+    });
+
     const opener = page.locator('.showlogin').first();
     const modalViewport = page.locator('.pinova-auth-modal__viewport');
     const modalMain = page.locator('#pinovaLoginModal .pinova-auth-main');
@@ -620,6 +640,8 @@ test('checkout modal remains dismissible while an authentication request is pend
             const state = modal._x_dataStack[0];
             return {
                 focused: document.activeElement === opener,
+                documentFocused: document.hasFocus(),
+                visibility: document.visibilityState,
                 active: document.activeElement?.tagName,
                 activeClass: document.activeElement?.className,
                 inert: Boolean(opener?.closest('[inert]')),
@@ -647,6 +669,12 @@ test('checkout modal remains dismissible while an authentication request is pend
         expect(closedState.bodyOverflow).toBe('');
         expect(closedState.inertBackgroundCount).toBe(0);
     } finally {
+        console.log('PINOVA_FOCUS_DIAGNOSTICS', JSON.stringify(await page.evaluate(() => ({
+            documentFocused: document.hasFocus(), visibility: document.visibilityState,
+            active: document.activeElement?.tagName, activeClass: document.activeElement?.className,
+            focused: document.activeElement === document.querySelector('.showlogin'),
+            events: window.__pinovaFocusEvents,
+        }))));
         releaseRequest();
     }
 });

@@ -52,7 +52,8 @@ test('ordinary stale reuse and explicit cookie-sharing opt-ins still work', () =
 
 test('the private patch remains a pinned override excluded from runtime dependencies', () => {
     const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url)));
-    assert.equal(packageJson.overrides['http-cache-semantics'], 'file:tools/vendor/http-cache-semantics');
+    assert.equal(packageJson.overrides['http-cache-semantics'], '$http-cache-semantics');
+    assert.equal(packageJson.devDependencies['http-cache-semantics'], 'file:tools/vendor/http-cache-semantics');
     assert.equal(packageJson.dependencies, undefined);
     const metadata = JSON.parse(readFileSync(new URL('../../tools/vendor/http-cache-semantics/package.json', import.meta.url)));
     assert.equal(metadata.version, '4.2.1-pinova.1');

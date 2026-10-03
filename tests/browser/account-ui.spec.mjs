@@ -137,6 +137,14 @@ async function openCheckout(page) {
     await page.waitForFunction(() => Boolean(
         document.querySelector('#pinovaLoginModal')?._x_dataStack?.[0],
     ));
+
+    // Finish native delayed WooCommerce notice focus before measuring modal focus return.
+    const initialNotice = page.locator(
+        '.woocommerce-message[role="alert"], .woocommerce-error[role="alert"], .wc-block-components-notice-banner[role="alert"]',
+    ).first();
+    if (await initialNotice.count()) {
+        await expect(initialNotice).toBeFocused();
+    }
 }
 
 test.beforeAll(() => {

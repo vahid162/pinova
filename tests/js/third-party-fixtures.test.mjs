@@ -17,16 +17,16 @@ function fixture(action) {
     writeFileSync(configPath, JSON.stringify({ config: { WP_DEBUG: true }, plugins: ['.'] }));
     const execute = (script, overrides = {}) => spawnSync(process.execPath, [script], {
         cwd: directory,
-        env: { ...process.env, PINOVA_TEST_PROFILE: '', WP_VERSION: '', WC_VERSION: '', ...overrides },
+        env: { ...process.env, PINOVA_TEST_PROFILE: '', PINOVA_TEST_PLUGIN_SET: '', WP_VERSION: '', WC_VERSION: '', ...overrides },
         encoding: 'utf8', timeout: 10_000,
     });
-    const installFixtures = () => {
-        for (const plugin of baseline.plugins) {
+    const installFixtures = (manifest = baseline) => {
+        for (const plugin of manifest.plugins) {
             const target = path.join(directory, '.build', 'third-party', plugin.slug);
             mkdirSync(target, { recursive: true });
             writeFileSync(path.join(target, plugin.main), '<?php // Synthetic fixture; never loaded.');
         }
-        writeFileSync(path.join(directory, '.build', 'third-party', 'verified.json'), JSON.stringify(baseline));
+        writeFileSync(path.join(directory, '.build', 'third-party', 'verified.json'), JSON.stringify(manifest));
     };
     try { action({ directory, configPath, execute, installFixtures, config: () => JSON.parse(readFileSync(configPath, 'utf8')) }); }
     finally { rmSync(directory, { recursive: true, force: true }); }
@@ -73,7 +73,7 @@ test('third-party profile requires exact baseline and prepared fixtures', () => 
         assert.equal(config().core, 'WordPress/WordPress#7.1.2');
         assert.deepEqual(config().plugins, [
             'https://downloads.wordpress.org/plugin/woocommerce.11.1.2.zip',
-            './.build/third-party/wpforo', './.build/third-party/dokan-lite', '.',
+            './.build/third-party/wpforo', './.build/third-party/dokan-lite', './.build/third-party/elementor', '.',
         ]);
         assert.deepEqual(config().config, {
             WP_DEBUG: true, PINOVA_THIRD_PARTY_BASELINE: true, DISABLE_WP_CRON: true, WP_ENVIRONMENT_TYPE: 'local',
@@ -91,6 +91,24 @@ test('switching to default removes third-party fixtures and isolation markers fr
         assert.deepEqual(config().config, { WP_DEBUG: true });
         assert.deepEqual(config().plugins, ['.', 'https://downloads.wordpress.org/plugin/woocommerce.10.9.4.zip']);
     });
+});
+
+test('current and mixed plugin sets require their exact verified receipt', () => {
+    for (const pluginSet of ['current', 'current-wpforo', 'current-dokan']) {
+        fixture(({ execute, installFixtures }) => {
+            const manifest = structuredClone(baseline);
+            manifest.plugins = manifest.plugins.map(plugin => {
+                const selected = pluginSet === 'current' ||
+                    (pluginSet === 'current-wpforo' && plugin.slug === 'wpforo') ||
+                    (pluginSet === 'current-dokan' && plugin.slug === 'dokan-lite');
+                return selected ? manifest.current_plugins.find(current => current.slug === plugin.slug) : plugin;
+            });
+            installFixtures(manifest);
+            assert.equal(execute(configure, { PINOVA_TEST_PROFILE: 'third-party', PINOVA_TEST_PLUGIN_SET: pluginSet }).status, 0);
+            assert.notEqual(execute(configure, { PINOVA_TEST_PROFILE: 'third-party', PINOVA_TEST_PLUGIN_SET: 'unrecognized' }).status, 0);
+            assert.notEqual(execute(configure, { PINOVA_TEST_PROFILE: 'third-party', PINOVA_TEST_PLUGIN_SET: 'baseline' }).status, 0);
+        });
+    }
 });
 
 test('a mismatched verification receipt cannot configure the third-party profile', () => {
@@ -163,7 +181,7 @@ test('preparation verifies every archive before extraction and cleans later fail
                 'slug=$(basename "$2" .zip)',
                 'mkdir -p "$4/$slug"',
                 '[ "$FAKE_MODE:$slug" != missing-entrypoint:dokan-lite ] || exit 0',
-                'case "$slug" in wpforo) main=wpforo.php ;; dokan-lite) main=dokan.php ;; pinova) main=pinova.php ;; esac',
+                'case "$slug" in wpforo) main=wpforo.php ;; dokan-lite) main=dokan.php ;; elementor) main=elementor.php ;; pinova) main=pinova.php ;; esac',
                 'printf synthetic > "$4/$slug/$main"',
                 '',
             ].join('\n'), { mode: 0o700 });

@@ -69,6 +69,12 @@ add_option('pinova_browser_saved_options', ['integrations' => get_option('pinova
 $registration = wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post_title' => 'Pinova browser vendor registration', 'post_content' => '[dokan-vendor-registration]']);
 if (!$registration || is_wp_error($registration)) { throw new Exception('Missing registration fixture page'); }
 update_option('pinova_browser_vendor_page', $registration);
+$widget_page = wp_insert_post(['post_type' => 'page', 'post_status' => 'publish', 'post_title' => 'Pinova browser recent topics']);
+if (!$widget_page || is_wp_error($widget_page)) { throw new Exception('Missing Elementor fixture page'); }
+update_post_meta($widget_page, '_elementor_edit_mode', 'builder');
+update_post_meta($widget_page, '_elementor_version', ELEMENTOR_VERSION);
+update_post_meta($widget_page, '_elementor_data', wp_slash(wp_json_encode([['id' => 'a123456', 'elType' => 'container', 'settings' => [], 'elements' => [['id' => 'b123456', 'elType' => 'widget', 'widgetType' => 'wp-widget-wpforo_recent_topics', 'settings' => ['wp' => ['boardid' => 0, 'title' => 'Pinova REST widget fixture', 'count' => 2]], 'elements' => []]]]])));
+update_option('pinova_browser_widget_page', $widget_page);
 `);
     const routes = readData(`echo 'PINOVA_BROWSER_DATA ' . wp_json_encode(['login' => wpforo_url('', 'login'), 'register' => wpforo_url('', 'register'), 'home' => wpforo_home_url(), 'migration' => wc_get_account_endpoint_url('account-migration'), 'dashboard' => dokan_get_navigation_url(), 'vendor_registration' => get_permalink(get_option('pinova_browser_vendor_page'))]);`);
     forumLogin = routes.login; forumRegister = routes.register; forumHome = routes.home;
@@ -101,7 +107,23 @@ if (is_array($saved)) {
 wp_unschedule_hook('pinova_otp_delivery');
 wp_delete_post((int)get_option('pinova_browser_vendor_page'), true);
 delete_option('pinova_browser_vendor_page');
+wp_delete_post((int)get_option('pinova_browser_widget_page'), true);
+delete_option('pinova_browser_widget_page');
 `);
+});
+
+test('RecentTopics renders through both REST URL forms with integration routing off and on', async ({ request }) => {
+    const id = readData(`echo 'PINOVA_BROWSER_DATA ' . wp_json_encode((int)get_option('pinova_browser_widget_page'));`);
+    for (const enabled of ['0', '1']) {
+        cli(`update_option('pinova_integrations', ['wpforo_enabled' => '${enabled}', 'dokan_enabled' => '${enabled}']);`);
+        for (const url of [`/?rest_route=/wp/v2/pages/${id}&_fields=content`, `/wp-json/wp/v2/pages/${id}?_fields=content`]) {
+            const response = await request.get(url);
+            expect(response.status()).toBe(200);
+            const body = await response.json();
+            expect(body.content.rendered).toContain('wpforo-widget-wrap');
+            expect(body.content.rendered).toContain('Pinova REST widget fixture');
+        }
+    }
 });
 
 for (const width of [390, 1280]) {

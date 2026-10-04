@@ -24,6 +24,7 @@ final class Load {
 			return;
 		}
 		self::$booted = true;
+		add_filter( 'rest_authentication_errors', [ self::class, 'rest_initialize' ], PHP_INT_MAX );
 		add_filter( 'wpforo_login_url', [ self::class, 'login_url' ] );
 		add_filter( 'wpforo_register_url', [ self::class, 'login_url' ] );
 		add_action( 'wpforo_core_inited', [ self::class, 'route' ], 0 );
@@ -48,6 +49,16 @@ final class Load {
 		add_action( 'wp_login', [ self::class, 'native_login_end' ], PHP_INT_MAX );
 		add_action( 'after_password_reset', [ self::class, 'native_reset_start' ], -PHP_INT_MAX );
 		add_action( 'after_password_reset', [ self::class, 'native_reset_end' ], PHP_INT_MAX );
+	}
+
+	/** wpForo recognizes pretty REST URLs but misses query-based REST dispatch. */
+	public static function rest_initialize( $result ) {
+		if ( ! is_wp_error( $result ) && wp_is_serving_rest_request() && function_exists( 'WPF' )
+			&& defined( 'WPFORO_VERSION' ) && IntegrationSettings::supports_version( 'wpforo', WPFORO_VERSION )
+			&& isset( WPF()->member ) && null === WPF()->topic ) {
+			WPF()->init();
+		}
+		return $result;
 	}
 
 	private static function available(): bool {
@@ -381,7 +392,7 @@ final class Load {
 
 	/** Runs before wpForo initializes an auth template, including its logged-in redirects. */
 	public static function route(): void {
-		if ( ! IntegrationSettings::enabled( 'wpforo' ) ) {
+		if ( ! IntegrationSettings::enabled( 'wpforo' ) || wp_is_serving_rest_request() ) {
 			return;
 		}
 		$path = untrailingslashit( (string) wp_parse_url( WPF()->current_url, PHP_URL_PATH ) );

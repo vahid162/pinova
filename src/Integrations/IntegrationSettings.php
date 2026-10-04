@@ -6,6 +6,15 @@ namespace Pinova\Integrations;
 final class IntegrationSettings {
 
 	public const OPTION = 'pinova_integrations';
+	private const VERSIONS = [
+		'wpforo' => [ '3.2.1', '3.2.2' ],
+		'dokan'  => [ '5.1.3', '5.2.1' ],
+	];
+
+	/** Exact characterized APIs; this is not a routing or account-approval decision. */
+	public static function supports_version( string $slug, string $version ): bool {
+		return in_array( $version, self::VERSIONS[ $slug ] ?? [], true );
+	}
 
 	/**
 	 * Drop unknown fields and fail closed on malformed checkbox values.
@@ -52,22 +61,19 @@ final class IntegrationSettings {
 	}
 
 	/**
-	 * Keep the initial compatibility boundary equal to the characterized profile.
+	 * Limit compatibility to the characterized dependency versions.
 	 *
 	 * @param array{woocommerce: string, wpforo: string, dokan: string, dokan_pro: bool} $versions Loaded dependencies.
 	 */
 	private static function dependency_status( string $slug, array $versions ): string {
-		$supported = [
-			'wpforo' => '3.2.1',
-			'dokan'  => '5.1.3',
-		];
-		if ( ! isset( $supported[ $slug ] ) ) {
+		if ( ! isset( self::VERSIONS[ $slug ] ) ) {
 			return 'unsupported';
 		}
 		if ( '' === $versions['woocommerce'] || '' === $versions[ $slug ] ) {
 			return 'missing';
 		}
-		if ( '11.1.2' !== $versions['woocommerce'] || $supported[ $slug ] !== $versions[ $slug ] || ( 'dokan' === $slug && $versions['dokan_pro'] ) ) {
+		if ( '11.1.2' !== $versions['woocommerce'] || ! self::supports_version( $slug, $versions[ $slug ] )
+			|| ( 'dokan' === $slug && ( $versions['dokan_pro'] || ( '' !== $versions['wpforo'] && ! self::supports_version( 'wpforo', $versions['wpforo'] ) ) ) ) ) {
 			return 'unsupported';
 		}
 		return 'supported';
@@ -83,7 +89,7 @@ final class IntegrationSettings {
 		];
 		$versions = self::versions();
 		$version  = $versions[ $slug ] ?? '';
-		$profile  = 'wpforo' === $slug ? 'wpForo 3.2.1' : 'Dokan Lite 5.1.3 بدون Dokan Pro';
+		$profile  = 'wpforo' === $slug ? 'wpForo 3.2.1 یا 3.2.2' : 'Dokan Lite 5.1.3 یا 5.2.1 بدون Dokan Pro؛ wpForo فعال نیز باید از نسخه‌های پشتیبانی‌شده باشد';
 		return $labels[ self::status( $slug ) ] . ' نسخهٔ جاری: ' . ( $version ?: '—' ) . '. ترکیب پشتیبانی‌شده: ' . $profile . '، WooCommerce 11.1.2.';
 	}
 }

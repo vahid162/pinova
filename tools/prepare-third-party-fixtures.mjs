@@ -8,6 +8,18 @@ if (process.env.PINOVA_TEST_PROFILE !== 'third-party') {
 }
 
 const baseline = JSON.parse(readFileSync(new URL('../tests/fixtures/third-party-baseline.json', import.meta.url), 'utf8'));
+const pluginSet = process.env.PINOVA_TEST_PLUGIN_SET || 'baseline';
+if (!['baseline', 'current', 'current-wpforo', 'current-dokan'].includes(pluginSet)) {
+    throw new Error(`Unknown third-party plugin set: ${pluginSet}`);
+}
+if (baseline && pluginSet !== 'baseline') {
+    baseline.plugins = baseline.plugins.map(plugin => {
+        const selected = pluginSet === 'current' ||
+            (pluginSet === 'current-wpforo' && plugin.slug === 'wpforo') ||
+            (pluginSet === 'current-dokan' && plugin.slug === 'dokan-lite');
+        return selected ? baseline.current_plugins.find(current => current.slug === plugin.slug) : plugin;
+    });
+}
 const archives = [...baseline.plugins, baseline.pinova_baseline];
 const build = path.resolve('.build');
 const destination = path.join(build, 'third-party');

@@ -156,7 +156,7 @@ final class Load {
 		if ( ! self::can_convert( self::$authorized ) ) {
 			self::unavailable();
 		}
-		if ( function_exists( 'WPF' ) && defined( 'WPFORO_VERSION' ) && '3.2.1' === WPFORO_VERSION
+		if ( function_exists( 'WPF' ) && defined( 'WPFORO_VERSION' ) && IntegrationSettings::supports_version( 'wpforo', WPFORO_VERSION )
 			&& [] === self::$role_hooks ) {
 			global $wp_filter;
 			$callback = 'wpforo_update_usergroup_on_role_change';

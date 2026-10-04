@@ -77,6 +77,7 @@ test('third-party profile requires exact baseline and prepared fixtures', () => 
         ]);
         assert.deepEqual(config().config, {
             WP_DEBUG: true, PINOVA_THIRD_PARTY_BASELINE: true, DISABLE_WP_CRON: true, WP_ENVIRONMENT_TYPE: 'local',
+            WP_MEMORY_LIMIT: '256M', WP_MAX_MEMORY_LIMIT: '512M',
         });
         rmSync(path.join(directory, '.build/third-party/dokan-lite/dokan.php'));
         assert.notEqual(execute(configure, env).status, 0);

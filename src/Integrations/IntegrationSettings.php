@@ -5,7 +5,7 @@ namespace Pinova\Integrations;
 /** Pinova-owned routing switches; pending-account guards must not depend on these. */
 final class IntegrationSettings {
 
-	public const OPTION = 'pinova_integrations';
+	public const OPTION    = 'pinova_integrations';
 	private const VERSIONS = [
 		'wpforo' => [ '3.2.1', '3.2.2' ],
 		'dokan'  => [ '5.1.3', '5.2.1' ],

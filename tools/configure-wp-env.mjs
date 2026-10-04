@@ -58,10 +58,14 @@ if (baseline) {
     config.config.PINOVA_THIRD_PARTY_BASELINE = true;
     config.config.DISABLE_WP_CRON = true;
     config.config.WP_ENVIRONMENT_TYPE = 'local';
+    config.config.WP_MEMORY_LIMIT = '256M';
+    config.config.WP_MAX_MEMORY_LIMIT = '512M';
 } else if (config.config.PINOVA_THIRD_PARTY_BASELINE === true) {
     delete config.config.PINOVA_THIRD_PARTY_BASELINE;
     delete config.config.DISABLE_WP_CRON;
     delete config.config.WP_ENVIRONMENT_TYPE;
+    delete config.config.WP_MEMORY_LIMIT;
+    delete config.config.WP_MAX_MEMORY_LIMIT;
 }
 
 writeFileSync('.wp-env.json', `${JSON.stringify(config, null, 2)}\n`);

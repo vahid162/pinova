@@ -29,7 +29,7 @@ $check = static function ( bool $condition, string $label ): void {
 	}
 };
 
-$baseline = json_decode( file_get_contents( dirname( __DIR__ ) . '/fixtures/third-party-baseline.json' ), true, 512, JSON_THROW_ON_ERROR );
+$baseline = json_decode( file_get_contents( dirname( __DIR__, 2 ) . '/.build/third-party/verified.json' ), true, 512, JSON_THROW_ON_ERROR );
 $plugin_versions = array_column( $baseline['plugins'], 'version', 'slug' );
 $check( defined( 'WPFORO_VERSION' ) && $plugin_versions['wpforo'] === WPFORO_VERSION, 'wpForo fixture version' );
 $check( defined( 'DOKAN_PLUGIN_VERSION' ) && $plugin_versions['dokan-lite'] === DOKAN_PLUGIN_VERSION, 'Dokan fixture version' );

@@ -7,7 +7,7 @@ WP_CLI::add_wp_hook( 'muplugins_loaded', static function (): void {
 		throw new RuntimeException( 'Archived plugin requires the disposable loopback fixture.' );
 	}
 	$root = dirname( __DIR__, 2 );
-	$fixture = json_decode( file_get_contents( $root . '/tests/fixtures/third-party-baseline.json' ), true, 512, JSON_THROW_ON_ERROR );
+	$fixture = json_decode( file_get_contents( $root . '/.build/third-party/verified.json' ), true, 512, JSON_THROW_ON_ERROR );
 	$path = $root . '/.build/third-party/pinova';
 	$build = json_decode( file_get_contents( $path . '/build-info.json' ), true, 512, JSON_THROW_ON_ERROR );
 	if ( ( $build['build_commit'] ?? '' ) !== $fixture['pinova_baseline']['commit'] ) {

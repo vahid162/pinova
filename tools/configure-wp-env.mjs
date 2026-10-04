@@ -9,6 +9,18 @@ const config = JSON.parse(readFileSync('.wp-env.json', 'utf8'));
 const baseline = profile === 'third-party'
     ? JSON.parse(readFileSync(new URL('../tests/fixtures/third-party-baseline.json', import.meta.url), 'utf8'))
     : null;
+const pluginSet = process.env.PINOVA_TEST_PLUGIN_SET || 'baseline';
+if (!['baseline', 'current', 'current-wpforo', 'current-dokan'].includes(pluginSet)) {
+    throw new Error(`Unknown third-party plugin set: ${pluginSet}`);
+}
+if (baseline && pluginSet !== 'baseline') {
+    baseline.plugins = baseline.plugins.map(plugin => {
+        const selected = pluginSet === 'current' ||
+            (pluginSet === 'current-wpforo' && plugin.slug === 'wpforo') ||
+            (pluginSet === 'current-dokan' && plugin.slug === 'dokan-lite');
+        return selected ? baseline.current_plugins.find(current => current.slug === plugin.slug) : plugin;
+    });
+}
 const wordpress = process.env.WP_VERSION || baseline?.wordpress || '6.8';
 const woocommerce = process.env.WC_VERSION || baseline?.woocommerce || '10.9.4';
 
@@ -46,10 +58,14 @@ if (baseline) {
     config.config.PINOVA_THIRD_PARTY_BASELINE = true;
     config.config.DISABLE_WP_CRON = true;
     config.config.WP_ENVIRONMENT_TYPE = 'local';
+    config.config.WP_MEMORY_LIMIT = '256M';
+    config.config.WP_MAX_MEMORY_LIMIT = '512M';
 } else if (config.config.PINOVA_THIRD_PARTY_BASELINE === true) {
     delete config.config.PINOVA_THIRD_PARTY_BASELINE;
     delete config.config.DISABLE_WP_CRON;
     delete config.config.WP_ENVIRONMENT_TYPE;
+    delete config.config.WP_MEMORY_LIMIT;
+    delete config.config.WP_MAX_MEMORY_LIMIT;
 }
 
 writeFileSync('.wp-env.json', `${JSON.stringify(config, null, 2)}\n`);

@@ -18,6 +18,11 @@ plugin_directory="$(basename "$repo_root")"
 result_file="$(mktemp)"
 trap 'rm -f -- "$result_file"' EXIT
 
+npx --no-install wp-env run cli \
+	--env-cwd="wp-content/plugins/$plugin_directory" \
+	wp eval-file --use-include tests/Integration/wpforo-rest.php | tee "$result_file"
+grep -Fxq 'PINOVA_REST_COMPLETE' "$result_file"
+
 for phase in seed upgrade rollback cleanup; do
 	options=()
 	if [[ "$phase" == seed || "$phase" == rollback ]]; then

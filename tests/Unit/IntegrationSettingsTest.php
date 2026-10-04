@@ -35,6 +35,15 @@ final class IntegrationSettingsTest extends TestCase {
 		self::assertSame( 'unsupported', $method->invoke( null, 'dokan', array_replace( $versions, [ 'dokan_pro' => true ] ) ) );
 		self::assertSame( 'supported', $method->invoke( null, 'wpforo', array_replace( $versions, [ 'dokan_pro' => true ] ) ) );
 		self::assertSame( 'unsupported', $method->invoke( null, 'unrecognized', $versions ) );
+		foreach ( [ '3.2.1', '3.2.2' ] as $forum ) {
+			foreach ( [ '5.1.3', '5.2.1' ] as $dokan ) {
+				$current = array_replace( $versions, [ 'wpforo' => $forum, 'dokan' => $dokan ] );
+				self::assertSame( 'supported', $method->invoke( null, 'wpforo', $current ) );
+				self::assertSame( 'supported', $method->invoke( null, 'dokan', $current ) );
+			}
+		}
+		self::assertSame( 'unsupported', $method->invoke( null, 'dokan', array_replace( $versions, [ 'wpforo' => '999.0' ] ) ) );
+		self::assertSame( 'supported', $method->invoke( null, 'dokan', array_replace( $versions, [ 'wpforo' => '' ] ) ) );
 	}
 
 	public function test_audit_retains_only_integration_key_names(): void {

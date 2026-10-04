@@ -25,7 +25,9 @@ $check = static function ( bool $condition, string $label ): void {
 		throw new RuntimeException( 'wpForo regression failed: ' . $label );
 	}
 };
-$check( defined( 'WPFORO_VERSION' ) && '3.2.1' === WPFORO_VERSION && defined( 'WC_VERSION' ) && '11.1.2' === WC_VERSION, 'exact characterized plugins' );
+$manifest = json_decode( file_get_contents( dirname( __DIR__, 2 ) . '/.build/third-party/verified.json' ), true, 512, JSON_THROW_ON_ERROR );
+$versions = array_column( $manifest['plugins'], 'version', 'slug' );
+$check( defined( 'WPFORO_VERSION' ) && $versions['wpforo'] === WPFORO_VERSION && defined( 'WC_VERSION' ) && '11.1.2' === WC_VERSION, 'exact characterized plugins' );
 $check( WPF()->is_installed(), 'real wpForo installation' );
 add_filter( 'pre_wp_mail', '__return_true' );
 add_filter( 'pre_http_request', static fn() => new WP_Error( 'pinova_fixture_no_network' ) );

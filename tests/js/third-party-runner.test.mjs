@@ -15,6 +15,10 @@ function fixture(action) {
     writeFileSync(path.join(temporary, 'npx'), [
         '#!/bin/bash',
         'touch "$FAKE_CALLS"',
+        'if [[ " $* " == *" wp pinova otp run "* ]]; then',
+        '    if [[ "${FAKE_NO_MARKER:-}" != 1 ]]; then printf "Success: Processed 0 scheduled Pinova OTP jobs; consult delivery logs for provider results.\\n"; fi',
+        '    exit "${FAKE_EXIT:-0}"',
+        'fi',
         '[[ " $* " == *" wp eval-file --use-include "* ]] || exit 9',
         'if [[ "${FAKE_NO_MARKER:-}" != 1 ]]; then',
         '    marker=PINOVA_BASELINE_COMPLETE',

@@ -35,8 +35,25 @@ final class Load {
 		add_filter( 'woocommerce_registration_errors', [ self::class, 'registration_errors' ], PHP_INT_MAX );
 		add_filter( 'woocommerce_new_customer_data', [ self::class, 'customer_data' ], PHP_INT_MAX );
 		add_filter( 'pre_do_shortcode_tag', [ self::class, 'shortcode' ], 10, 2 );
+		add_filter( 'woocommerce_reports_get_order_report_query', [ self::class, 'report_query' ], 11 );
 		add_action( 'wp_ajax_nopriv_dokan_get_login_form', [ self::class, 'ajax_form' ], 0 );
 		add_action( 'wp_ajax_nopriv_dokan_login_user', [ self::class, 'ajax_login' ], 0 );
+	}
+
+	/** Preserve Dokan's native parent-order restriction on WooCommerce HPOS reports. */
+	public static function report_query( array $query ): array {
+		global $wpdb;
+		if ( ! defined( 'DOKAN_PLUGIN_VERSION' ) || ! IntegrationSettings::supports_version( 'dokan', DOKAN_PLUGIN_VERSION )
+			|| ! isset( $query['from'], $query['where'] ) || ! is_string( $query['where'] )
+			|| 'FROM ' . $wpdb->prefix . 'wc_orders AS orders' !== $query['from'] ) {
+			return $query;
+		}
+		// Skip SQL literals; only the legacy column token changes, never its value or operator.
+		$pattern = <<<'SQL'
+~'(?:[^'\\]|\\.|'')*'(*SKIP)(*F)|"(?:[^"\\]|\\.|"")*"(*SKIP)(*F)|\bposts\.post_parent\b~
+SQL;
+		$query['where'] = preg_replace( $pattern, 'orders.parent_order_id', $query['where'] ) ?? $query['where'];
+		return $query;
 	}
 
 	/** Previously owned pending attempts cannot escape by disabling routing. */

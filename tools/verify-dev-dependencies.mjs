@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { vulnerabilityCheck } from '@simple-git/argv-parser';
 import yaml from 'js-yaml';
+
+const require = createRequire(import.meta.url);
+assert.equal(typeof require('simple-git'), 'function');
 
 // wp-env needs YAML dump and ordinary Git operations, never unsafe editors.
 for (const key of ['VISUAL', 'visual', 'Visual']) {

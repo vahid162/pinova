@@ -11,7 +11,9 @@
     "http-cache-semantics": "$http-cache-semantics",
     "@wordpress/env": {
       "js-yaml": "4.3.2",
-      "simple-git": "4.0.2"
+      "simple-git": {
+        "@simple-git/argv-parser": "2.0.1"
+      }
     }
   },
   "scripts": {

@@ -147,8 +147,12 @@ final class SecurityRegressionTest extends WP_UnitTestCase {
 		$fail_mail = static fn(): bool => false;
 		add_filter( 'pre_wp_mail', $fail_mail );
 		try {
+			$existing_started  = time();
 			$existing_response = $api->authenticate( $existing );
+			$existing_finished = time();
+			$missing_started   = time();
 			$missing_response  = $api->authenticate( $missing );
+			$missing_finished  = time();
 			$this->run_queued_otp( JWT::decode( $existing_response->get_data()['data']['jwt'] )['flow_id'] );
 			$this->run_queued_otp( JWT::decode( $missing_response->get_data()['data']['jwt'] )['flow_id'] );
 		} finally {
@@ -156,14 +160,24 @@ final class SecurityRegressionTest extends WP_UnitTestCase {
 		}
 
 		self::assertSame( $missing_response->get_status(), $existing_response->get_status() );
-		$normalize = static function ( array $data ): array {
+		$normalize = static function ( array $data, int $started, int $finished ): array {
 			$claims = JWT::decode( $data['data']['jwt'] );
 			self::assertSame( [ 'flow_id', 'exp' ], array_keys( $claims ) );
 			self::assertMatchesRegularExpression( '/\A[a-f0-9]{32}\z/', $claims['flow_id'] );
+			self::assertIsInt( $data['data']['ttl'] );
+			self::assertLessThanOrEqual( JWT::DEFAULT_TTL, $data['data']['ttl'] );
+			self::assertGreaterThanOrEqual( JWT::DEFAULT_TTL - ( $finished - $started ) - 1, $data['data']['ttl'] );
+			self::assertGreaterThanOrEqual( $started, $claims['exp'] - $data['data']['ttl'] );
+			self::assertLessThanOrEqual( $finished, $claims['exp'] - $data['data']['ttl'] );
+			// The countdown may cross a second boundary between the two fresh requests.
+			$data['data']['ttl'] = '[countdown]';
 			$data['data']['jwt'] = array_keys( $claims );
 			return $data;
 		};
-		self::assertSame( $normalize( $missing_response->get_data() ), $normalize( $existing_response->get_data() ) );
+		self::assertSame(
+			$normalize( $missing_response->get_data(), $missing_started, $missing_finished ),
+			$normalize( $existing_response->get_data(), $existing_started, $existing_finished )
+		);
 	}
 
 	public function test_repeated_otp_initiations_reuse_a_flow_for_real_and_decoy_accounts(): void {

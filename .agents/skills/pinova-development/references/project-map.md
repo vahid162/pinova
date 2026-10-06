@@ -121,6 +121,9 @@ Only the identified wpForo login/reset callbacks are scoped out, retaining their
 
 ### Dokan conversion boundary
 
+The native `woocommerce_reports_get_order_report_query` compatibility filter preserves Dokan's parent-order predicate when WooCommerce emits its exact HPOS `wc_orders AS orders` FROM clause. Rewrite only the unquoted legacy `posts.post_parent` column in WHERE, preserving SQL literals, values/operators and every other clause. Leave legacy CPT and unrecognized query shapes unchanged; report compatibility is independent of login-routing switches.
+
+
 `Integrations/Dokan/Load` routes supported Dokan authentication surfaces through Pinova and protects the native `BecomeAVendor` handler before it changes roles. Public signup never grants seller access. Mobile proof establishes eligibility to submit the existing account's conversion; Dokan retains required fields, selling activation, and product-review policy. A pending onboarding marker remains guarded when routing is disabled or dependencies become unsupported. Preserve forum primary/secondary groups by scoping only wpForo's identified role-sync callback around the authorized account's seller transition; forward unrelated events and restore the original callback priority/accepted arguments on completion or failure. Do not rely on a second group-restoration write after conversion. Refresh member RAM cache and current permissions, and leave forum approval/status and email confirmation unchanged. Store contact numbers are not identity aliases.
 
 ### REST rendering and exact dependency versions

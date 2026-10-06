@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import './wp-env-git-compat.cjs';
 import { vulnerabilityCheck } from '@simple-git/argv-parser';
 import yaml from 'js-yaml';
 

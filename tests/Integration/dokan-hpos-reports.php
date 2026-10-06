@@ -15,6 +15,7 @@ $check = static function ( bool $condition, string $label ): void {
 		throw new RuntimeException( 'Dokan report regression failed: ' . $label );
 	}
 };
+$_SERVER['REMOTE_ADDR'] = '192.0.2.160';
 add_filter( 'pre_wp_mail', '__return_true' );
 add_filter( 'pre_http_request', static fn() => new WP_Error( 'pinova_fixture_no_network' ) );
 global $wpdb;
@@ -36,13 +37,13 @@ $check( Load::report_query( $legacy ) === $legacy, 'legacy order store remains u
 $malformed = [ 'from' => $from, 'where' => [] ];
 $check( Load::report_query( $malformed ) === $malformed, 'upstream malformed clauses remain unchanged' );
 require_once WC_ABSPATH . 'includes/admin/reports/class-wc-admin-report.php';
-$native = [ ( new ReflectionClass( \WeDevs\Dokan\Admin\Hooks::class ) )->newInstanceWithoutConstructor(), 'admin_order_reports_remove_parents' ];
+$native = [ ( new ReflectionClass( \WeDevs\Dokan\Order\Admin\Hooks::class ) )->newInstanceWithoutConstructor(), 'admin_order_reports_remove_parents' ];
 add_filter( 'woocommerce_reports_get_order_report_query', $native );
 $orders = [];
 $previous = $wpdb->suppress_errors();
 try {
 	foreach ( [ 0, 0, null ] as $parent ) {
-		$order = wc_create_order( [ 'status' => 'pending', 'parent' => $parent ?? $orders[0]->get_id() ] );
+		$order = wc_create_order( [ 'status' => 'pending', 'created_via' => 'pinova-dokan-report-fixture', 'parent' => $parent ?? $orders[0]->get_id() ] );
 		$check( $order instanceof WC_Order, 'native synthetic order creation' );
 		$orders[] = $order;
 	}

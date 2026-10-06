@@ -49,7 +49,7 @@ final class Load {
 			return $query;
 		}
 		// Skip SQL literals; only the legacy column token changes, never its value or operator.
-		$pattern = <<<'SQL'
+		$pattern        = <<<'SQL'
 ~'(?:[^'\\]|\\.|'')*'(*SKIP)(*F)|"(?:[^"\\]|\\.|"")*"(*SKIP)(*F)|\bposts\.post_parent\b~
 SQL;
 		$query['where'] = preg_replace( $pattern, 'orders.parent_order_id', $query['where'] ) ?? $query['where'];

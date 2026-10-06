@@ -204,13 +204,22 @@ class RateLimitService {
 		try {
 			$expired = $wpdb->get_var(
 				$wpdb->prepare(
-					"SELECT 1 FROM %i WHERE `scope` = %s AND `reset_at` <= UTC_TIMESTAMP() AND `payload` IS NOT NULL AND `payload` NOT IN ('delivered', 'processing') AND `payload` NOT LIKE 'processing:%%' AND `payload` NOT LIKE 'cancelled:%%' LIMIT 1",
+					"SELECT 1 FROM %i WHERE `scope` = %s AND `reset_at` <= UTC_TIMESTAMP() AND `payload` IS NOT NULL AND `payload` NOT IN ('delivered', 'processing') AND `payload` NOT LIKE %s AND `payload` NOT LIKE %s LIMIT 1",
 					$wpdb->prefix . 'pinova_rate_limits',
-					$flow_id
+					$flow_id,
+					'processing:%',
+					'cancelled:%'
 				)
 			);
 			if ( ! $wpdb->last_error && null !== $expired ) {
-				EventThrottle::log( 'auth.request_failed', [ 'operation' => 'queued_otp', 'reason' => 'queue_expired', 'flow_id' => $flow_id ] );
+				EventThrottle::log(
+					'auth.request_failed',
+					[
+						'operation' => 'queued_otp',
+						'reason'    => 'queue_expired',
+						'flow_id'   => $flow_id,
+					]
+				);
 			}
 		} catch ( \Throwable $throwable ) {
 			unset( $throwable );

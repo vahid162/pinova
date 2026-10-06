@@ -8,7 +8,11 @@
   },
   "overrides": {
     "express": "4.22.3",
-    "http-cache-semantics": "$http-cache-semantics"
+    "http-cache-semantics": "$http-cache-semantics",
+    "@wordpress/env": {
+      "js-yaml": "4.3.2",
+      "simple-git": "4.0.2"
+    }
   },
   "scripts": {
     "env:configure": "node tools/configure-wp-env.mjs",

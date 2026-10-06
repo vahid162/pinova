@@ -42,6 +42,20 @@ class Pinova {
 	}
 
 	public function init_hooks() {
+		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( '\\WP_CLI' ) ) {
+			\WP_CLI::add_command(
+				'pinova otp run',
+				static function (): void {
+					try {
+						$count = OTPService::run_due_delivery();
+					} catch ( \Throwable $throwable ) {
+						unset( $throwable );
+						\WP_CLI::error( 'The Pinova OTP batch could not be processed.' );
+					}
+					\WP_CLI::success( sprintf( 'Processed %d scheduled Pinova OTP jobs; consult delivery logs for provider results.', $count ) );
+				}
+			);
+		}
 		add_action( 'init', [ $this, 'register_rewrite_rules' ] );
 		add_action( 'init', [ $this, 'schedule_cleanup' ] );
 		add_action( 'pinova_rate_limit_cleanup', [ RateLimitService::class, 'cleanup' ] );

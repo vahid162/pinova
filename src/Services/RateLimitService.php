@@ -194,6 +194,31 @@ class RateLimitService {
 		return [ $row->scope, (int) strtotime( $row->reset_at . ' UTC' ) ];
 	}
 
+	/** Observe only an expired, unclaimed encrypted payload; never decode its identity. */
+	public static function observe_expired_queued_otp( string $flow_id ): void {
+		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) {
+			return;
+		}
+		global $wpdb;
+		$suppressed = $wpdb->suppress_errors();
+		try {
+			$expired = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT 1 FROM %i WHERE `scope` = %s AND `reset_at` <= UTC_TIMESTAMP() AND `payload` IS NOT NULL AND `payload` NOT IN ('delivered', 'processing') AND `payload` NOT LIKE 'processing:%%' AND `payload` NOT LIKE 'cancelled:%%' LIMIT 1",
+					$wpdb->prefix . 'pinova_rate_limits',
+					$flow_id
+				)
+			);
+			if ( ! $wpdb->last_error && null !== $expired ) {
+				EventThrottle::log( 'auth.request_failed', [ 'operation' => 'queued_otp', 'reason' => 'queue_expired', 'flow_id' => $flow_id ] );
+			}
+		} catch ( \Throwable $throwable ) {
+			unset( $throwable );
+		} finally {
+			$wpdb->suppress_errors( $suppressed );
+		}
+	}
+
 	/** @return array{identifier:string,purpose:string,ip:string,deadline:int,claim_token:string,user_id:?int}|null */
 	public static function claim_queued_otp( string $flow_id ): ?array {
 		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) || ! self::lock_queued_otp( $flow_id ) ) {

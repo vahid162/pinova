@@ -18,6 +18,37 @@ use Throwable;
 
 class OTPService {
 
+	/** Run only a small due OTP batch; the host runner must hold its site cron lock. */
+	public static function run_due_delivery(): int {
+		if ( is_multisite() ) {
+			throw new Exception( 'The OTP runner requires a single-site installation.' );
+		}
+		$ready = wp_get_ready_cron_jobs();
+		if ( ! is_array( $ready ) || false === has_action( 'pinova_otp_delivery', [ self::class, 'deliver_queued' ] ) ) {
+			throw new Exception( 'The OTP queue or delivery callback is unavailable.' );
+		}
+		$started = microtime( true );
+		$count   = 0;
+		foreach ( $ready as $timestamp => $hooks ) {
+			foreach ( $hooks['pinova_otp_delivery'] ?? [] as $event ) {
+				if ( 3 <= $count || 20 <= microtime( true ) - $started ) {
+					return $count;
+				}
+				$args = $event['args'] ?? [];
+				if ( false !== ( $event['schedule'] ?? null ) || ! is_array( $args ) || 1 !== count( $args )
+					|| ! is_string( $args[0] ?? null ) || ! preg_match( '/\A[a-f0-9]{32}\z/', $args[0] ) ) {
+					continue;
+				}
+				if ( true !== wp_unschedule_event( (int) $timestamp, 'pinova_otp_delivery', $args, true ) ) {
+					throw new Exception( 'The due OTP event could not be unscheduled.' );
+				}
+				do_action_ref_array( 'pinova_otp_delivery', $args );
+				++$count;
+			}
+		}
+		return $count;
+	}
+
 	/**
 	 * @throws Exception
 	 */
@@ -95,6 +126,7 @@ class OTPService {
 		try {
 			$queued = RateLimitService::claim_queued_otp( $flow_id );
 			if ( null === $queued || $queued['deadline'] <= time() ) {
+				RateLimitService::observe_expired_queued_otp( $flow_id );
 				return;
 			}
 

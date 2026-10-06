@@ -18,6 +18,9 @@ plugin_directory="$(basename "$repo_root")"
 result_file="$(mktemp)"
 trap 'rm -f -- "$result_file"' EXIT
 
+npx --no-install wp-env run cli wp pinova otp run | tee "$result_file"
+grep -Fq 'Processed 0 scheduled Pinova OTP jobs; consult delivery logs for provider results.' "$result_file"
+
 npx --no-install wp-env run cli \
 	--env-cwd="wp-content/plugins/$plugin_directory" \
 	wp eval-file --use-include tests/Integration/wpforo-rest.php | tee "$result_file"

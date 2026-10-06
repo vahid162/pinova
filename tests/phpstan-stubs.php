@@ -12,6 +12,12 @@ namespace {
 	const DB_CHARSET = 'utf8mb4';
 	define( 'DB_COLLATE', (string) getenv( 'DB_COLLATE' ) );
 
+	class WP_CLI {
+		public static function add_command( string $name, callable $callback ): void {}
+		public static function success( string $message ): void {}
+		public static function error( string $message ): never { throw new \RuntimeException( 'CLI terminates on error.' ); }
+	}
+
 	class wpforo extends \stdClass {
 		public function init(): void {}
 	}

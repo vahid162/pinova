@@ -17,6 +17,10 @@ final class EventThrottle {
 			'scope' => 'log_otp_queued',
 			'level' => 'info',
 		],
+		'otp.delivery_skipped'          => [
+			'scope' => 'log_otp_delivery_skipped',
+			'level' => 'info',
+		],
 		'auth.request_failed'           => [
 			'scope' => 'log_auth_request_failed',
 			'level' => 'error',
@@ -57,7 +61,7 @@ final class EventThrottle {
 			$source = '' === $ip ? 'unknown' : inet_pton( $ip );
 			if ( 'otp.verify_failed' === $event ) {
 				$source .= '|' . (string) ( $context['reason'] ?? 'unknown' );
-			} elseif ( 'otp.queued' === $event ) {
+			} elseif ( in_array( $event, [ 'otp.queued', 'otp.delivery_skipped' ], true ) ) {
 				$source .= '|' . (string) ( $context['flow_id'] ?? '' );
 			}
 			$hash = hash_hmac( 'sha256', (string) $source, wp_salt( 'auth' ) );
@@ -70,7 +74,7 @@ final class EventThrottle {
 				return;
 			}
 
-			$event_context = in_array( $event, [ 'otp.verify_failed', 'otp.queued' ], true )
+			$event_context = in_array( $event, [ 'otp.verify_failed', 'otp.queued', 'otp.delivery_skipped' ], true )
 				? $context
 				: $context + [ 'ip_fingerprint' => $logger->fingerprint( $ip, 'ip' ) ];
 			$logger->log( $level, $event, $event_context );

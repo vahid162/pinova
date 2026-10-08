@@ -35,7 +35,7 @@ class Menu {
 				},
 			],
 			30 => [
-				'title'      => 'گزارش‌ها',
+				'title'      => 'لاگ‌ها و مشکلات',
 				'capability' => 'manage_options',
 				'slug'       => 'pinova-logs',
 				'callback'   => [ Logs::class, 'render' ],

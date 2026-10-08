@@ -20,7 +20,7 @@ if (baseline && pluginSet !== 'baseline') {
         return selected ? baseline.current_plugins.find(current => current.slug === plugin.slug) : plugin;
     });
 }
-const archives = [...baseline.plugins, baseline.pinova_baseline];
+const archives = [...baseline.plugins, ...baseline.callback_fixtures, baseline.pinova_baseline];
 const build = path.resolve('.build');
 const destination = path.join(build, 'third-party');
 if (existsSync(destination)) {

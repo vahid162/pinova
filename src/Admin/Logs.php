@@ -5,7 +5,6 @@ namespace Pinova\Admin;
 use Pinova\Logging\BuildMetadata;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
-use Pinova\Logging\SettingsAudit;
 use Pinova\Pinova;
 use Psr\Log\LogLevel;
 
@@ -17,6 +16,7 @@ final class Logs {
 	private const LEVELS           = [ 'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency' ];
 
 	public function __construct() {
+		new Issues();
 		add_action( 'admin_post_pinova_clear_logs', [ $this, 'clear' ] );
 		add_action( 'admin_post_pinova_export_incident', [ $this, 'export_incident' ] );
 	}
@@ -64,7 +64,7 @@ final class Logs {
 		);
 		?>
 		<div class="wrap">
-			<h1><?php esc_html_e( 'گزارش‌های پینوا', 'pinova' ); ?></h1>
+			<h1><?php esc_html_e( 'لاگ‌ها و مشکلات پینوا', 'pinova' ); ?></h1>
 			<?php if ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON ) : ?>
 				<div class="notice notice-warning inline"><p><?php esc_html_e( 'اجرای خودکار cron وردپرس غیرفعال است. برای ارسال به‌موقع کد، اجرای cron سرور را دست‌کم هر دقیقه تنظیم کنید. اعتبار کد از زمان درخواست شروع می‌شود؛ ثبت صف به‌تنهایی به معنی ارسال یا دریافت پیامک نیست.', 'pinova' ); ?></p></div>
 			<?php endif; ?>
@@ -80,7 +80,7 @@ final class Logs {
 				$states = [
 					'unavailable'     => __( 'در دسترس نیست', 'pinova' ),
 					'degraded'        => __( 'کاهش‌یافته', 'pinova' ),
-					'database-backed' => __( 'پایگاه‌داده فعال', 'pinova' ),
+					'database-backed' => __( 'خواندن پایگاه‌داده در دسترس است', 'pinova' ),
 					'fallback'        => __( 'مسیر جایگزین در این درخواست استفاده شد', 'pinova' ),
 				];
 				echo esc_html( $states[ $health['state'] ] ?? $states['unavailable'] );
@@ -103,6 +103,28 @@ final class Logs {
 				?>
 			</p>
 
+
+			<p><?php esc_html_e( 'این بررسی فقط خواندن را می‌سنجد و تضمین ثبت رخدادهای بعدی نیست. وضعیت نگهداری نیز در صورت خرابی پایگاه‌داده ممکن است ذخیره نشود.', 'pinova' ); ?></p>
+			<?php if ( $health['cleanup_overdue'] ) : ?>
+				<div class="notice notice-warning inline"><p><?php esc_html_e( 'زمان پاک‌سازی گذشته است؛ اجرای cron را بررسی کنید.', 'pinova' ); ?></p></div>
+			<?php endif; ?>
+			<p>
+				<?php
+				$cleanup_labels = [
+					'unknown' => __( 'هنوز نتیجهٔ پاک‌سازی ثبت نشده است', 'pinova' ),
+					'success' => __( 'آخرین پاک‌سازی موفق بود', 'pinova' ),
+					'failed'  => __( 'آخرین پاک‌سازی ناموفق بود؛ دسترسی پایگاه‌داده و زمان‌بندی را بررسی کنید', 'pinova' ),
+				];
+				echo esc_html( $cleanup_labels[ $health['cleanup']['status'] ] );
+				if ( $health['cleanup']['at'] > 0 ) {
+					echo ' — ' . esc_html( gmdate( 'Y-m-d H:i:s', $health['cleanup']['at'] ) ) . ' UTC';
+				}
+				?>
+			</p>
+			<?php if ( $health['fallback']['at'] > 0 ) : ?>
+				<p><?php esc_html_e( 'تلاش برای ثبت جایگزین مشاهده شده است؛ ذخیرهٔ قطعی در لاگ سرور تأیید نشده. لاگ‌های میزبان را در این زمان بررسی کنید:', 'pinova' ); ?> <?php echo esc_html( gmdate( 'Y-m-d H:i:s', $health['fallback']['at'] ) ); ?> UTC</p>
+			<?php endif; ?>
+
 			<?php if ( ! $table_exists ) : ?>
 				<div class="notice notice-error"><p><?php esc_html_e( 'جدول گزارش‌های پینوا در دسترس نیست. نصب یا ارتقای افزونه باید بررسی شود.', 'pinova' ); ?></p></div>
 			<?php elseif ( LogLevel::ERROR === $minimum_level && $diagnostic_until <= time() ) : ?>
@@ -114,6 +136,8 @@ final class Logs {
 				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'گزارش‌های قبلی پاک شدند.', 'pinova' ); ?></p></div>
 			<?php endif; ?>
 
+			<?php Issues::render(); ?>
+			<h2><?php esc_html_e( 'رخدادهای ثبت‌شده', 'pinova' ); ?></h2>
 			<form method="get">
 				<input type="hidden" name="page" value="pinova-logs" />
 				<label for="pinova-log-level"><?php esc_html_e( 'سطح:', 'pinova' ); ?></label>
@@ -160,7 +184,9 @@ final class Logs {
 					<th><?php esc_html_e( 'Context امن', 'pinova' ); ?></th>
 				</tr></thead>
 				<tbody>
-				<?php if ( empty( $data['rows'] ) ) : ?>
+				<?php if ( isset( $data['success'] ) && ! $data['success'] ) : ?>
+					<tr><td colspan="7"><?php esc_html_e( 'خواندن گزارش‌ها انجام نشد؛ نبود رخداد تأیید نشده است.', 'pinova' ); ?></td></tr>
+				<?php elseif ( empty( $data['rows'] ) ) : ?>
 					<tr><td colspan="7"><?php esc_html_e( 'هنوز رخدادی مطابق فیلتر و سطح ثبت فعلی ذخیره نشده است.', 'pinova' ); ?></td></tr>
 				<?php else : ?>
 					<?php foreach ( $data['rows'] as $row ) : ?>
@@ -175,7 +201,11 @@ final class Logs {
 							<td><code><?php echo esc_html( $display['correlation_id'] ); ?></code></td>
 							<td><code><?php echo esc_html( $display['flow_id'] ); ?></code></td>
 							<td><?php echo $display['user_id'] ? esc_html( (string) $display['user_id'] ) : '&mdash;'; ?></td>
-							<td><code dir="ltr"><?php echo esc_html( is_string( $pretty ) ? $pretty : '{}' ); ?></code></td>
+							<td><code dir="ltr"><?php echo esc_html( is_string( $pretty ) ? $pretty : '{}' ); ?></code>
+							<?php
+							if ( ! empty( $row['context_truncated'] ) ) :
+								?>
+								<p><?php esc_html_e( 'جزئیات بیش از حد مجاز بود؛ شواهد این رخداد کامل نیست.', 'pinova' ); ?></p><?php endif; ?></td>
 						</tr>
 					<?php endforeach; ?>
 				<?php endif; ?>
@@ -232,74 +262,7 @@ final class Logs {
 	 * @return array<string,mixed>
 	 */
 	public static function redact_incident_row( array $row ): array {
-		$stored = json_decode( (string) ( $row['context'] ?? '{}' ), true );
-		$stored = is_array( $stored ) ? $stored : [];
-		$safe   = [];
-		foreach ( [
-			'attempt'         => 1000,
-			'attempts'        => 1000,
-			'candidate_count' => 1000,
-			'count'           => 1000,
-			'duration_ms'     => 600000,
-			'http_status'     => 599,
-			'retry_after'     => 86400,
-		] as $key => $maximum ) {
-			if ( isset( $stored[ $key ] ) && is_int( $stored[ $key ] ) && 0 <= $stored[ $key ] && $maximum >= $stored[ $key ] ) {
-				$safe[ $key ] = $stored[ $key ];
-			}
-		}
-		if ( isset( $stored['identifier_type'] ) && in_array( $stored['identifier_type'], [ 'email', 'mobile', 'username', 'ip' ], true ) ) {
-			$safe['identifier_type'] = $stored['identifier_type'];
-		}
-		if ( isset( $stored['otp_type'] ) && in_array( $stored['otp_type'], [ 'login', 'register', 'forget' ], true ) ) {
-			$safe['otp_type'] = $stored['otp_type'];
-		}
-		if ( 'settings.updated' === ( $row['event'] ?? '' ) ) {
-			$keys = isset( $stored['changed_keys'] ) && is_array( $stored['changed_keys'] ) ? SettingsAudit::safe_keys( $stored['changed_keys'] ) : [];
-			if ( $keys ) {
-				$safe['changed_keys'] = $keys;
-			}
-			if ( isset( $stored['operation'] ) && in_array(
-				$stored['operation'],
-				[
-					'pinova_general',
-					'pinova_sms',
-					'pinova_gateway_maxsms',
-					'pinova_gateway_melipayamak',
-					'pinova_gateway_panelchi',
-					'pinova_messengers',
-					'pinova_zohal',
-					'pinova_design',
-					'pinova_logging',
-					'pinova_advanced',
-				],
-				true
-			) ) {
-				$safe['operation'] = $stored['operation'];
-			}
-			if ( 'success' === ( $stored['result'] ?? '' ) ) {
-				$safe['result'] = 'success';
-			}
-		}
-		if ( isset( $stored['build_commit'] ) && is_string( $stored['build_commit'] ) && preg_match( '/\A[a-f0-9]{40}\z/', $stored['build_commit'] ) ) {
-			$safe['build_commit'] = $stored['build_commit'];
-		}
-		if ( isset( $stored['package_identity'] ) && in_array( $stored['package_identity'], [ 'source', 'pinova-release-zip' ], true ) ) {
-			$safe['package_identity'] = $stored['package_identity'];
-		}
-		if ( isset( $stored['release_tag'] ) && is_string( $stored['release_tag'] ) && preg_match( '/\Av[0-9]+\.[0-9]+\.[0-9]+-rc[1-9][0-9]*\z/', $stored['release_tag'] ) ) {
-			$safe['release_tag'] = $stored['release_tag'];
-		}
-
-		return [
-			'created_at'     => preg_match( '/\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\z/', (string) ( $row['created_at'] ?? '' ) ) ? $row['created_at'] : '',
-			'level'          => in_array( $row['level'] ?? '', [ 'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency' ], true ) ? $row['level'] : 'unknown',
-			'event'          => LogRepository::redact_event( $row['event'] ?? null ),
-			'correlation_id' => LogRepository::redact_correlation_id( $row['correlation_id'] ?? null ),
-			'flow_id'        => preg_match( '/\A[a-f0-9]{32}\z/', (string) ( $row['flow_id'] ?? '' ) ) ? $row['flow_id'] : '',
-			'user_id'        => max( 0, (int) ( $row['user_id'] ?? 0 ) ),
-			'context'        => $safe,
-		];
+		return \Pinova\Logging\EventEvidence::redact( $row );
 	}
 
 	public function export_incident(): void {
@@ -365,6 +328,9 @@ final class Logs {
 		$complete  = true;
 		do {
 			foreach ( $batch['rows'] as $row ) {
+				if ( ! empty( $row['context_truncated'] ) ) {
+					$complete = false;
+				}
 				$cursor  = (int) $row['id'];
 				$encoded = wp_json_encode( self::redact_incident_row( $row ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 				if ( ! is_string( $encoded ) ) {

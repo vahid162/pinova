@@ -21,7 +21,7 @@ function fixture(action) {
         encoding: 'utf8', timeout: 10_000,
     });
     const installFixtures = (manifest = baseline) => {
-        for (const plugin of manifest.plugins) {
+        for (const plugin of [...manifest.plugins, ...manifest.callback_fixtures]) {
             const target = path.join(directory, '.build', 'third-party', plugin.slug);
             mkdirSync(target, { recursive: true });
             writeFileSync(path.join(target, plugin.main), '<?php // Synthetic fixture; never loaded.');
@@ -75,6 +75,7 @@ test('third-party profile requires exact baseline and prepared fixtures', () => 
             'https://downloads.wordpress.org/plugin/woocommerce.11.1.2.zip',
             './.build/third-party/wpforo', './.build/third-party/dokan-lite', './.build/third-party/elementor', '.',
         ]);
+        assert.equal(config().plugins.some(plugin => plugin.includes('woo-wallet')), false);
         assert.deepEqual(config().config, {
             WP_DEBUG: true, PINOVA_THIRD_PARTY_BASELINE: true, DISABLE_WP_CRON: true, WP_ENVIRONMENT_TYPE: 'local',
             WP_MEMORY_LIMIT: '256M', WP_MAX_MEMORY_LIMIT: '512M',
@@ -150,7 +151,7 @@ test('preparation refuses non-profile runs and preserves an existing fixture dir
 });
 
 test('preparation verifies every archive before extraction and cleans later failures', () => {
-    for (const mode of ['corrupt-second', 'extract-fails', 'missing-entrypoint', 'success']) {
+    for (const mode of ['corrupt-second', 'corrupt-callback', 'extract-fails', 'missing-entrypoint', 'success']) {
         fixture(({ directory, execute }) => {
             // Use the unchanged preparer with a synthetic manifest and transports.
             // No network or real plugin code is needed to exercise failure ordering.
@@ -161,7 +162,7 @@ test('preparation verifies every archive before extraction and cleans later fail
             writeFileSync(helper, readFileSync(prepare));
             const synthetic = structuredClone(baseline);
             const digest = createHash('sha256').update('verified fixture').digest('hex');
-            for (const plugin of [...synthetic.plugins, synthetic.pinova_baseline]) plugin.sha256 = digest;
+            for (const plugin of [...synthetic.plugins, ...synthetic.callback_fixtures, synthetic.pinova_baseline]) plugin.sha256 = digest;
             writeFileSync(path.join(helperRoot, 'tests/fixtures/third-party-baseline.json'), JSON.stringify(synthetic));
             const bin = path.join(directory, 'bin');
             mkdirSync(bin);
@@ -170,6 +171,7 @@ test('preparation verifies every archive before extraction and cleans later fail
                 'while [ "$1" != "--output" ]; do shift; done',
                 'case "$FAKE_MODE:$2" in',
                 '    corrupt-second:*/dokan-lite.zip) printf corrupted > "$2" ;;',
+                '    corrupt-callback:*/woo-wallet.zip) printf corrupted > "$2" ;;',
                 '    *) printf "verified fixture" > "$2" ;;',
                 'esac',
                 '',
@@ -182,7 +184,7 @@ test('preparation verifies every archive before extraction and cleans later fail
                 'slug=$(basename "$2" .zip)',
                 'mkdir -p "$4/$slug"',
                 '[ "$FAKE_MODE:$slug" != missing-entrypoint:dokan-lite ] || exit 0',
-                'case "$slug" in wpforo) main=wpforo.php ;; dokan-lite) main=dokan.php ;; elementor) main=elementor.php ;; pinova) main=pinova.php ;; esac',
+                'case "$slug" in wpforo) main=wpforo.php ;; dokan-lite) main=dokan.php ;; elementor) main=elementor.php ;; woo-wallet) main=woo-wallet.php ;; pinova) main=pinova.php ;; esac',
                 'printf synthetic > "$4/$slug/$main"',
                 '',
             ].join('\n'), { mode: 0o700 });
@@ -199,6 +201,10 @@ test('preparation verifies every archive before extraction and cleans later fail
                 assert.deepEqual(readdirSync(path.join(directory, '.build')), [], mode);
                 if (mode === 'corrupt-second') {
                     assert.match(result.stderr, /Checksum mismatch for dokan-lite/);
+                    assert.equal(existsSync(extracted), false);
+                }
+                if (mode === 'corrupt-callback') {
+                    assert.match(result.stderr, /Checksum mismatch for woo-wallet/);
                     assert.equal(existsSync(extracted), false);
                 }
                 if (mode === 'missing-entrypoint') assert.match(result.stderr, /Missing entry point for dokan-lite/);

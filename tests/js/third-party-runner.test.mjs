@@ -27,8 +27,10 @@ function fixture(action) {
         '    if [[ " $* " == *"installed-upgrade.php"* ]]; then marker=PINOVA_UPGRADE_COMPLETE; fi',
         '    if [[ " $* " == *"wpforo-rest.php"* ]]; then marker=PINOVA_REST_COMPLETE; fi',
         '    if [[ " $* " == *"dokan-hpos-reports.php"* ]]; then marker=PINOVA_DOKAN_REPORTS_COMPLETE; fi',
+        '    if [[ " $* " == *"wallet-hpos-reports.php"* ]]; then marker=PINOVA_WALLET_REPORTS_COMPLETE; fi',
+        '    if [[ " $* " == *"logs-command.php"* ]]; then marker=PINOVA_LOGS_COMMAND_COMPLETE; fi',
         '    if [[ "${FAKE_MISSING_SUITE:-}" != "$marker" ]]; then',
-        '        if [[ "$marker" == PINOVA_REST_COMPLETE || "$marker" == PINOVA_DOKAN_REPORTS_COMPLETE ]]; then printf "%s\\n" "$marker"; else printf "%s %s\\n" "$marker" "${@: -1}"; fi',
+        '        if [[ "$marker" == PINOVA_REST_COMPLETE || "$marker" == PINOVA_DOKAN_REPORTS_COMPLETE || "$marker" == PINOVA_WALLET_REPORTS_COMPLETE || "$marker" == PINOVA_LOGS_COMMAND_COMPLETE ]]; then printf "%s\\n" "$marker"; else printf "%s %s\\n" "$marker" "${@: -1}"; fi',
         '    fi',
         'fi',
         'exit "${FAKE_EXIT:-0}"',
@@ -65,10 +67,14 @@ test('third-party runner requires process success and explicit scenario completi
         const result = execute();
         assert.equal(result.status, 0, result.stderr);
         assert.match(result.stdout, /PINOVA_BASELINE_COMPLETE normal/);
+        assert.match(result.stdout, /PINOVA_LOGS_COMMAND_COMPLETE/);
+        assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_LOGS_COMMAND_COMPLETE' }).status, 0);
         assert.match(result.stdout, /PINOVA_REST_COMPLETE/);
         assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_REST_COMPLETE' }).status, 0);
         assert.match(result.stdout, /PINOVA_DOKAN_REPORTS_COMPLETE/);
         assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_DOKAN_REPORTS_COMPLETE' }).status, 0);
+        assert.match(result.stdout, /PINOVA_WALLET_REPORTS_COMPLETE/);
+        assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_WALLET_REPORTS_COMPLETE' }).status, 0);
         for (const phase of ['seed', 'upgrade', 'rollback', 'cleanup']) assert.match(result.stdout, new RegExp(`PINOVA_UPGRADE_COMPLETE ${phase}`));
         assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_UPGRADE_COMPLETE' }).status, 0);
         assert.match(result.stdout, /PINOVA_BASELINE_COMPLETE manual-approval/);

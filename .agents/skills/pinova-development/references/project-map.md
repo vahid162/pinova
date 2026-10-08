@@ -131,3 +131,8 @@ The native `woocommerce_reports_get_order_report_query` compatibility filter pre
 IntegrationSettings owns the exact wpForo/Dokan version allowlists shared by routing and scoped seller role synchronization. A loaded unsupported wpForo disables Dokan routing rather than permitting conversion without the characterized group-preservation callback. Keep all four old/current combinations in the real-plugin CI matrix, with HPOS on/off.
 
 The wpForo adapter completes native initialization at the end of successful REST authentication when a characterized wpForo has its base member service but no topic service. This compensates for upstream URI matching that misses query-based REST dispatch. Preserve the authentication result unchanged, do not initialize on WP_Error, do not initialize an already-ready service, and never redirect REST requests through forum login routing. This rendering fix remains independent of routing switches. Exercise actual Elementor RecentTopics rendering through pretty and query-based REST URLs; a render-output filter runs too late to prevent the fatal.
+
+
+## Wallet report compatibility
+
+`src/Integrations/Woocommerce/WalletReports.php` corrects TeraWallet's numeric `posts.ID NOT IN (...)` exclusion only for the characterized 1.7.1 native callback and exact HPOS report FROM clause. It registers independently of Dokan, changes only the unquoted outer identifier and preserves recharge exclusions, comments, literals and CPT queries. New versions require native callback characterization before widening the guard.

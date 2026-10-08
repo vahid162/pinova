@@ -74,6 +74,9 @@ class OTPService {
 		);
 		if ( null !== $queue_claim_token && ( null === $flow_id || ! RateLimitService::queued_otp_is_active( $flow_id, $queue_claim_token ) ) ) {
 			$otp->delete();
+			if ( null !== $flow_id ) {
+				self::observe_delivery_skipped( $flow_id, 'claim_unavailable' );
+			}
 			throw new SendOTPException( 'Queued OTP delivery was cancelled.' );
 		}
 
@@ -127,6 +130,9 @@ class OTPService {
 			$queued = RateLimitService::claim_queued_otp( $flow_id );
 			if ( null === $queued || $queued['deadline'] <= time() ) {
 				RateLimitService::observe_expired_queued_otp( $flow_id );
+				if ( null !== $queued ) {
+					self::observe_delivery_skipped( $flow_id, 'expired' );
+				}
 				return;
 			}
 
@@ -134,25 +140,30 @@ class OTPService {
 			// must never send a second OTP for it.
 			$existing = OTP::query()->where( 'flow_id', $flow_id )->limit( 2 )->get();
 			if ( $existing->count() > 1 ) {
+				self::observe_delivery_skipped( $flow_id, 'duplicate_records' );
 				return;
 			}
 			if ( 1 === $existing->count() ) {
 				$previous = $existing->first();
 				if ( $previous->isVerified() || in_array( true, (array) $previous->channels, true ) ) {
+					self::observe_delivery_skipped( $flow_id, 'already_completed' );
 					return;
 				}
 				// Provider acceptance before a crash is unknowable. Keep the old
 				// code valid and let a later public request open a fresh flow.
 				RateLimitService::retire_queued_otp( $flow_id );
+				self::observe_delivery_skipped( $flow_id, 'provider_outcome_unknown' );
 				return;
 			}
 			$identifier = new Identifier( $queued['identifier'] );
 			if ( ! $identifier->is_valid() || $identifier->is_username() ) {
+				self::observe_delivery_skipped( $flow_id, 'invalid_payload' );
 				return;
 			}
 			if ( OTP::TYPE_VERIFY_MOBILE === $queued['purpose'] ) {
 				$user_id = (int) $queued['user_id'];
 				if ( ! MobileVerificationService::can_assign( $user_id, $identifier ) ) {
+					self::observe_delivery_skipped( $flow_id, 'policy_rejected' );
 					return;
 				}
 				$mobile_unclaimed = false;
@@ -162,9 +173,11 @@ class OTPService {
 
 			$user = $user_id ? get_userdata( $user_id ) : false;
 			if ( $user instanceof \WP_User && UserService::is_native_only( $user ) ) {
+				self::observe_delivery_skipped( $flow_id, 'policy_rejected' );
 				return;
 			}
 			if ( ! $user_id && ( 'forget' === $queued['purpose'] || ! Pinova::users_can_register() || $identifier->is_email() || ! $mobile_unclaimed ) ) {
+				self::observe_delivery_skipped( $flow_id, 'policy_rejected' );
 				return;
 			}
 
@@ -176,12 +189,15 @@ class OTPService {
 				$type = $user_id ? OTP::TYPE_LOGIN : OTP::TYPE_REGISTER;
 			}
 			if ( $queued['deadline'] <= time() ) {
+				self::observe_delivery_skipped( $flow_id, 'expired' );
 				return;
 			}
 			if ( FirewallService::is_blocked( $identifier->get_value() ) || FirewallService::is_blocked( $queued['ip'] ) ) {
+				self::observe_delivery_skipped( $flow_id, 'policy_rejected' );
 				return;
 			}
 			if ( ! RateLimitService::queued_otp_is_active( $flow_id, $queued['claim_token'] ) ) {
+				self::observe_delivery_skipped( $flow_id, 'claim_unavailable' );
 				return;
 			}
 			self::create( $identifier, ChannelService::get_channels( $identifier ), $type, $user_id, true, $queued['deadline'], $flow_id, $queued['ip'], $queued['claim_token'] );
@@ -198,6 +214,7 @@ class OTPService {
 				[
 					'operation' => 'queued_otp',
 					'reason'    => 'delivery_worker_error',
+					'flow_id'   => $flow_id,
 				]
 			);
 			// A queued delivery cannot change the response already sent to the caller.
@@ -207,6 +224,18 @@ class OTPService {
 				RateLimitService::finish_queued_otp( $flow_id, $queued['claim_token'] );
 			}
 		}
+	}
+
+	/** Observe a known worker outcome without exposing identity or policy classification. */
+	private static function observe_delivery_skipped( string $flow_id, string $reason ): void {
+		EventThrottle::log(
+			'otp.delivery_skipped',
+			[
+				'operation' => 'queued_otp',
+				'flow_id'   => $flow_id,
+				'reason'    => $reason,
+			]
+		);
 	}
 
 	/** WordPress 6.8 spawns cron before REST callbacks; schedule a non-blocking pass at shutdown. */

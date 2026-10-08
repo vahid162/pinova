@@ -13,8 +13,9 @@ namespace {
 	define( 'DB_COLLATE', (string) getenv( 'DB_COLLATE' ) );
 
 	class WP_CLI {
-		public static function add_command( string $name, callable $callback ): void {}
+		public static function add_command( string $name, callable|string $callback ): void {}
 		public static function success( string $message ): void {}
+		public static function line( string $message ): void {}
 		public static function error( string $message ): never { throw new \RuntimeException( 'CLI terminates on error.' ); }
 	}
 

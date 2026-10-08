@@ -148,6 +148,8 @@ delete_option('${fixtureOption}');
 test('Logs and Issues explains evidence, preserves manual reviews, reopens recurrence and downloads redacted JSON', async ({ page }) => {
     test.setTimeout(120_000);
     await page.goto(fixture.login, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#user_login')).toHaveValue('');
+    await expect(page.locator('body')).not.toContainText('Undefined variable');
     await page.locator('#user_login').fill(username);
     await page.locator('#user_pass').fill(password);
     await page.locator('#wp-submit').click();

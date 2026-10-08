@@ -43,6 +43,7 @@ class Pinova {
 
 	public function init_hooks() {
 		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( '\\WP_CLI' ) ) {
+			\WP_CLI::add_command( 'pinova logs report', \Pinova\Logging\IssuesCommand::class );
 			\WP_CLI::add_command(
 				'pinova otp run',
 				static function (): void {

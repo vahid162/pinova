@@ -35,7 +35,7 @@ class Menu {
 				},
 			],
 			30 => [
-				'title'      => 'گزارش‌ها',
+				'title'      => 'لاگ‌ها و مشکلات',
 				'capability' => 'manage_options',
 				'slug'       => 'pinova-logs',
 				'callback'   => [ Logs::class, 'render' ],
@@ -45,7 +45,16 @@ class Menu {
 		$submenus = apply_filters( 'pinova/submenus', $submenus );
 
 		foreach ( $submenus as $submenu ) {
-			add_submenu_page( 'pinova', $submenu['title'], $submenu['title'], $submenu['capability'], $submenu['slug'], $submenu['callback'] );
+			$hook = add_submenu_page( 'pinova', $submenu['title'], $submenu['title'], $submenu['capability'], $submenu['slug'], $submenu['callback'] );
+			if ( $hook && 'pinova-logs' === $submenu['slug'] ) {
+				// Core's cross-document transition can leave review POST redirects visually frozen.
+				add_action(
+					'admin_print_styles-' . $hook,
+					static function (): void {
+						wp_dequeue_style( 'wp-view-transitions-admin' );
+					}
+				);
+			}
 		}
 	}
 

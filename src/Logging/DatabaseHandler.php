@@ -8,7 +8,7 @@ final class DatabaseHandler implements HandlerInterface {
 
 	private static bool $fallback_used = false;
 
-	/** Whether a fallback actually succeeded in this PHP request. */
+	/** Whether fallback was attempted in this request, not proof of persistence. */
 	public static function did_fallback(): bool {
 		return self::$fallback_used;
 	}
@@ -60,27 +60,34 @@ final class DatabaseHandler implements HandlerInterface {
 	 * @param array<string, mixed> $record
 	 */
 	private function fallback( array $record ): void {
-		$encoded = $this->encode( $record );
-		$line    = '' !== $encoded ? $encoded : '{"event":"logging.write_failed"}';
+		$encoded               = $this->encode( $record );
+		$line                  = '' !== $encoded ? $encoded : '{"event":"logging.write_failed"}';
+		$woocommerce_attempted = false;
+		$php_accepted          = false;
+		self::$fallback_used   = true;
 
 		try {
 			if ( function_exists( 'wc_get_logger' ) ) {
+				$woocommerce_attempted = true;
 				wc_get_logger()->log(
 					(string) ( $record['level'] ?? 'error' ),
 					$line,
 					[ 'source' => 'pinova' ]
 				);
-				self::$fallback_used = true;
-				return;
 			}
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
 		}
 
-		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate last-resort production logger.
-		if ( error_log( '[pinova] ' . $line ) ) {
-			self::$fallback_used = true;
+		// WooCommerce returns void and can filter the message or suppress its
+		// level. Always attempt the independent host logger as well.
+		try {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Deliberate last-resort production logger.
+			$php_accepted = error_log( '[pinova] ' . $line );
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
 		}
+		HealthState::record_fallback( $woocommerce_attempted, $php_accepted );
 	}
 
 	/** @param array<string, mixed> $value */

@@ -3,10 +3,14 @@
 namespace Pinova\Logging;
 
 use Pinova\Pinova;
+use Throwable;
 
 final class LogRepository {
 
+	private const DIAGNOSTIC_SELECT = 'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `flow_id`, `user_id`, CASE WHEN OCTET_LENGTH(`context`) <= %d THEN `context` ELSE \'{}\' END AS `context`, OCTET_LENGTH(`context`) > %d AS `context_truncated` FROM %i';
+
 	public const DEFAULT_RETENTION_DAYS = 14;
+	private const CONTEXT_MAX_BYTES     = 8192;
 	private const LEVELS                = [ 'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency' ];
 	private const EXPORT_EVENTS         = [
 		'admin.sms_test_failed',
@@ -24,12 +28,14 @@ final class LogRepository {
 		'identity.resolved',
 		'logging.cleared',
 		'logging.incident_exported',
+		'logging.issue_reviewed',
 		'logging.unknown_event',
 		'logging.write_failed',
 		'otp.channel_send_failed',
 		'otp.created',
 		'otp.queued',
 		'otp.delivery_failed',
+		'otp.delivery_skipped',
 		'otp.verified',
 		'otp.verify_failed',
 		'security.block_added',
@@ -56,22 +62,26 @@ final class LogRepository {
 			: '';
 	}
 
-	public static function cleanup(): int {
+	public static function cleanup(): int|false {
 		global $wpdb;
 
-		if ( ! self::table_exists() ) {
-			return 0;
+		$deleted = false;
+		try {
+			if ( self::table_exists() ) {
+				$query = $wpdb->prepare(
+					'DELETE FROM %i WHERE `created_at` < (UTC_TIMESTAMP() - INTERVAL %d DAY) LIMIT 5000',
+					self::table_name(),
+					self::retention_days()
+				);
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is prepared immediately above.
+				$result  = $wpdb->query( $query );
+				$deleted = false === $result ? false : max( 0, (int) $result );
+			}
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
 		}
-
-		$days  = self::retention_days();
-		$query = $wpdb->prepare(
-			'DELETE FROM %i WHERE `created_at` < (UTC_TIMESTAMP() - INTERVAL %d DAY) LIMIT 5000',
-			self::table_name(),
-			$days
-		);
-
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is prepared immediately above.
-		return max( 0, (int) $wpdb->query( $query ) );
+		HealthState::record_cleanup( false !== $deleted, false === $deleted ? 0 : $deleted );
+		return $deleted;
 	}
 
 	public static function delete_all(): int|false {
@@ -278,27 +288,28 @@ final class LogRepository {
 	}
 
 	/**
-	 * @return array{rows:array<int, array<string, mixed>>, total:int}
+	 * @return array{rows:array<int, array<string, mixed>>, total:int,success:bool}
 	 */
 	public static function paginate( int $page = 1, int $per_page = 50, string $level = '', array $filters = [] ): array {
 		global $wpdb;
 
 		if ( ! self::table_exists() ) {
 			return [
-				'rows'  => [],
-				'total' => 0,
+				'rows'    => [],
+				'total'   => 0,
+				'success' => false,
 			];
 		}
 
 		$page     = max( 1, min( 1000, $page ) );
 		$per_page = max( 1, min( 100, $per_page ) );
 		$offset   = ( $page - 1 ) * $per_page;
-		$level    = in_array( $level, self::LEVELS, true ) ? $level : '';
 		$filters  = self::filter_values( $filters );
-		if ( ! $filters['valid'] ) {
+		if ( ! $filters['valid'] || ( '' !== $level && ! in_array( $level, self::LEVELS, true ) ) ) {
 			return [
-				'rows'  => [],
-				'total' => 0,
+				'rows'    => [],
+				'total'   => 0,
+				'success' => false,
 			];
 		}
 
@@ -307,19 +318,27 @@ final class LogRepository {
 			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The WHERE fragment contains only fixed clauses and placeholders.
 			$wpdb->prepare( 'SELECT COUNT(*) FROM %i' . $where, array_merge( [ self::table_name() ], $values ) )
 		);
+		if ( self::database_error_present() ) {
+			return [
+				'rows'    => [],
+				'total'   => 0,
+				'success' => false,
+			];
+		}
 		$rows = $wpdb->get_results(
 			// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Dynamic fixed-clause WHERE values are assembled together.
 			$wpdb->prepare(
 				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The WHERE fragment contains only fixed clauses and placeholders.
-				'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `flow_id`, `user_id`, `context` FROM %i' . $where . ' ORDER BY `id` DESC LIMIT %d OFFSET %d',
-				array_merge( [ self::table_name() ], $values, [ $per_page, $offset ] )
+				self::DIAGNOSTIC_SELECT . $where . ' ORDER BY `id` DESC LIMIT %d OFFSET %d',
+				array_merge( [ self::CONTEXT_MAX_BYTES, self::CONTEXT_MAX_BYTES, self::table_name() ], $values, [ $per_page, $offset ] )
 			),
 			ARRAY_A
 		);
 
 		return [
-			'rows'  => is_array( $rows ) ? $rows : [],
-			'total' => $total,
+			'rows'    => self::diagnostic_rows( $rows ),
+			'total'   => $total,
+			'success' => is_array( $rows ) && ! self::database_error_present(),
 		];
 	}
 
@@ -355,16 +374,31 @@ final class LogRepository {
 			// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Dynamic fixed-clause WHERE values are assembled together.
 			$wpdb->prepare(
 				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The WHERE fragment contains only fixed clauses and placeholders.
-				'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `flow_id`, `user_id`, `context` FROM %i' . $where . ' ORDER BY `id` DESC LIMIT %d',
-				array_merge( [ self::table_name() ], $values )
+				self::DIAGNOSTIC_SELECT . $where . ' ORDER BY `id` DESC LIMIT %d',
+				array_merge( [ self::CONTEXT_MAX_BYTES, self::CONTEXT_MAX_BYTES, self::table_name() ], $values )
 			),
 			ARRAY_A
 		);
 
 		return [
-			'rows'    => is_array( $rows ) ? $rows : [],
-			'success' => ! self::database_error_present(),
+			'rows'    => self::diagnostic_rows( $rows ),
+			'success' => is_array( $rows ) && ! self::database_error_present(),
 		];
+	}
+
+	/**
+	 * @param mixed $rows
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function diagnostic_rows( $rows ): array {
+		if ( ! is_array( $rows ) ) {
+			return [];
+		}
+		foreach ( $rows as &$row ) {
+			$row['context_truncated'] = ! empty( $row['context_truncated'] );
+		}
+		unset( $row );
+		return $rows;
 	}
 
 	/** @param array<string,mixed> $filters */
@@ -372,39 +406,62 @@ final class LogRepository {
 		return self::filter_values( $filters )['valid'];
 	}
 
-	/** @return array{state:string,table_exists:bool,cleanup_scheduled:bool,last_event_id:int,last_event_at:string} */
+	/**
+	 * Reads cannot establish future write success. Persisted failure observations
+	 * are best effort and may be unavailable during an options/database outage.
+	 *
+	 * @return array{state:string,table_exists:bool,readable:bool,cleanup_scheduled:bool,cleanup_due_at:int,cleanup_overdue:bool,last_event_id:int,last_event_at:string,cleanup:array{status:string,at:int,deleted:int},fallback:array{at:int,woocommerce:string,php:string}}
+	 */
 	public static function health(): array {
 		global $wpdb;
 
 		$health = [
 			'state'             => 'unavailable',
 			'table_exists'      => false,
+			'readable'          => false,
 			'cleanup_scheduled' => false,
+			'cleanup_due_at'    => 0,
+			'cleanup_overdue'   => false,
 			'last_event_id'     => 0,
 			'last_event_at'     => '',
+			'cleanup'           => HealthState::cleanup(),
+			'fallback'          => HealthState::fallback(),
 		];
 		if ( ! isset( $wpdb ) || ! is_object( $wpdb ) ) {
 			return $health;
 		}
 
-		$health['cleanup_scheduled'] = (bool) wp_next_scheduled( 'pinova_logging_cleanup' );
-		$health['table_exists']      = self::table_exists();
-		if ( self::database_error_present() ) {
-			$health['state'] = 'degraded';
-		} elseif ( $health['table_exists'] ) {
-			$latest = $wpdb->get_row(
-				$wpdb->prepare( 'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `user_id`, `context` FROM %i ORDER BY `id` DESC LIMIT 1', self::table_name() ),
-				ARRAY_A
-			);
+		try {
+			$health['cleanup_due_at']    = (int) wp_next_scheduled( 'pinova_logging_cleanup' );
+			$health['cleanup_scheduled'] = 0 < $health['cleanup_due_at'];
+			// Daily maintenance tolerates the normal delay of a traffic-driven cron.
+			$health['cleanup_overdue'] = $health['cleanup_scheduled'] && $health['cleanup_due_at'] < time() - HOUR_IN_SECONDS;
+			$health['table_exists']    = self::table_exists();
 			if ( self::database_error_present() ) {
 				$health['state'] = 'degraded';
-			} else {
-				$health['state'] = $health['cleanup_scheduled'] ? 'database-backed' : 'degraded';
-				if ( is_array( $latest ) ) {
-					$health['last_event_id'] = (int) $latest['id'];
-					$health['last_event_at'] = (string) $latest['created_at'];
+			} elseif ( $health['table_exists'] ) {
+				$latest = $wpdb->get_row(
+					$wpdb->prepare( 'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `flow_id`, `user_id`, LEFT(`context`, 0) AS `context` FROM %i ORDER BY `id` DESC LIMIT 1', self::table_name() ),
+					ARRAY_A
+				);
+				if ( self::database_error_present() ) {
+					$health['state'] = 'degraded';
+				} else {
+					$health['readable'] = true;
+					$health['state']    = $health['cleanup_scheduled'] && ! $health['cleanup_overdue'] && 'failed' !== $health['cleanup']['status'] ? 'database-backed' : 'degraded';
+					if ( is_array( $latest ) ) {
+						$health['last_event_id'] = (int) $latest['id'];
+						$health['last_event_at'] = (string) $latest['created_at'];
+					}
+					$last_insert = '' !== $health['last_event_at'] ? strtotime( $health['last_event_at'] . ' UTC' ) : false;
+					if ( 0 < $health['fallback']['at'] && ( false === $last_insert || time() < $last_insert || $last_insert <= $health['fallback']['at'] ) ) {
+						$health['state'] = 'degraded';
+					}
 				}
 			}
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+			$health['state'] = 'degraded';
 		}
 
 		if ( DatabaseHandler::did_fallback() ) {

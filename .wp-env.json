@@ -3,6 +3,7 @@
   "phpVersion": "8.1",
   "plugins": ["."],
   "config": {
+    "WP_ENVIRONMENT_TYPE": "local",
     "WP_DEBUG": true,
     "WP_DEBUG_LOG": true
   }

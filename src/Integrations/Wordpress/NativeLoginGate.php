@@ -411,7 +411,8 @@ final class NativeLoginGate {
 			return;
 		}
 
-		global $action, $error, $interim_login, $wp_query;
+		// Core's included form reads the username initialized by wp_set_current_user().
+		global $action, $error, $interim_login, $user_login, $wp_query;
 
 		if ( $wp_query ) {
 			$wp_query->is_404 = false;

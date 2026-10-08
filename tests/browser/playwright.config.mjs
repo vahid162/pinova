@@ -7,7 +7,7 @@ const repositoryRoot = path.resolve(browserDirectory, '../..');
 
 export default defineConfig({
     testDir: browserDirectory,
-    testMatch: 'account-ui.spec.mjs',
+    testMatch: ['account-ui.spec.mjs', 'logs-issues.spec.mjs'],
     fullyParallel: false,
     workers: 1,
     retries: 0,

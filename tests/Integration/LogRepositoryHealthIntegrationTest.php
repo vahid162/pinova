@@ -18,9 +18,9 @@ final class LogRepositoryHealthIntegrationTest extends WP_UnitTestCase {
 
 		global $wpdb;
 
-		self::$test_prefix = $wpdb->prefix . 'health_' . bin2hex( random_bytes( 4 ) ) . '_';
-		self::$test_table  = self::$test_prefix . 'pinova_logs';
-		$created           = $wpdb->query(
+		self::$test_prefix   = $wpdb->prefix . 'health_' . bin2hex( random_bytes( 4 ) ) . '_';
+		self::$test_table    = self::$test_prefix . 'pinova_logs';
+		$created             = $wpdb->query(
 			$wpdb->prepare(
 				'CREATE TABLE %i (`id` bigint(20) unsigned NOT NULL AUTO_INCREMENT, `created_at` datetime NOT NULL, PRIMARY KEY (`id`))',
 				self::$test_table
@@ -52,7 +52,7 @@ final class LogRepositoryHealthIntegrationTest extends WP_UnitTestCase {
 
 		try {
 			$wpdb->prefix = self::$test_prefix;
-			$health        = LogRepository::health();
+			$health       = LogRepository::health();
 
 			self::assertTrue( $health['table_exists'] );
 			self::assertTrue( $health['cleanup_scheduled'] );
@@ -64,6 +64,31 @@ final class LogRepositoryHealthIntegrationTest extends WP_UnitTestCase {
 			if ( ! $had_cleanup ) {
 				wp_clear_scheduled_hook( 'pinova_logging_cleanup' );
 			}
+		}
+	}
+
+	public function test_health_probes_the_flow_column_used_by_diagnostic_reads(): void {
+		global $wpdb;
+
+		$wpdb->query(
+			$wpdb->prepare(
+				'ALTER TABLE %i ADD `level` varchar(12) NOT NULL, ADD `event` varchar(100) NOT NULL, ADD `correlation_id` varchar(64) NOT NULL, ADD `user_id` bigint unsigned NULL, ADD `context` longtext NOT NULL',
+				self::$test_table
+			)
+		);
+		$original_prefix = $wpdb->prefix;
+		$previous_errors = $wpdb->suppress_errors( true );
+		try {
+			$wpdb->prefix = self::$test_prefix;
+			$health       = LogRepository::health();
+			self::assertFalse( $health['readable'] );
+			self::assertSame( 'degraded', $health['state'] );
+			self::assertStringContainsString( 'flow_id', $wpdb->last_error );
+			self::assertFalse( LogRepository::paginate()['success'] );
+			self::assertFalse( LogRepository::incident_batch( [] )['success'] );
+		} finally {
+			$wpdb->prefix = $original_prefix;
+			$wpdb->suppress_errors( $previous_errors );
 		}
 	}
 }

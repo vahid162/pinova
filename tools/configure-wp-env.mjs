@@ -32,7 +32,7 @@ if (baseline) {
     if (!existsSync(receipt) || JSON.stringify(JSON.parse(readFileSync(receipt, 'utf8'))) !== JSON.stringify(baseline)) {
         throw new Error('Prepare checksum-verified third-party fixtures before configuring this profile.');
     }
-    for (const plugin of baseline.plugins) {
+    for (const plugin of [...baseline.plugins, ...baseline.callback_fixtures]) {
         if (!existsSync(`.build/third-party/${plugin.slug}/${plugin.main}`)) {
             throw new Error(`Missing required third-party fixture: ${plugin.slug}`);
         }

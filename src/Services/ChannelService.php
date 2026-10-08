@@ -33,9 +33,14 @@ class ChannelService {
 					break;
 				}
 
+				$started   = microtime( true );
+				$exception = null;
 				try {
 					$success = self::send_channel( $channel, $identifier, $code, $otp->type );
 				} catch ( \Throwable $e ) {
+					$exception = $e;
+				}
+				if ( false === $success || null !== $exception ) {
 					Logger::instance()->warning(
 						'otp.channel_send_failed',
 						[
@@ -43,12 +48,16 @@ class ChannelService {
 							'flow_id'                => $otp->flow_id,
 							'otp_type'               => $otp->type,
 							'channel'                => $channel,
+							'reason'                 => null === $exception ? 'provider_returned_false' : 'provider_exception',
+							'duration_ms'            => min( 600000, max( 0, (int) round( ( microtime( true ) - $started ) * 1000 ) ) ),
 							'identifier_type'        => $identifier->get_type(),
 							'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
-							'exception'              => $e,
+							'exception'              => $exception,
 						]
 					);
-					do_action( 'pinova/channel_send_failed', sanitize_key( (string) $channel ) );
+					if ( null !== $exception ) {
+						do_action( 'pinova/channel_send_failed', sanitize_key( (string) $channel ) );
+					}
 				}
 			}
 		}

@@ -24,8 +24,8 @@
     "test:integration": "bash tools/run-integration.sh"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.0",
-    "@wordpress/env": "11.15.0",
+    "@playwright/test": "1.63.0",
+    "@wordpress/env": "11.16.0",
     "http-cache-semantics": "file:tools/vendor/http-cache-semantics"
   }
 }

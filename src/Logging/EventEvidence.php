@@ -32,7 +32,7 @@ final class EventEvidence {
 		} elseif ( str_starts_with( $event, 'user.export_' ) ) {
 			$allowed['operation'] = [ 'excel', 'vcf' ];
 		} elseif ( 'auth.redirect_failed' === $event ) {
-			$allowed['operation'] = [ 'logout', 'login', 'native_login', 'force_reauthentication' ];
+			$allowed['operation'] = [ 'logout', 'login', 'native_login', 'force_reauthentication', 'issue_review' ];
 		}
 		if ( in_array( $event, [ 'auth.session_created', 'user.registered' ], true ) ) {
 			$allowed['auth_method'] = [ 'otp', 'password' ];

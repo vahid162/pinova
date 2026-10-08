@@ -246,6 +246,41 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertTrue( IssueMonitor::report( [ 'created_from' => gmdate( 'Y-m-d', time() - 6 * DAY_IN_SECONDS ), 'created_to' => $today ] )['coverage']['valid_range'] );
 	}
 
+	public function test_failed_review_redirect_preserves_the_review_and_returns_a_safe_link(): void {
+		$this->insert_event();
+		$issue = IssueMonitor::report()['issues'][0];
+		$dates = [ 'created_from' => gmdate( 'Y-m-d', time() - DAY_IN_SECONDS ), 'created_to' => gmdate( 'Y-m-d' ) ];
+		$this->post( 'pinova_review_issue', $dates + [
+			'issue' => $issue['code'], 'state' => 'acknowledged',
+			'through_id' => (string) $issue['last_event_id'], 'expected' => IssueMonitor::review_token( $issue['review'] ),
+		] );
+		$response = [];
+		$handler = static function () use ( &$response ): callable {
+			return static function ( $message, $title, $args ) use ( &$response ): void {
+				$response = [ 'message' => $message, 'args' => $args ];
+				throw new \RuntimeException( 'review_redirect_fallback' );
+			};
+		};
+		add_filter( 'wp_redirect', '__return_false', PHP_INT_MAX );
+		add_filter( 'wp_die_handler', $handler, PHP_INT_MAX );
+		try {
+			$this->invoke( 'review' );
+			self::fail( 'A rejected redirect must return a controlled response.' );
+		} catch ( \RuntimeException $exception ) {
+			self::assertSame( 'review_redirect_fallback', $exception->getMessage() );
+		} finally {
+			remove_filter( 'wp_redirect', '__return_false', PHP_INT_MAX );
+			remove_filter( 'wp_die_handler', $handler, PHP_INT_MAX );
+		}
+		self::assertSame( 503, $response['args']['response'] );
+		self::assertNotEmpty( $response['message'] );
+		self::assertSame( add_query_arg( [ 'page' => 'pinova-logs' ] + $dates, admin_url( 'admin.php' ) ), $response['args']['link_url'] );
+		$issues = array_column( IssueMonitor::report()['issues'], null, 'code' );
+		self::assertSame( 'acknowledged', $issues[ $issue['code'] ]['state'] );
+		$failure = $issues['auth.redirect_failed:headers_sent'] ?? $issues['auth.redirect_failed:safe_redirect_rejected'];
+		self::assertSame( 'issue_review', $failure['evidence'][0]['context']['operation'] );
+	}
+
 	public function test_row_limit_is_explicit_and_blocks_resolution(): void {
 		global $wpdb;
 		$values = [];

@@ -2,6 +2,7 @@
 
 namespace Pinova\Admin;
 
+use Pinova\Helper;
 use Pinova\Logging\IssueMonitor;
 use Pinova\Logging\Logger;
 
@@ -171,8 +172,9 @@ final class Issues {
 
 	public function review(): void {
 		$this->review_response();
-		wp_safe_redirect( admin_url( 'admin.php?page=pinova-logs' ) );
-		exit;
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- review_response authorized and validated this range.
+		$query = [ 'page' => 'pinova-logs' ] + self::dates( $_POST );
+		Helper::redirect_to( add_query_arg( $query, admin_url( 'admin.php' ) ), 'issue_review' );
 	}
 
 	private function review_response(): void {

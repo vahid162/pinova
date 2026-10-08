@@ -5,6 +5,9 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
+// Use the full Chromium renderer for WordPress's cross-document admin transitions.
+test.use({ channel: 'chromium' });
+
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const suffix = randomBytes(8).toString('hex');

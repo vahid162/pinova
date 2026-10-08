@@ -1,9 +1,11 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
+const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const suffix = randomBytes(8).toString('hex');
 const username = `pinova_logs_${suffix}`;
@@ -14,7 +16,7 @@ const secret = `pinova-private-${suffix}`;
 const fingerprint = randomBytes(16).toString('hex');
 let fixture;
 
-function cli(script) {
+async function cli(script) {
     const expected = `pinova-browser-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
     const base = new URL(process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8890');
     if (process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true' ||
@@ -35,14 +37,15 @@ add_filter('pre_http_request', static fn() => new WP_Error('pinova_fixture_no_ne
 global $wpdb;
 ${script}
 `;
-    return execFileSync('npx', ['--no-install', 'wp-env', 'run', 'cli', 'wp', 'eval', guarded], {
+    const { stdout } = await execFileAsync('npx', ['--no-install', 'wp-env', 'run', 'cli', 'wp', 'eval', guarded], {
         cwd: repositoryRoot, encoding: 'utf8', timeout: 30_000,
-        env: process.env, stdio: ['ignore', 'pipe', 'pipe'],
+        env: process.env,
     });
+    return stdout;
 }
 
-function readData(script) {
-    const output = cli(script);
+async function readData(script) {
+    const output = await cli(script);
     const line = output.split('\n').find(value => value.startsWith('PINOVA_LOGS_BROWSER_DATA '));
     if (!line) throw new Error('Missing logs browser fixture receipt.');
     return JSON.parse(line.slice('PINOVA_LOGS_BROWSER_DATA '.length));
@@ -66,8 +69,8 @@ echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode(['count' => count(array_filter
 `);
 }
 
-test.beforeAll(() => {
-    fixture = readData(String.raw`
+test.beforeAll(async () => {
+    fixture = await readData(String.raw`
 if (username_exists('${username}') || false !== get_option('${fixtureOption}', false)) {
     throw new RuntimeException('Logs fixture ownership collision');
 }
@@ -114,8 +117,8 @@ echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode([
 `);
 });
 
-test.afterAll(() => {
-    cli(String.raw`
+test.afterAll(async () => {
+    await cli(String.raw`
 $saved = get_option('${fixtureOption}');
 if (false === $saved) { return; }
 $id = (int)$saved['user_id'];
@@ -159,7 +162,7 @@ test('Logs and Issues explains evidence, preserves manual reviews, reopens recur
     await expect(issues).toContainText('تأیید سرویس‌دهنده نیز به معنی دریافت پیامک روی گوشی نیست');
     await expect(issues).toContainText('ناپدیدشدن یک رخداد از بازه یا پایان نگهداری، به معنی رفع آن نیست');
     const rowFor = code => issues.locator('tbody tr').filter({ has: page.getByText(code, { exact: true }) });
-    const before = report();
+    const before = await report();
     expect(before.coverage).toMatchObject({ complete: true, truncated: false, observed_counts_only: true, physical_delivery: 'not_verified' });
     const categories = {
         [failureCode]: 'خرابی مشاهده‌شده؛ علت هنوز تأیید نشده',
@@ -175,7 +178,7 @@ test('Logs and Issues explains evidence, preserves manual reviews, reopens recur
         await expect(rowFor(code)).toContainText(issue.investigation_hint);
     }
     const failure = before.issues.find(value => value.code === failureCode);
-    const originalEvents = eventSnapshot();
+    const originalEvents = await eventSnapshot();
     expect(originalEvents.count).toBe(4);
     await expect(rowFor(failureCode)).toContainText('نیازمند بررسی');
     const evidence = rowFor(failureCode).getByRole('link', { name: `#${fixture.ids[0]}`, exact: true });
@@ -185,20 +188,20 @@ test('Logs and Issues explains evidence, preserves manual reviews, reopens recur
 
     await rowFor(failureCode).getByRole('button', { name: 'بررسی شد', exact: true }).click();
     await expect(rowFor(failureCode)).toContainText('بررسی‌شده؛ رفع تأیید نشده');
-    let reviewed = report().issues.find(value => value.code === failureCode);
+    let reviewed = (await report()).issues.find(value => value.code === failureCode);
     expect(reviewed.state).toBe('acknowledged');
     expect(reviewed.review.through_id).toBe(failure.last_event_id);
     expect(reviewed.evidence).toEqual(failure.evidence);
-    expect(eventSnapshot()).toEqual(originalEvents);
+    expect(await eventSnapshot()).toEqual(originalEvents);
 
     await rowFor(failureCode).getByRole('button', { name: 'اعلام رفع توسط مدیر', exact: true }).click();
     await expect(rowFor(failureCode)).toContainText('مدیر اعلام رفع کرده؛ آزمون رفع ثبت نشده');
-    reviewed = report().issues.find(value => value.code === failureCode);
+    reviewed = (await report()).issues.find(value => value.code === failureCode);
     expect(reviewed.state).toBe('resolved_unverified');
     expect(reviewed.observed_count).toBe(failure.observed_count);
-    expect(eventSnapshot()).toEqual(originalEvents);
+    expect(await eventSnapshot()).toEqual(originalEvents);
 
-    const recurrence = readData(String.raw`
+    const recurrence = await readData(String.raw`
 $saved = get_option('${fixtureOption}');
 $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE id = %d AND user_id = %d', $wpdb->prefix . 'pinova_logs', $saved['ids'][0], $saved['user_id']), ARRAY_A);
 if (!$row) { throw new RuntimeException('Missing owned recurrence fixture'); }
@@ -212,13 +215,13 @@ echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode($id);
 `);
     await page.goto(`/wp-admin/admin.php?${query}`, { waitUntil: 'domcontentloaded' });
     await expect(rowFor(failureCode)).toContainText('نیازمند بررسی');
-    const expected = report();
+    const expected = await report();
     const reopened = expected.issues.find(value => value.code === failureCode);
     expect(reopened.state).toBe('open');
     expect(reopened.review).toEqual(reviewed.review);
     expect(reopened.last_event_id).toBe(recurrence);
     expect(reopened.observed_count).toBe(failure.observed_count + 1);
-    expect(eventSnapshot().count).toBe(5);
+    expect((await eventSnapshot()).count).toBe(5);
 
     const downloaded = page.waitForEvent('download');
     await issues.getByRole('button', { name: 'دریافت گزارش مشکلات برای بررسی', exact: true }).click();

@@ -83,7 +83,9 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 'not_inspected', $report['coverage']['external_logs'] );
 		self::assertSame( 'not_verified', $report['coverage']['physical_delivery'] );
 		self::assertSame( 'info', $report['coverage']['minimum_level'] );
-		update_option( 'pinova_logging', [ 'minimum_level' => 'error', 'diagnostic_until' => time() + 60 ] );
+		// Settings accepts the selected duration and stores its absolute deadline.
+		update_option( 'pinova_logging', [ 'minimum_level' => 'error', 'diagnostic_until' => 900 ] );
+		self::assertGreaterThan( time(), get_option( 'pinova_logging' )['diagnostic_until'] );
 		self::assertSame( 'debug', IssueMonitor::report()['coverage']['minimum_level'] );
 	}
 

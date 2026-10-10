@@ -296,7 +296,10 @@ class UserAPI extends RestAPI {
 			return self::response( false, self::otp_failure_message(), [], 401 );
 		}
 
-		$session_context = [ 'user_id' => $user->ID, 'flow_id' => $flow_id ];
+		$session_context = [
+			'user_id' => $user->ID,
+			'flow_id' => $flow_id,
+		];
 		try {
 			if ( UserService::is_native_only( $user ) || is_wp_error( UserService::login( $user->ID, 'otp', $flow_id, $identifier ) ) ) {
 				EventThrottle::log( 'auth.session_failed', $session_context + [ 'reason' => 'policy_rejected' ] );

@@ -30,7 +30,7 @@ class Customer {
 		return is_array( $value ) ? $value : ( UserService::get_mobile( $object->get_id() ) ?? $value );
 	}
 
-	/** Old WooCommerce caches may still contain the previous adapter's unsaved row. */
+	/** Extensions enabling WooCommerce metadata caching may retain the old unsaved row. */
 	public function remove_virtual_mobile( array $meta_data ): array {
 		return array_values(
 			array_filter(

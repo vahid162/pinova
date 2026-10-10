@@ -113,15 +113,19 @@ final class MobileMetadataRegressionTest extends WP_UnitTestCase {
 
 	public function test_upgrade_discards_only_unsaved_mobile_rows_from_old_woocommerce_cache(): void {
 		$id = $this->account();
-		$customer = new \WC_Customer( $id );
+		$customer = new class( $id ) extends \WC_Customer {
+			// Native customers leave this disabled; extensions can enable WC_Data caching.
+			protected $cache_group = 'pinova_mobile_cache_fixture';
+		};
 		$customer->get_meta_data();
 		$key = $customer->get_meta_cache_key();
-		$cached = wp_cache_get( $key, 'customers' );
+		$cached = wp_cache_get( $key, 'pinova_mobile_cache_fixture' );
 		self::assertIsArray( $cached );
 		$cached[] = (object) [ 'meta_id' => 0, 'meta_key' => 'pinova_mobile', 'meta_value' => '+989121234765' ];
 		$cached[] = (object) [ 'meta_key' => 'pinova_mobile', 'meta_value' => '+989121234765' ];
-		wp_cache_set( $key, $cached, 'customers' );
-		$customer = new \WC_Customer( $id );
+		wp_cache_set( $key, $cached, 'pinova_mobile_cache_fixture' );
+		$customer_class = get_class( $customer );
+		$customer = new $customer_class( $id );
 		self::assertSame( '+989121234765', $customer->get_meta( 'pinova_mobile' ) );
 		self::assertSame( [], $customer->get_meta( 'pinova_mobile', false ) );
 		$customer->save();

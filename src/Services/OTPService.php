@@ -434,7 +434,13 @@ class OTPService {
 
 	/** Record an operational failure without retaining exception text or request secrets. */
 	private static function completion_failure( array $context, string $reason ): OTPCompletionException {
-		EventThrottle::log( 'auth.request_failed', $context + [ 'operation' => 'verify_otp', 'reason' => $reason ] );
+		EventThrottle::log(
+			'auth.request_failed',
+			$context + [
+				'operation' => 'verify_otp',
+				'reason'    => $reason,
+			]
+		);
 		return new OTPCompletionException();
 	}
 

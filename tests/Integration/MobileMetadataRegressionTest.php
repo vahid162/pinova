@@ -231,6 +231,39 @@ final class MobileMetadataRegressionTest extends WP_UnitTestCase {
 		return [ [ true ], [ false ] ];
 	}
 
+	public function test_proof_only_late_policy_denial_preserves_account_and_evidence(): void {
+		$id = $this->account();
+		$this->duplicates( $id );
+		$before = $this->rows( $id );
+		$otp = $this->otp( $id, OTP::TYPE_VERIFY_MOBILE );
+		wp_set_current_user( $id );
+		$request = $this->request( $otp );
+		$request->set_header( 'X-WP-Nonce', wp_create_nonce( 'wp_rest' ) );
+		$calls = 0;
+		$deny = static function ( $allowed, $user, $method ) use ( &$calls ) {
+			return 'mobile_verification' !== $method || 1 === ++$calls;
+		};
+		add_filter( 'pinova/authentication_policy', $deny, 100, 3 );
+		try {
+			$response = ( new \Pinova\API\MobileVerificationAPI() )->verify( $request );
+		} finally {
+			remove_filter( 'pinova/authentication_policy', $deny, 100 );
+		}
+		self::assertSame( 401, $response->get_status() );
+		self::assertSame( 2, $calls );
+		self::assertNotNull( $otp->fresh()->verified_at );
+		self::assertSame( $id, get_current_user_id() );
+		self::assertFalse( Proof::is_verified( $id ) );
+		self::assertSame( $before, $this->rows( $id ) );
+		self::assertSame( '', get_user_meta( $id, Proof::PROOF_META, true ) );
+		self::assertSame( '989121234765', get_userdata( $id )->user_login );
+		self::assertSame( 0, LogRepository::paginate( 1, 10, '', [ 'event' => 'auth.request_failed' ] )['total'] );
+		$issues = IssueMonitor::report()['issues'];
+		self::assertCount( 1, $issues );
+		self::assertSame( 'otp.verify_failed:policy_rejected', $issues[0]['code'] );
+		self::assertSame( 'expected_rejection', $issues[0]['category'] );
+	}
+
 	/** @dataProvider session_failure_modes */
 	public function test_failure_at_the_session_boundary_is_visible( bool $throw ): void {
 		$id = $this->account();

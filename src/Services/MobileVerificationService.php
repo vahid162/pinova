@@ -250,7 +250,7 @@ final class MobileVerificationService {
 
 	private static function complete_locked( int $user_id, Identifier $identifier, string $epoch ): void {
 		if ( get_current_user_id() !== $user_id || ! self::can_assign( $user_id, $identifier ) || self::meta( $user_id, self::EPOCH_META ) !== $epoch ) {
-			throw new Exception( __( 'تأیید تلفن همراه معتبر نمی‌باشد.', 'pinova' ) );
+			throw new AuthenticationPolicyException( __( 'تأیید تلفن همراه معتبر نمی‌باشد.', 'pinova' ) );
 		}
 		// Rotate before replacement so an eligibility read started on the old number fails.
 		$epoch = bin2hex( random_bytes( 16 ) );

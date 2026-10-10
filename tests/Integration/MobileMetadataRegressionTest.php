@@ -132,6 +132,52 @@ final class MobileMetadataRegressionTest extends WP_UnitTestCase {
 		self::assertSame( [], $this->rows( $id ) );
 	}
 
+	/** @dataProvider initial_epoch_states */
+	public function test_native_account_deletion_does_not_leave_recreated_epoch_rows( bool $remove_epoch ): void {
+		global $wpdb;
+		$id = $this->account();
+		$this->duplicates( $id );
+		if ( $remove_epoch ) {
+			delete_user_meta( $id, Proof::EPOCH_META );
+		}
+		$other = self::factory()->user->create();
+		$other_epoch = Proof::epoch( $other );
+		self::assertTrue( wp_delete_user( $id ) );
+		self::assertFalse( get_userdata( $id ) );
+		self::assertSame( '0', $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE user_id = %d', $wpdb->usermeta, $id ) ) );
+		self::assertSame( $other_epoch, get_user_meta( $other, Proof::EPOCH_META, true ) );
+	}
+
+	public static function initial_epoch_states(): array {
+		return [ 'earlier epoch' => [ false ], 'missing epoch' => [ true ] ];
+	}
+
+	public function test_deleting_mobile_by_metadata_id_still_revokes_proof(): void {
+		$id = $this->account();
+		$this->duplicates( $id );
+		$response = ( new UserAPI() )->login_otp( $this->request( $this->otp( $id ) ) );
+		self::assertSame( 200, $response->get_status() );
+		self::assertTrue( Proof::is_verified( $id ) );
+		$epoch = Proof::epoch( $id );
+		self::assertTrue( delete_metadata_by_mid( 'user', (int) $this->rows( $id )[0]['umeta_id'] ) );
+		self::assertNotSame( $epoch, Proof::epoch( $id ) );
+		self::assertFalse( Proof::is_verified( $id ) );
+		self::assertCount( 1, $this->rows( $id ) );
+	}
+
+	public function test_site_removal_callback_preserves_a_still_existing_accounts_evidence(): void {
+		$id = $this->account();
+		$this->duplicates( $id );
+		$response = ( new UserAPI() )->login_otp( $this->request( $this->otp( $id ) ) );
+		self::assertSame( 200, $response->get_status() );
+		$epoch = Proof::epoch( $id );
+		$proof = get_user_meta( $id, Proof::PROOF_META, true );
+		Proof::cleanup_deleted_user_epoch( $id );
+		self::assertSame( $epoch, Proof::epoch( $id ) );
+		self::assertSame( $proof, get_user_meta( $id, Proof::PROOF_META, true ) );
+		self::assertTrue( Proof::is_verified( $id ) );
+	}
+
 	public function test_identical_legacy_rows_allow_recovery_without_minting_mobile_proof(): void {
 		$id = $this->account();
 		$this->duplicates( $id );

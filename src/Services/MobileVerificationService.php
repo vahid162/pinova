@@ -31,6 +31,7 @@ final class MobileVerificationService {
 		foreach ( [ 'added_user_meta', 'updated_user_meta', 'deleted_user_meta' ] as $hook ) {
 			add_action( $hook, [ self::class, 'after_meta_change' ], 10, 4 );
 		}
+		add_action( 'deleted_user', [ self::class, 'cleanup_deleted_user_epoch' ] );
 		add_shortcode( 'pinova_verify_mobile', [ self::class, 'render' ] );
 		add_action( 'template_redirect', [ self::class, 'route' ], 1 );
 		add_action( 'woocommerce_account_dashboard', [ self::class, 'render_link' ] );
@@ -121,6 +122,16 @@ final class MobileVerificationService {
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
 			return false;
+		}
+	}
+
+	/** Native deletion snapshots metadata IDs; mobile hooks can recreate an already deleted epoch. */
+	public static function cleanup_deleted_user_epoch( int $user_id ): void {
+		global $wpdb;
+		$exists = $wpdb->get_var( $wpdb->prepare( 'SELECT ID FROM %i WHERE ID = %d', $wpdb->users, $user_id ) );
+		// Multisite removal can leave the global account alive. Preserve its evidence, also on read failure.
+		if ( $user_id > 0 && null === $exists && ! $wpdb->last_error ) {
+			delete_user_meta( $user_id, self::EPOCH_META );
 		}
 	}
 

@@ -18,14 +18,16 @@ final class ElementorDocuments {
 			return;
 		}
 
+		$document_classes = [
+			'ElementorPro\Modules\Woocommerce\Documents\Product',
+			'ElementorPro\Modules\Woocommerce\Documents\Product_Archive',
+		];
 		foreach ( $hook->callbacks[11] ?? [] as $entry ) {
 			$callback = $entry['function'];
 			if ( ! is_array( $callback ) || ! isset( $callback[0], $callback[1] )
 				|| ! is_object( $callback[0] ) || 'enqueue_scripts' !== $callback[1]
-				|| ! in_array( get_class( $callback[0] ), [
-					'ElementorPro\Modules\Woocommerce\Documents\Product',
-					'ElementorPro\Modules\Woocommerce\Documents\Product_Archive',
-				], true ) || ! is_callable( [ $callback[0], 'get_post' ] ) ) {
+				|| ! in_array( get_class( $callback[0] ), $document_classes, true )
+				|| ! is_callable( [ $callback[0], 'get_post' ] ) ) {
 				continue;
 			}
 

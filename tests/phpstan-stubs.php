@@ -74,3 +74,11 @@ namespace Automattic\Jetpack {
 		}
 	}
 }
+
+namespace ElementorPro\Modules\Woocommerce\Documents {
+	class Product {
+		public function get_post(): ?\WP_Post { return null; }
+		public function enqueue_scripts(): void {}
+	}
+	class Product_Archive extends Product {}
+}

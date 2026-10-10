@@ -77,6 +77,7 @@ Adding a context key requires all of:
 | `auth.password_reset_succeeded` | info | Password reset completed; observation throttled |
 | `auth.redirect_failed` | warning | A validated authentication/logout redirect was rejected or headers were already committed before a Location response could be emitted |
 | `auth.session_created` | info | Pinova created an authenticated session |
+| `auth.session_failed` | notice/error | Final OTP session policy rejected the request, or a session callback raised an exception |
 | `auth.session_destroyed` | info | Pinova logout completed |
 | `identity.resolved` | debug | Identifier resolution result during a diagnostic window |
 | `identity.mobile_conflict` | warning | One mobile matched multiple legacy User IDs; resolution failed closed |
@@ -160,3 +161,7 @@ Administrators use the existing `pinova-logs` route, nonce-protected issue expor
 Review state uses one non-autoloaded option per finite issue code. Stale review tokens or event watermarks fail; later matching evidence reopens a group. An older date range cannot move the reviewed-through watermark backward. Failed/truncated reports cannot be marked reviewed. `resolved_unverified` means an administrator reported resolution, not that a test established it. Range expiry or retention never implies recovery. Clearing events does not clear review metadata. A bounded `logging.issue_reviewed` audit records the administrator and chosen state without free-text notes.
 
 Cleanup returns `false` for failure and zero for successful empty deletion. Two bounded health options retain last cleanup and coalesced fallback observations with only fixed codes/timestamps/counts; writes are best effort, recursion-safe and never break authentication. Fallback observations are coalesced for five minutes, not exact counters. The daily cleanup health check has one hour of lateness tolerance. A status read never writes probes. Health checks include every required viewer column, including `flow_id`; page/export read errors must not be rendered as an empty successful result.
+
+## OTP completion failures
+
+A checked code is not a completed login. Bounded `auth.request_failed` records preserve the trusted flow/account and `operation=verify_otp`: `mobile_evidence_unavailable` means the security generation could not be read before consumption; `otp_completion_failed` means account creation or proof completion failed after consumption. Neither is an invalid-code rejection. Public completion failures return a generic 503 with the normal correlation header, never exception text. `auth.session_failed:policy_rejected` remains an expected rejection, whereas `session_exception` is a confirmed operational failure; it does not establish whether a callback had already created cookies. These events do not label the underlying defect as confirmed without further investigation. Both request and session failures separate fixed source slots by reason, preserving the shared 100-events-per-window site cap. No automatic repair, deployment or new context key is introduced.

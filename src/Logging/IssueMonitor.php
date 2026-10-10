@@ -10,7 +10,7 @@ final class IssueMonitor {
 
 	public const MAX_ROWS          = 1000;
 	private const FAILURE_EVENTS   = [ 'admin.sms_test_failed', 'auth.request_failed', 'auth.redirect_failed', 'identity.mobile_conflict', 'logging.write_failed', 'otp.channel_send_failed', 'otp.delivery_failed', 'user.export_failed' ];
-	private const REJECTION_EVENTS = [ 'auth.password_failed', 'auth.logout_rejected', 'auth.password_reset_failed', 'otp.verify_failed', 'security.rate_limited' ];
+	private const REJECTION_EVENTS = [ 'auth.password_failed', 'auth.logout_rejected', 'auth.password_reset_failed', 'auth.session_failed', 'otp.verify_failed', 'security.rate_limited' ];
 	private const OPTION_PREFIX    = 'pinova_issue_review_';
 
 	/** @param array<string,mixed> $filters
@@ -165,7 +165,7 @@ final class IssueMonitor {
 		}
 		if ( in_array( $event, self::REJECTION_EVENTS, true ) ) {
 			$category = '' !== $reason || 'security.rate_limited' === $event ? 'expected_rejection' : 'insufficient_evidence';
-			if ( in_array( $reason, [ 'reset_key_generation_failed', 'reset_pipeline_failed' ], true ) ) {
+			if ( in_array( $reason, [ 'reset_key_generation_failed', 'reset_pipeline_failed', 'session_exception' ], true ) ) {
 				$category = 'confirmed_failure';
 			} elseif ( in_array( $reason, [ 'record_not_found', 'claim_rejected' ], true ) ) {
 				$category = 'insufficient_evidence';
@@ -212,6 +212,10 @@ final class IssueMonitor {
 
 	public static function explanation( string $code ): string {
 		return match ( true ) {
+			'auth.session_failed:session_exception' === $code => __( 'مرحلهٔ ورود یا یکی از callbackهای آن خطا داد. رخدادهای همان درخواست را بررسی کنید؛ این مشاهده به‌تنهایی وضعیت نهایی Cookie مرورگر را ثابت نمی‌کند.', 'pinova' ),
+			'auth.session_failed:policy_rejected' === $code => __( 'پس از تأیید کد، سیاست حساب اجازهٔ ورود نداد. تغییر نقش، مسدودیت یا محدودیت افزونهٔ دیگر را بررسی کنید؛ این رد به‌تنهایی باگ نیست.', 'pinova' ),
+			'auth.request_failed:otp_completion_failed' === $code => __( 'کد پذیرفته شد، اما عملیات حساب تکمیل نشد. رکوردهای موبایل و مرحلهٔ ساخت حساب یا ثبت تأیید را بررسی کنید؛ این رخداد به معنی کد اشتباه نیست.', 'pinova' ),
+			'auth.request_failed:mobile_evidence_unavailable' === $code => __( 'خواندن وضعیت تأیید موبایل انجام نشد. رکوردهای امنیتی تکراری یا خطای پایگاه داده را بررسی کنید؛ مصرف کد در این مرحله انجام نشده است.', 'pinova' ),
 			'otp.outcome_unknown' === $code => __( 'نتیجهٔ این صف در بازه دیده نشد. محدودیت ثبت، رد سیاست یا نتیجهٔ خارج از بازه ممکن است علت باشد؛ ارسال ناموفق ثابت نشده است.', 'pinova' ),
 			str_contains( $code, 'token_expired' ), str_contains( $code, ':expired' ) && str_starts_with( $code, 'otp.verify_failed' ) => __( 'اعتبار کد هنگام تأیید پایان یافته بود. این رخداد به‌تنهایی نشانهٔ باگ نیست؛ زمان درخواست و ارسال را مقایسه کنید.', 'pinova' ),
 			str_contains( $code, 'queue_expired' ), 'otp.delivery_skipped:expired' === $code => __( 'مهلت صف پیش از ارسال تمام شد. زمان اجرای cron و مدت انتظار صف را بررسی کنید؛ کد منقضی نباید ارسال شود.', 'pinova' ),

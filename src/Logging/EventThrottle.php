@@ -13,6 +13,10 @@ final class EventThrottle {
 	private const SOURCE_SLOTS   = 1024;
 
 	private const EVENTS = [
+		'auth.session_failed'           => [
+			'scope' => 'log_session_failed',
+			'level' => 'error',
+		],
 		'otp.queued'                    => [
 			'scope' => 'log_otp_queued',
 			'level' => 'info',
@@ -53,13 +57,16 @@ final class EventThrottle {
 			$config = self::EVENTS[ $event ];
 			$logger = Logger::instance();
 			$level  = 'otp.verify_failed' === $event && 'ip_mismatch' === ( $context['reason'] ?? '' ) ? 'warning' : $config['level'];
+			if ( 'auth.session_failed' === $event && 'policy_rejected' === ( $context['reason'] ?? '' ) ) {
+				$level = 'notice';
+			}
 			if ( ! $logger->is_enabled( $level ) ) {
 				return;
 			}
 
 			$ip     = IP::get();
 			$source = '' === $ip ? 'unknown' : inet_pton( $ip );
-			if ( 'otp.verify_failed' === $event ) {
+			if ( in_array( $event, [ 'otp.verify_failed', 'auth.request_failed', 'auth.session_failed' ], true ) ) {
 				$source .= '|' . (string) ( $context['reason'] ?? 'unknown' );
 			} elseif ( in_array( $event, [ 'otp.queued', 'otp.delivery_skipped' ], true ) ) {
 				$source .= '|' . (string) ( $context['flow_id'] ?? '' );

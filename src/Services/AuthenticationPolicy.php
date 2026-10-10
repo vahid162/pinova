@@ -2,7 +2,7 @@
 
 namespace Pinova\Services;
 
-use Exception;
+use Pinova\Exceptions\AuthenticationPolicyException;
 use Pinova\Models\OTP;
 use Pinova\Objects\Identifier;
 use Pinova\Pinova;
@@ -75,7 +75,7 @@ final class AuthenticationPolicy {
 			}
 		}
 		if ( ! $allowed ) {
-			throw new Exception( __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ) );
+			throw new AuthenticationPolicyException( __( 'کد تأیید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 	}
 

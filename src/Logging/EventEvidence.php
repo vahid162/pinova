@@ -7,7 +7,8 @@ final class EventEvidence {
 
 	/** Finite reasons are safe to expose; arbitrary code-shaped strings are not. */
 	public const REASONS = [
-		'auth.request_failed'        => [ 'initiation_error', 'delivery_worker_error', 'queue_expired' ],
+		'auth.session_failed'        => [ 'policy_rejected', 'session_exception' ],
+		'auth.request_failed'        => [ 'initiation_error', 'delivery_worker_error', 'queue_expired', 'mobile_evidence_unavailable', 'otp_completion_failed' ],
 		'auth.password_failed'       => [ 'authentication_rejected', 'native_only_policy' ],
 		'auth.password_reset_failed' => [ 'native_only_policy', 'reset_key_generation_failed', 'reset_key_rejected', 'password_mismatch', 'invalid_token', 'user_not_found', 'invalid_reset_key', 'reset_pipeline_failed' ],
 		'auth.logout_rejected'       => [ 'invalid_nonce' ],
@@ -26,7 +27,7 @@ final class EventEvidence {
 			$allowed['channel'] = [ 'sms', 'email', 'bale', 'call' ];
 		}
 		if ( in_array( $event, [ 'auth.request_failed', 'otp.delivery_skipped' ], true ) ) {
-			$allowed['operation'] = [ 'authenticate', 'queued_otp' ];
+			$allowed['operation'] = [ 'authenticate', 'queued_otp', 'verify_otp' ];
 		} elseif ( str_starts_with( $event, 'auth.password_reset_' ) ) {
 			$allowed['operation'] = [ 'forgot_verify', 'forgot_change' ];
 		} elseif ( str_starts_with( $event, 'user.export_' ) ) {

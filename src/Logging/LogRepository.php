@@ -23,6 +23,7 @@ final class LogRepository {
 		'auth.redirect_failed',
 		'auth.request_failed',
 		'auth.session_created',
+		'auth.session_failed',
 		'auth.session_destroyed',
 		'identity.mobile_conflict',
 		'identity.resolved',

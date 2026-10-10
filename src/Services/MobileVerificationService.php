@@ -3,6 +3,7 @@
 namespace Pinova\Services;
 
 use Exception;
+use Pinova\Exceptions\AuthenticationPolicyException;
 use Pinova\Integrations\IntegrationSettings;
 use Pinova\Integrations\Continuation;
 use Pinova\Objects\Identifier;
@@ -36,10 +37,13 @@ final class MobileVerificationService {
 		add_action( 'woocommerce_before_edit_account_form', [ self::class, 'render_link' ] );
 	}
 
-	/** Read physical rows; duplicates and database failures are never evidence. */
+	/** Identical mobile rows represent one value; proof/epoch duplicates still fail closed. */
 	private static function meta( int $user_id, string $key ): ?string {
 		global $wpdb;
-		$rows = $wpdb->get_col( $wpdb->prepare( 'SELECT meta_value FROM %i WHERE user_id = %d AND meta_key = %s LIMIT 2', $wpdb->usermeta, $user_id, $key ) );
+		$sql  = 'pinova_mobile' === $key
+			? 'SELECT DISTINCT BINARY meta_value FROM %i WHERE user_id = %d AND meta_key = %s LIMIT 2'
+			: 'SELECT meta_value FROM %i WHERE user_id = %d AND meta_key = %s LIMIT 2';
+		$rows = $wpdb->get_col( $wpdb->prepare( $sql, $wpdb->usermeta, $user_id, $key ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Both query templates are fixed literals.
 		if ( $wpdb->last_error || ! is_array( $rows ) || count( $rows ) > 1 ) {
 			throw new Exception( 'Mobile evidence is unavailable.' );
 		}
@@ -194,7 +198,7 @@ final class MobileVerificationService {
 		if ( ! $identifier->is_mobile() || self::meta( $user_id, self::EPOCH_META ) !== $epoch
 			|| $identifier->get_value() !== self::current_mobile( $user_id ) || UserService::match( $identifier ) !== $user_id
 			|| is_wp_error( AuthenticationPolicy::session( $user_id, 'mobile_verification', $identifier ) ) ) {
-			throw new Exception( __( 'تأیید تلفن همراه معتبر نمی‌باشد. دوباره تلاش کنید.', 'pinova' ) );
+			throw new AuthenticationPolicyException( __( 'تأیید تلفن همراه معتبر نمی‌باشد. دوباره تلاش کنید.', 'pinova' ) );
 		}
 		$timestamp = time();
 		$proof     = wp_json_encode(

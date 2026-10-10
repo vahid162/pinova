@@ -10,7 +10,8 @@ class Customer {
 
 	public function __construct() {
 		add_action( 'pinova/user_registered', [ $this, 'set_new_customer_billing_phone' ], 10, 1 );
-		add_filter( 'woocommerce_data_store_wp_user_read_meta', [ $this, 'get_pinova_mobile' ], 10, 2 );
+		add_filter( 'woocommerce_customer_get_pinova_mobile', [ $this, 'get_pinova_mobile' ], 10, 2 );
+		add_filter( 'woocommerce_data_store_wp_user_read_meta', [ $this, 'remove_virtual_mobile' ] );
 	}
 
 	public function set_new_customer_billing_phone( int $user_id ) {
@@ -24,14 +25,18 @@ class Customer {
 		update_user_meta( $user_id, 'billing_phone', $mobile );
 	}
 
-	public function get_pinova_mobile( array $meta_data, WC_Data $object ): array {
+	/** Present the mobile without adding unsaved rows to WooCommerce's metadata store. */
+	public function get_pinova_mobile( $value, WC_Data $object ) {
+		return is_array( $value ) ? $value : ( UserService::get_mobile( $object->get_id() ) ?? $value );
+	}
 
-		$meta_data[] = (object) [
-			'meta_id'    => 0,
-			'meta_key'   => 'pinova_mobile',
-			'meta_value' => UserService::get_mobile( $object->get_id() ),
-		];
-
-		return $meta_data;
+	/** Extensions enabling WooCommerce metadata caching may retain the old unsaved row. */
+	public function remove_virtual_mobile( array $meta_data ): array {
+		return array_values(
+			array_filter(
+				$meta_data,
+				static fn( $meta ): bool => 'pinova_mobile' !== $meta->meta_key || ! empty( $meta->meta_id )
+			)
+		);
 	}
 }

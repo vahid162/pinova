@@ -5,6 +5,7 @@ namespace Pinova\API;
 
 use Exception;
 use Pinova\Exceptions\BlockedException;
+use Pinova\Exceptions\OTPCompletionException;
 use Pinova\Exceptions\RateLimitException;
 use Pinova\Exceptions\RateLimitUnavailableException;
 use Pinova\Helper;
@@ -288,17 +289,26 @@ class UserAPI extends RestAPI {
 			[ $user, $flow_id, $identifier ] = OTPService::verify_with_flow( $jwt, $code, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ] );
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
+		} catch ( OTPCompletionException $e ) {
+			return self::response( false, $e->getMessage(), [], 503 );
 		} catch ( Exception $e ) {
 			self::minimum_response_time( $started );
 			return self::response( false, self::otp_failure_message(), [], 401 );
 		}
 
-		if ( UserService::is_native_only( $user ) ) {
-			return self::response( false, self::otp_failure_message(), [], 401 );
-		}
-
-		if ( is_wp_error( UserService::login( $user->ID, 'otp', $flow_id, $identifier ) ) ) {
-			return self::response( false, self::otp_failure_message(), [], 401 );
+		$session_context = [
+			'user_id' => $user->ID,
+			'flow_id' => $flow_id,
+		];
+		try {
+			if ( UserService::is_native_only( $user ) || is_wp_error( UserService::login( $user->ID, 'otp', $flow_id, $identifier ) ) ) {
+				EventThrottle::log( 'auth.session_failed', $session_context + [ 'reason' => 'policy_rejected' ] );
+				return self::response( false, self::otp_failure_message(), [], 401 );
+			}
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+			EventThrottle::log( 'auth.session_failed', $session_context + [ 'reason' => 'session_exception' ] );
+			return self::response( false, ( new OTPCompletionException() )->getMessage(), [], 503 );
 		}
 
 		return self::response( true, __( 'ورود با موفقیت انجام شد.', 'pinova' ) );
@@ -322,6 +332,8 @@ class UserAPI extends RestAPI {
 			[ $user, $flow_id, $identifier ] = OTPService::verify_with_flow( $jwt, $code, [ OTP::TYPE_FORGET ] );
 		} catch ( BlockedException $e ) {
 			return self::response( false, $e->getMessage(), [], 403 );
+		} catch ( OTPCompletionException $e ) {
+			return self::response( false, $e->getMessage(), [], 503 );
 		} catch ( Exception $e ) {
 			self::minimum_response_time( $started );
 			return self::response( false, self::otp_failure_message(), [], 401 );

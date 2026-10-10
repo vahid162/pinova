@@ -3,6 +3,7 @@
 namespace Pinova\API;
 
 use Pinova\Exceptions\RateLimitException;
+use Pinova\Exceptions\OTPCompletionException;
 use Pinova\Helpers\IP;
 use Pinova\Helpers\JWT;
 use Pinova\Models\OTP;
@@ -107,6 +108,8 @@ final class MobileVerificationAPI extends RestAPI {
 				}
 			);
 			return self::response( true, __( 'تلفن همراه این حساب تأیید شد.', 'pinova' ) );
+		} catch ( OTPCompletionException $exception ) {
+			return self::response( false, $exception->getMessage(), [], 503 );
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
 			return self::response( false, self::otp_failure_message(), [], 401 );

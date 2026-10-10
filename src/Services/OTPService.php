@@ -4,8 +4,10 @@ namespace Pinova\Services;
 
 use Carbon\Carbon;
 use Exception;
+use Pinova\Exceptions\AuthenticationPolicyException;
 use Pinova\Exceptions\ExpiredTokenException;
 use Pinova\Exceptions\BlockedException;
+use Pinova\Exceptions\OTPCompletionException;
 use Pinova\Exceptions\SendOTPException;
 use Pinova\Helpers\IP;
 use Pinova\Helpers\JWT;
@@ -387,8 +389,13 @@ class OTPService {
 		}
 
 		$proof_epoch = null;
-		if ( $identifier->is_mobile() && null !== $otp->user_id && OTP::TYPE_FORGET !== $otp->type ) {
-			$proof_epoch = MobileVerificationService::epoch( (int) $otp->user_id );
+		try {
+			if ( $identifier->is_mobile() && null !== $otp->user_id && OTP::TYPE_FORGET !== $otp->type ) {
+				$proof_epoch = MobileVerificationService::epoch( (int) $otp->user_id );
+			}
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+			throw self::completion_failure( $log_context, 'mobile_evidence_unavailable' );
 		}
 
 		if ( ! $otp->markVerified() ) {
@@ -403,17 +410,38 @@ class OTPService {
 			$log_context
 		);
 
-		if ( OTP::TYPE_VERIFY_MOBILE === $otp->type ) {
-			MobileVerificationService::complete( (int) $otp->user_id, $identifier, (string) $proof_epoch );
-			$user = new \WP_User( (int) $otp->user_id );
-		} else {
-			$user = UserService::get_or_create( $otp );
-			if ( $identifier->is_mobile() && in_array( $otp->type, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ], true )
-				&& MobileVerificationService::current_mobile( $user->ID ) === $identifier->get_value() ) {
-				MobileVerificationService::record( $user->ID, $identifier, $proof_epoch ?? MobileVerificationService::epoch( $user->ID ) );
+		try {
+			if ( OTP::TYPE_VERIFY_MOBILE === $otp->type ) {
+				MobileVerificationService::complete( (int) $otp->user_id, $identifier, (string) $proof_epoch );
+				$user = new \WP_User( (int) $otp->user_id );
+			} else {
+				$user                   = UserService::get_or_create( $otp );
+				$log_context['user_id'] = $user->ID;
+				if ( $identifier->is_mobile() && in_array( $otp->type, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ], true )
+					&& MobileVerificationService::current_mobile( $user->ID ) === $identifier->get_value() ) {
+					MobileVerificationService::record( $user->ID, $identifier, $proof_epoch ?? MobileVerificationService::epoch( $user->ID ) );
+				}
 			}
+		} catch ( AuthenticationPolicyException $exception ) {
+			EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'policy_rejected' ] );
+			throw $exception;
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+			throw self::completion_failure( $log_context, 'otp_completion_failed' );
 		}
 		return [ $user, $record_flow, $identifier ];
+	}
+
+	/** Record an operational failure without retaining exception text or request secrets. */
+	private static function completion_failure( array $context, string $reason ): OTPCompletionException {
+		EventThrottle::log(
+			'auth.request_failed',
+			$context + [
+				'operation' => 'verify_otp',
+				'reason'    => $reason,
+			]
+		);
+		return new OTPCompletionException();
 	}
 
 	public static function signed_state( OTP $otp, ?int $ttl = null ): string {

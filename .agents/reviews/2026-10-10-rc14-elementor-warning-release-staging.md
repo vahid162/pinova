@@ -61,3 +61,9 @@ Final RC14 acceptance:
 The post-install server and WooCommerce fatal-log observation began at 11:21:31 UTC. The initial acceptance scan showed zero appended bytes and zero new PHP warnings/notices/deprecations, fatal/uncaught errors or database errors. Pinova's current-day report was database-backed and readable, with cleanup scheduled and no issues. Its zero examined rows, warning threshold, sampling and retention remain coverage limits; absence of rows is not proof of universal health. Physical delivery was not tested.
 
 The separate private installation-provenance observation is outside this Pinova compatibility correction and is not included in public evidence. Production installation remains the site owner's decision; no production or shared-service change was performed.
+
+## Evidence PR browser-fixture correction
+
+The first documentation PR run (`38048404905`, job `114202466188`) passed 15 browser cases but failed before the Logs and Issues case could authenticate. Its trace recorded no login POST, and the screenshot showed the synthetic password in the username field with the password field empty. WordPress's native 200 ms autofocus ran during automated field entry. The same documentation head's branch run passed, as had the release-source runs above.
+
+The browser fixture now waits for native username focus before entering credentials and asserts both field values before submission. It does not disable autofocus, alter authentication, add retries, or relax the login assertion. This test-only correction changes no released files and does not require replacing the immutable RC14 package. CI must pass on the corrected evidence PR head before merge.

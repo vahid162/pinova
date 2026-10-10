@@ -153,8 +153,12 @@ test('Logs and Issues explains evidence, preserves manual reviews, reopens recur
     await page.goto(fixture.login, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#user_login')).toHaveValue('');
     await expect(page.locator('body')).not.toContainText('Undefined variable');
+    // Wait for WordPress's delayed autofocus before it can interrupt password entry.
+    await expect(page.locator('#user_login')).toBeFocused();
     await page.locator('#user_login').fill(username);
     await page.locator('#user_pass').fill(password);
+    await expect(page.locator('#user_login')).toHaveValue(username);
+    await expect(page.locator('#user_pass')).toHaveValue(password);
     await page.locator('#wp-submit').click();
     await expect.poll(async () => (await page.context().cookies()).some(cookie => cookie.name.startsWith('wordpress_logged_in_'))).toBe(true);
 

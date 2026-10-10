@@ -27,6 +27,7 @@ class Load {
 		new Checkout();
 		new Customer();
 		new Account();
+		add_action( 'wp_enqueue_scripts', [ ElementorDocuments::class, 'guard_enqueue_scripts' ], 10 );
 		add_filter( 'woocommerce_reports_get_order_report_query', [ WalletReports::class, 'report_query' ], 11 );
 
 		if ( 'yes_automatic' === self::registration_required() ) {

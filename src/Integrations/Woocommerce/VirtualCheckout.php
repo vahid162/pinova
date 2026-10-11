@@ -255,9 +255,12 @@ final class VirtualCheckout {
 	}
 
 	private static function record_failure(): void {
-		EventThrottle::log( 'integration.operation_failed', [
-			'operation' => 'woocommerce',
-			'reason'    => 'virtual_checkout_contract_failed',
-		] );
+		EventThrottle::log(
+			'integration.operation_failed',
+			[
+				'operation' => 'woocommerce',
+				'reason'    => 'virtual_checkout_contract_failed',
+			]
+		);
 	}
 }

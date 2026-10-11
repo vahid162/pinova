@@ -9,7 +9,7 @@ final class SettingsAudit {
 
 	/** Only first-party persisted fields may appear as audit keys. */
 	private const FIELDS = [
-		'pinova_general'             => [ 'wordpress_users_can_register', 'wordpress_default_role', 'woocommerce_checkout_registration_required' ],
+		'pinova_general'             => [ 'wordpress_users_can_register', 'wordpress_default_role', 'woocommerce_checkout_registration_required', 'woocommerce_virtual_checkout' ],
 		'pinova_sms'                 => [ 'gateway', 'message_code', 'test_mobile' ],
 		'pinova_gateway_maxsms'      => [ 'api_key', 'sender' ],
 		'pinova_gateway_melipayamak' => [ 'username', 'password', 'sender' ],

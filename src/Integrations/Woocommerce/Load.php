@@ -25,6 +25,7 @@ class Load {
 	public function __construct() {
 
 		new Checkout();
+		new VirtualCheckout();
 		new Customer();
 		new Account();
 		add_action( 'wp_enqueue_scripts', [ ElementorDocuments::class, 'guard_enqueue_scripts' ], 10 );

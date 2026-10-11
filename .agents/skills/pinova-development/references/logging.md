@@ -83,7 +83,7 @@ Adding a context key requires all of:
 | `identity.mobile_conflict` | warning | One mobile matched multiple legacy User IDs; resolution failed closed |
 | `integration.wpforo_status_changed` | notice/warning | A bounded wpForo capability observation changed; partial/unavailable observations are warnings |
 | `integration.dokan_status_changed` | notice/warning | A bounded Dokan capability observation changed; partial/unavailable observations are warnings |
-| `integration.operation_failed` | error | A guarded membership, rendering or seller operation failed; fixed adapter/reason codes and existing observation throttle |
+| `integration.operation_failed` | error | A guarded membership, rendering, seller or classic checkout operation failed; fixed adapter/reason codes and existing observation throttle |
 | `logging.cleared` | warning | An administrator manually cleared existing records |
 | `logging.incident_exported` | notice | An authorized administrator generated a bounded incident export; logs actor ID, count, scope, and result, never export content |
 | `settings.updated` | notice | An authorized persisted Pinova settings change; logs actor ID, first-party changed key names, section, and success only |
@@ -170,3 +170,8 @@ Cleanup returns `false` for failure and zero for successful empty deletion. Two 
 ## OTP completion failures
 
 A checked code is not a completed login. Bounded `auth.request_failed` records preserve the trusted flow/account and `operation=verify_otp`: `mobile_evidence_unavailable` means the security generation could not be read before consumption; `otp_completion_failed` means account creation or proof completion failed after consumption. Neither is an invalid-code rejection. Public completion failures return a generic 503 with the normal correlation header, never exception text. `auth.session_failed:policy_rejected` remains an expected rejection, whereas `session_exception` is a confirmed operational failure; it does not establish whether a callback had already created cookies. These events do not label the underlying defect as confirmed without further investigation. Both request and session failures separate fixed source slots by reason, preserving the shared 100-events-per-window site cap. No automatic repair, deployment or new context key is introduced.
+
+
+## Virtual checkout diagnostics
+
+The optional classic checkout policy uses `integration.operation_failed` with fixed `operation=woocommerce` and `reason=virtual_checkout_contract_failed` only for unexpected inspection/contract failures. Use the existing finite throttle and ordinary severity threshold, retain the normal form, and never persist product/customer identifiers, field values, gateway payloads or exception text. Unknown requirements, physical/empty carts and unsupported Blocks are ordinary policy states rather than per-request failure events. Settings audit includes only the changed key name `woocommerce_virtual_checkout`, never its value.

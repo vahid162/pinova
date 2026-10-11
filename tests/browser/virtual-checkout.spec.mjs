@@ -159,7 +159,9 @@ for (const width of [1280, 390]) {
         const rejection = await response.json();
         expect(rejection.result).toBe('failure');
         expect(rejection.messages).toContain('شماره موبایل');
-        await expect(page.locator('.woocommerce-error[role="alert"], .wc-block-components-notice-banner.is-error[role="alert"]').first()).toContainText('شماره موبایل');
+        const notice = page.locator('.woocommerce-NoticeGroup-checkout [role="alert"]');
+        await expect(notice).toBeVisible();
+        await expect(notice).toContainText('شماره موبایل');
         await expect(page.locator('.pinova-auth-modal')).not.toBeVisible();
         await policy(true, true);
         await page.reload();

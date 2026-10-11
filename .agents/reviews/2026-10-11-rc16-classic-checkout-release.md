@@ -44,7 +44,7 @@ Native release verification and verification of all four release assets passed a
 
 ## Authorized installation and rollback
 
-No new database export or wp-config copy was made, as the operator had declined that backup. This was a files-only, same-schema installation: runtime version 1.3.0 and schema 3, unchanged lifecycle code, and a default-disabled setting.
+No new database export or wp-config copy was made, as the operator had declined that backup. This was a files-only, same-schema installation: runtime version 1.3.0 and schema 3, unchanged installation/migration code, and a default-disabled setting.
 
 The verified public RC15 ZIP content matched all 3,626 installed prior files; filesystem ownership and modes were separately recorded and preserved. A guarded installer preserved unrelated files and configuration, used scoped maintenance, and independently verified each package. Its database-export-dependent path was not used.
 
@@ -62,7 +62,7 @@ Public home, checkout and account requests returned HTTP 200 with no critical-er
 
 ## Scoped maintenance review
 
-The earlier authorized cleanup removed 24 exited containers, 20 dedicated volumes and four empty networks belonging to the five approved obsolete test projects, plus their one dedicated environment directory. The measured allocation before cleanup was 2,391,625,728 bytes; actual reclaimed filesystem space was not measured. Shared images, uncertain resources and worktrees were preserved. Subsequent inventory retained six containers, nine volumes, five networks and 20 images.
+The earlier authorized cleanup removed 24 exited containers, 20 dedicated volumes and four empty networks belonging to the five approved obsolete test projects, plus their one dedicated environment directory. The measured allocation before cleanup was 2,391,625,728 bytes; actual reclaimed filesystem space was not measured. Shared images, uncertain resources and worktrees were preserved. Subsequent inventory checks matched the preserved resource counts.
 
 The test configuration permission correction changed mode 0666 to 0400 without changing contents. Its owner remained the native PHP/CLI service user and authorized reads still worked.
 

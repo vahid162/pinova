@@ -46,13 +46,13 @@ Native release verification and verification of all four release assets passed a
 
 No new database export or wp-config copy was made, as the operator had declined that backup. This was a files-only, same-schema installation: runtime version 1.3.0 and schema 3, unchanged lifecycle code, and a default-disabled setting.
 
-The verified public RC15 ZIP matched all 3,626 installed prior files, including ownership and modes. A guarded installer preserved unrelated files and configuration, used scoped maintenance, and independently verified each package. Its database-export-dependent path was not used.
+The verified public RC15 ZIP content matched all 3,626 installed prior files; filesystem ownership and modes were separately recorded and preserved. A guarded installer preserved unrelated files and configuration, used scoped maintenance, and independently verified each package. Its database-export-dependent path was not used.
 
 The completed sequence was RC15 → RC16 → RC15 → RC16. Upgrade changed nine files and removed none. Rollback changed eight files and removed only the one integration file introduced by RC16, restoring the exact prior package. Reinstallation and final verification passed. Maintenance was cleared. Production's entire Pinova tree, child-theme source and configuration retained their pre-install fingerprints; test configuration and unrelated test-plugin/theme files were preserved.
 
 ## Native test-site acceptance
 
-The configured checkout remained Blocks. A temporary process-only classic context exercised the published package without changing the checkout page, tax settings or gateway configuration. Mail and outbound WordPress HTTP were suppressed for the fixture; no payment, OTP issuance or SMS send was requested.
+The configured checkout remained Blocks. A temporary process-only classic context exercised the published package without changing the checkout page or stored tax/gateway settings. Native BACS and temporary tax-option filters supplied the characterized acceptance context; this did not independently characterize the site's configured gateway. Mail and outbound WordPress HTTP were suppressed for the fixture; no payment, OTP issuance or SMS send was requested.
 
 The first fixture run stopped before checkout assertions because its synthetic product author and anonymous CLI user were both zero. Dokan's native own-product restriction correctly made that fixture unpurchasable. Cleanup and original-setting restoration were independently checked. Assigning only the owned synthetic products to an existing administrator fixed the fixture without changing that account, impersonating it or bypassing native purchase rules.
 

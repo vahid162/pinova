@@ -3,6 +3,7 @@
 namespace Pinova\Admin;
 
 use Pinova\Helper;
+use Pinova\Integrations\IntegrationSettings;
 use Pinova\Logging\IssueMonitor;
 use Pinova\Logging\Logger;
 
@@ -36,6 +37,7 @@ final class Issues {
 		?>
 		<section aria-labelledby="pinova-issues-heading">
 			<h2 id="pinova-issues-heading"><?php esc_html_e( 'مشکلات و نتیجهٔ بررسی', 'pinova' ); ?></h2>
+			<?php self::render_integrations( $report['integrations'] ); ?>
 			<p><?php esc_html_e( 'این گزارش از رخدادهای ثبت‌شده ساخته می‌شود. خرابی مشاهده‌شده لزوماً باگ پینوا نیست؛ علت اصلی باید با شواهد بررسی شود. تأیید سرویس‌دهنده نیز به معنی دریافت پیامک روی گوشی نیست.', 'pinova' ); ?></p>
 			<p><?php esc_html_e( 'بازهٔ گزارش حداکثر هفت روز تقویمی UTC است؛ پیش‌فرض، روز جاری است. فیلترهای رخداد، سطح، کاربر و کد پیگیری فقط جدول لاگ‌ها را تغییر می‌دهند و بر این خلاصه اثر ندارند.', 'pinova' ); ?></p>
 			<p>
@@ -109,6 +111,62 @@ final class Issues {
 		<?php
 	}
 
+	/** Current health has no historical review action or implied recovery.
+	 * @param array<string,mixed> $snapshot
+	 */
+	private static function render_integrations( array $snapshot ): void {
+		?>
+		<h3><?php esc_html_e( 'سلامت فعلی هماهنگی‌ها', 'pinova' ); ?></h3>
+		<p><?php esc_html_e( 'این وضعیت، قابلیت‌های فعلی را بررسی می‌کند و مستقل از بازهٔ رخدادهاست. فعال‌بودن هماهنگی، موفقیت همهٔ درخواست‌ها یا رفع مشکلات قبلی را اثبات نمی‌کند. شمارهٔ نسخه فقط برای تشخیص محیط نمایش داده می‌شود.', 'pinova' ); ?></p>
+		<?php if ( empty( $snapshot ) ) : ?>
+			<p><?php esc_html_e( 'وضعیت فعلی هماهنگی قابل بررسی نیست؛ سلامت آن تأیید نشده است.', 'pinova' ); ?></p>
+		<?php else : ?>
+			<p><time><?php echo esc_html( $snapshot['observed_at'] ); ?></time></p>
+			<table class="widefat striped">
+				<thead><tr><th><?php esc_html_e( 'هماهنگی', 'pinova' ); ?></th><th><?php esc_html_e( 'وضعیت و علت', 'pinova' ); ?></th><th><?php esc_html_e( 'قابلیت‌های در دسترس', 'pinova' ); ?></th></tr></thead>
+				<tbody>
+				<?php
+				foreach ( [
+					'wpforo' => 'wpForo',
+					'dokan'  => 'Dokan',
+				] as $slug => $label ) :
+					?>
+									<?php $entry = $snapshot[ $slug ]; ?>
+					<tr>
+						<td><?php echo esc_html( $label ); ?><br><?php echo esc_html( $entry['requested'] ? __( 'گزینه روشن است', 'pinova' ) : __( 'گزینه خاموش است', 'pinova' ) ); ?>
+									<?php foreach ( $entry['versions'] as $plugin => $version ) : ?>
+										<?php
+										if ( '' !== $version ) :
+											?>
+											<br><code dir="ltr"><?php echo esc_html( $plugin . ' ' . $version ); ?></code><?php endif; ?>
+							<?php endforeach; ?>
+						</td>
+						<td><?php echo esc_html( IntegrationSettings::description_for( $entry ) ); ?><p><code dir="ltr"><?php echo esc_html( $entry['reason'] ); ?></code></p></td>
+						<td>
+									<?php foreach ( $entry['features'] as $feature => $available ) : ?>
+										<?php echo esc_html( self::integration_feature_label( $feature ) ); ?>: <?php echo esc_html( $available ? __( 'در دسترس', 'pinova' ) : __( 'در دسترس نیست', 'pinova' ) ); ?><br>
+							<?php endforeach; ?>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+				</tbody>
+			</table>
+		<?php endif; ?>
+		<?php
+	}
+
+	private static function integration_feature_label( string $feature ): string {
+		return match ( $feature ) {
+			'routing' => __( 'هدایت ورود و ثبت‌نام', 'pinova' ),
+			'membership' => __( 'هماهنگی عضویت', 'pinova' ),
+			'rest' => __( 'راه‌اندازی انجمن در REST', 'pinova' ),
+			'conversion' => __( 'تبدیل حساب به فروشنده', 'pinova' ),
+			'forum_groups' => __( 'حفظ گروه‌های انجمن', 'pinova' ),
+			'reports' => __( 'هماهنگی گزارش سفارش‌ها', 'pinova' ),
+			default => __( 'قابلیت ناشناخته', 'pinova' ),
+		};
+	}
+
 	/** @param array<string,mixed> $report */
 	private static function range_fields( array $report ): void {
 		?>
@@ -119,6 +177,7 @@ final class Issues {
 
 	public static function category_label( string $category ): string {
 		return match ( $category ) {
+			'compatibility_observation' => __( 'محدودیت هماهنگی مشاهده شد؛ خرابی درخواست کاربر ثابت نشده', 'pinova' ),
 			'confirmed_failure' => __( 'خرابی مشاهده‌شده؛ علت هنوز تأیید نشده', 'pinova' ),
 			'expected_rejection' => __( 'رد درخواست مطابق کنترل‌های سیستم', 'pinova' ),
 			default => __( 'شواهد ناکافی برای تشخیص', 'pinova' ),

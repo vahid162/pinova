@@ -5,8 +5,10 @@ namespace Pinova\Integrations\WpForo;
 use Pinova\Helper;
 use Pinova\Integrations\Continuation;
 use Pinova\Integrations\IntegrationSettings;
+use Pinova\Logging\EventThrottle;
 use Pinova\Pinova;
 use Pinova\Services\MobileVerificationService;
+use Throwable;
 
 /** wpForo membership is separate from the shared WordPress/store session. */
 final class Load {
@@ -53,16 +55,37 @@ final class Load {
 
 	/** wpForo recognizes pretty REST URLs but misses query-based REST dispatch. */
 	public static function rest_initialize( $result ) {
-		if ( ! is_wp_error( $result ) && wp_is_serving_rest_request() && function_exists( 'WPF' )
-			&& defined( 'WPFORO_VERSION' ) && IntegrationSettings::supports_version( 'wpforo', WPFORO_VERSION )
-			&& isset( WPF()->member ) && null === WPF()->topic ) {
-			WPF()->init();
+		if ( ! is_wp_error( $result ) && wp_is_serving_rest_request() && IntegrationSettings::capable( 'wpforo', 'rest' ) ) {
+			try {
+				if ( null === ( WPF()->topic ?? null ) ) {
+					WPF()->init();
+					if ( null === ( WPF()->topic ?? null ) ) {
+						self::failure( 'rest_initialization_failed' );
+					}
+				}
+			} catch ( Throwable $error ) {
+				self::failure( 'rest_initialization_failed' );
+			}
 		}
 		return $result;
 	}
 
 	private static function available(): bool {
-		return function_exists( 'WPF' ) && isset( WPF()->member ) && method_exists( WPF()->member, 'get_status' );
+		try {
+			return function_exists( 'WPF' ) && is_callable( [ WPF()->member ?? null, 'get_status' ] );
+		} catch ( Throwable $error ) {
+			return false;
+		}
+	}
+
+	private static function failure( string $reason ): void {
+		EventThrottle::log(
+			'integration.operation_failed',
+			[
+				'operation' => 'wpforo',
+				'reason'    => $reason,
+			]
+		);
 	}
 
 	/**
@@ -70,7 +93,12 @@ final class Load {
 	 * @phpstan-impure
 	 */
 	private static function status( int $user_id ): string {
-		return (string) WPF()->member->get_status( $user_id );
+		try {
+			return self::available() ? (string) WPF()->member->get_status( $user_id ) : 'unknown';
+		} catch ( Throwable $error ) {
+			self::failure( 'membership_failed' );
+			return 'unknown';
+		}
 	}
 
 	private static function state( int $user_id ): string {
@@ -119,29 +147,41 @@ final class Load {
 	}
 
 	private static function protected_user( int $user_id ): bool {
-		return self::available() && ( '' !== self::state( $user_id ) || IntegrationSettings::enabled( 'wpforo' ) );
+		return '' !== self::state( $user_id ) || ( IntegrationSettings::requested( 'wpforo' ) && self::available() );
 	}
 
 	/** Never enroll historical users on login, proof, or an integration toggle. */
 	public static function registered( int $user_id ): void {
-		if ( ! IntegrationSettings::enabled( 'wpforo' ) || ! self::available() || '' !== self::state( $user_id ) ) {
+		if ( ! IntegrationSettings::requested( 'wpforo' ) || '' !== self::state( $user_id ) ) {
 			return;
 		}
 		// Persist ownership first: even an interrupted profile write must deny forum posting.
 		if ( ! add_user_meta( $user_id, self::STATE_META, 'pending', true ) ) {
 			return;
 		}
-		WPF()->member->synchronize_user( $user_id );
-		$status = self::status( $user_id );
-		if ( ! in_array( $status, [ 'active', 'inactive' ], true ) ) {
-			update_user_meta( $user_id, self::STATE_META, 'held' );
+		if ( ! IntegrationSettings::capable( 'wpforo', 'membership' ) ) {
+			self::failure( 'membership_failed' );
 			return;
 		}
-		self::write_status( $user_id, 'inactive', 'active', 'pending' );
+		try {
+			WPF()->member->synchronize_user( $user_id );
+			$status = self::status( $user_id );
+			if ( ! in_array( $status, [ 'active', 'inactive' ], true ) ) {
+				update_user_meta( $user_id, self::STATE_META, 'held' );
+				return;
+			}
+			self::write_status( $user_id, 'inactive', 'active', 'pending' );
+		} catch ( Throwable $error ) {
+			self::failure( 'membership_failed' );
+		}
 	}
 
 	/** Keep native filters, cache invalidation and hooks, but make our status write conditional. */
 	private static function write_status( int $user_id, string $status, string $previous, string $state ): bool {
+		if ( ! IntegrationSettings::capable( 'wpforo', 'membership' ) ) {
+			self::failure( 'membership_failed' );
+			return false;
+		}
 		global $wpdb;
 		$table       = WPF()->tables->profiles;
 		$expected    = $wpdb->prepare( 'UPDATE %i SET `status` = %s WHERE `userid` = %d', $table, $status, $user_id );
@@ -155,34 +195,78 @@ final class Load {
 			$previous,
 			$state
 		);
-		$prefix      = $wpdb->prepare( 'UPDATE %i SET ', $table );
 		$matched     = false;
-		// wpForo exposes no conditional-update argument. Scope the guard to its first profile write.
+		$rejected    = false;
+		// wpForo exposes no conditional-update argument. Scope the guard to its profile-write boundary.
 		// Added fields or a changed statement must fail closed, never fall through unconditionally.
-		$guard = static function ( string $query ) use ( $prefix, $expected, $conditional, &$matched, &$guard ): string {
+		$guard    = static function ( string $query ) use ( $table, $expected, $conditional, &$matched, &$rejected ): string {
 			global $wp_current_filter;
-			if ( 1 !== count( array_keys( (array) $wp_current_filter, 'query', true ) ) || ! str_starts_with( $query, $prefix ) ) {
+			if ( 1 !== count( array_keys( (array) $wp_current_filter, 'query', true ) ) || ! self::profile_write( $query, $table ) ) {
 				return $query;
 			}
-			remove_filter( 'query', $guard, PHP_INT_MAX );
-			$matched = $query === $expected;
-			return $matched ? $conditional : 'SELECT 0';
+			if ( $rejected || $query !== $expected ) {
+				$rejected = true;
+				return 'SELECT 0';
+			}
+			$matched = true;
+			return $conditional;
 		};
-		$arm   = static function ( array $fields ) use ( $guard ): array {
+		$arm      = static function ( array $fields ) use ( $guard ): array {
 			add_filter( 'query', $guard, PHP_INT_MAX );
 			return $fields;
 		};
+		$complete = static function ( int $written_user, array $data, $result ) use ( $user_id, $guard, $arm, &$matched, &$rejected ): void {
+			unset( $data );
+			if ( $written_user === $user_id && $matched && ! $rejected && 1 === $result ) {
+				// Only the native successful-write boundary releases retries and later admin hooks.
+				remove_filter( 'query', $guard, PHP_INT_MAX );
+				remove_filter( 'wpforo_before_update_profile_fields', $arm, PHP_INT_MAX );
+			}
+		};
 
 		self::$writing = $user_id;
+		$depth         = count( self::$profile_locks[ $user_id ] ?? [] );
 		add_filter( 'wpforo_before_update_profile_fields', $arm, PHP_INT_MAX );
+		add_action( 'wpforo_update_profile_fields', $complete, -PHP_INT_MAX, 3 );
 		try {
 			$result = WPF()->member->update_profile_fields( $user_id, [ 'status' => $status ], false );
-			return $matched && 1 === (int) $result;
+			if ( $rejected || ! $matched ) {
+				self::failure( 'profile_write_changed' );
+			} elseif ( false === $result ) {
+				self::failure( 'membership_failed' );
+			}
+			return $matched && ! $rejected && 1 === $result;
+		} catch ( Throwable $error ) {
+			self::failure( 'membership_failed' );
+			return false;
 		} finally {
 			remove_filter( 'wpforo_before_update_profile_fields', $arm, PHP_INT_MAX );
+			remove_action( 'wpforo_update_profile_fields', $complete, -PHP_INT_MAX );
 			remove_filter( 'query', $guard, PHP_INT_MAX );
+			$remaining_depth = count( self::$profile_locks[ $user_id ] ?? [] );
+			while ( $remaining_depth > $depth ) {
+				self::profile_written( $user_id );
+				$remaining_depth = count( self::$profile_locks[ $user_id ] ?? [] );
+			}
 			self::$writing = null;
 		}
+	}
+
+	/** Identify only writes targeting our profile table, ignoring comments and SQL values. */
+	private static function profile_write( string $query, string $table ): bool {
+		$values = <<<'SQL'
+~'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*"|/\*.*?\*/|--(?=[\x00-\x20])[^\r\n]*|\#[^\r\n]*~s
+SQL;
+		$plain  = preg_replace( $values, ' ', $query );
+		if ( null === $plain ) {
+			return true;
+		}
+		if ( ! preg_match( '/\A\s*(UPDATE\b.*?)\bSET\b/is', $plain, $parts ) ) {
+			return false;
+		}
+		$identifier = '(?:`(?:[^`]|``)+`|[A-Za-z0-9_$]+)';
+		$target     = '(?:`' . preg_quote( str_replace( '`', '``', $table ), '~' ) . '`|' . preg_quote( $table, '~' ) . '(?![A-Za-z0-9_$]))';
+		return 1 === preg_match( '~(?:\b(?:UPDATE|JOIN)\s+|,\s*)(?:(?:LOW_PRIORITY|IGNORE)\s+)*(?:' . $identifier . '\s*\.\s*)?' . $target . '~i', $parts[1] );
 	}
 
 	/** Native member buttons and bulk/API methods do not use the profile-fields hook. */
@@ -206,7 +290,8 @@ final class Load {
 			return true;
 		}
 		$actor = get_current_user_id();
-		if ( ! $actor || $actor === $user_id || ! WPF()->usergroup->can( 'bm' ) ) {
+		if ( ! $actor || $actor === $user_id || ! is_callable( [ WPF()->usergroup ?? null, 'can' ] )
+			|| ! is_callable( [ WPF()->perm ?? null, 'user_can_manage_user' ] ) || ! WPF()->usergroup->can( 'bm' ) ) {
 			return false;
 		}
 		return 'wpforo_after_unban_user' === $hook
@@ -214,11 +299,12 @@ final class Load {
 	}
 
 	private static function administrator(): bool {
-		return current_user_can( 'edit_users' ) || ( 0 < get_current_user_id() && isset( WPF()->usergroup ) && WPF()->usergroup->can( 'em' ) );
+		return current_user_can( 'edit_users' ) || ( 0 < get_current_user_id() && function_exists( 'WPF' )
+			&& is_callable( [ WPF()->usergroup ?? null, 'can' ] ) && WPF()->usergroup->can( 'em' ) );
 	}
 
 	public static function verified( int $user_id ): void {
-		if ( ! IntegrationSettings::enabled( 'wpforo' ) || ! self::available() || ! self::lock( $user_id ) ) {
+		if ( ! IntegrationSettings::requested( 'wpforo' ) || ! IntegrationSettings::capable( 'wpforo', 'membership' ) || ! self::lock( $user_id ) ) {
 			return;
 		}
 		try {
@@ -229,7 +315,7 @@ final class Load {
 	}
 
 	private static function activate_pending( int $user_id ): void {
-		if ( ! IntegrationSettings::enabled( 'wpforo' ) || ! self::available()
+		if ( ! IntegrationSettings::requested( 'wpforo' ) || ! IntegrationSettings::capable( 'wpforo', 'membership' )
 			|| 'pending' !== self::state( $user_id ) || ! wpforo_setting( 'authorization', 'user_register' )
 			|| wpforo_setting( 'authorization', 'manually_approval' ) || ! MobileVerificationService::is_verified( $user_id ) ) {
 			return;
@@ -253,9 +339,13 @@ final class Load {
 		if ( self::$writing === $user_id ) {
 			return $fields;
 		}
+		if ( array_key_exists( 'status', $fields ) && '' !== self::state( $user_id ) && 'unknown' === self::status( $user_id ) ) {
+			unset( $fields['status'] );
+			self::failure( 'membership_failed' );
+		}
 		$reset = end( self::$resets );
 		if ( $reset && $reset['user_id'] === $user_id && 'email' === $reset['origin']
-			&& doing_action( 'after_password_reset' ) && isset( $fields['status'], $fields['is_email_confirmed'] ) && 1 === (int) $fields['is_email_confirmed'] ) {
+			&& doing_action( 'after_password_reset' ) && isset( $fields['is_email_confirmed'] ) && 1 === (int) $fields['is_email_confirmed'] ) {
 			clean_user_cache( $user_id );
 			$user = get_userdata( $user_id );
 			if ( ! $user || $reset['email'] !== $user->user_email ) {
@@ -285,7 +375,7 @@ final class Load {
 		}
 		$state = self::state( $user_id );
 		if ( '' === $state ) {
-			return IntegrationSettings::enabled( 'wpforo' ) && self::available()
+			return IntegrationSettings::requested( 'wpforo' ) && self::available()
 				&& 'active' !== self::status( $user_id );
 		}
 		return ! in_array( $state, [ 'verified', 'approved' ], true ) || ! self::available()
@@ -305,11 +395,18 @@ final class Load {
 	private static function suspend( string $scope, string $hook, string $method, bool $needed ): void {
 		global $wp_filter;
 		$removed = [];
-		if ( $needed && self::available() && isset( $wp_filter[ $hook ] ) ) {
-			$callback = [ WPF()->member, $method ];
+		$member  = null;
+		try {
+			$member = function_exists( 'WPF' ) ? ( WPF()->member ?? null ) : null;
+		} catch ( Throwable $error ) {
+			unset( $error );
+		}
+		if ( $needed && isset( $wp_filter[ $hook ] ) ) {
 			foreach ( $wp_filter[ $hook ]->callbacks as $priority => $callbacks ) {
 				foreach ( $callbacks as $entry ) {
-					if ( $entry['function'] === $callback ) {
+					$callback = $entry['function'];
+					if ( is_array( $callback ) && is_object( $callback[0] ) && $method === $callback[1]
+						&& ( $member === $callback[0] || is_a( $callback[0], 'wpforo\classes\Members' ) ) ) {
 						$removed[] = [ $callback, $priority, $entry['accepted_args'] ];
 						remove_action( $hook, $callback, $priority );
 					}
@@ -356,7 +453,7 @@ final class Load {
 			'origin'  => $origin,
 			'email'   => $user ? $user->user_email : '',
 		];
-		self::suspend( 'reset', 'after_password_reset', 'after_password_reset', 'email' !== $origin && self::available() );
+		self::suspend( 'reset', 'after_password_reset', 'after_password_reset', 'email' !== $origin );
 	}
 
 	public static function reset_end(): void {

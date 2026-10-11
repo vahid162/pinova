@@ -27,6 +27,8 @@ final class IntegrationSettingsTest extends \WP_UnitTestCase {
 	public function test_defaults_disable_both_adapters_and_register_in_existing_settings_api(): void {
 		self::assertFalse( IntegrationSettings::enabled( 'wpforo' ) );
 		self::assertFalse( IntegrationSettings::enabled( 'dokan' ) );
+		self::assertSame( 'off', IntegrationSettings::status( 'wpforo' ) );
+		self::assertSame( 'off', IntegrationSettings::status( 'dokan' ) );
 		self::assertFalse( IntegrationSettings::enabled( 'unknown' ) );
 		$registered = get_registered_settings();
 		self::assertSame( IntegrationSettings::OPTION, $registered[ IntegrationSettings::OPTION ]['group'] );
@@ -62,7 +64,8 @@ final class IntegrationSettingsTest extends \WP_UnitTestCase {
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
 		update_option( IntegrationSettings::OPTION, [ 'wpforo_enabled' => '1', 'dokan_enabled' => '1' ] );
 		foreach ( [ 'wpforo', 'dokan' ] as $slug ) {
-			self::assertSame( 'missing', IntegrationSettings::status( $slug ) );
+			self::assertSame( 'unavailable', IntegrationSettings::status( $slug ) );
+			self::assertSame( 'missing_plugin', IntegrationSettings::snapshot()[ $slug ]['reason'] );
 			self::assertFalse( IntegrationSettings::enabled( $slug ) );
 		}
 		self::assertSame( [ 'wpforo_enabled' => '1', 'dokan_enabled' => '1' ], get_option( IntegrationSettings::OPTION ) );

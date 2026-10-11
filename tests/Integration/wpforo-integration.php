@@ -27,7 +27,9 @@ $check = static function ( bool $condition, string $label ): void {
 };
 $manifest = json_decode( file_get_contents( dirname( __DIR__, 2 ) . '/.build/third-party/verified.json' ), true, 512, JSON_THROW_ON_ERROR );
 $versions = array_column( $manifest['plugins'], 'version', 'slug' );
-$check( defined( 'WPFORO_VERSION' ) && $versions['wpforo'] === WPFORO_VERSION && defined( 'WC_VERSION' ) && '11.1.2' === WC_VERSION, 'exact characterized plugins' );
+$forum_only = 'forum-only' === ( $args[1] ?? '' );
+$check( defined( 'WPFORO_VERSION' ) && $versions['wpforo'] === WPFORO_VERSION, 'exact characterized forum' );
+$check( $forum_only ? ! defined( 'WC_VERSION' ) && ! function_exists( 'dokan' ) : defined( 'WC_VERSION' ) && $manifest['woocommerce'] === WC_VERSION, 'forum-only dependency isolation or exact commerce fixture' );
 $check( WPF()->is_installed(), 'real wpForo installation' );
 add_filter( 'pre_wp_mail', '__return_true' );
 add_filter( 'pre_http_request', static fn() => new WP_Error( 'pinova_fixture_no_network' ) );

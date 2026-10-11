@@ -2,20 +2,25 @@
 
 namespace Pinova\Logging;
 
+use Pinova\Integrations\IntegrationSettings;
+
 /** One historical-data redactor for the viewer, exports and issue reports. */
 final class EventEvidence {
 
 	/** Finite reasons are safe to expose; arbitrary code-shaped strings are not. */
 	public const REASONS = [
-		'auth.session_failed'        => [ 'policy_rejected', 'session_exception' ],
-		'auth.request_failed'        => [ 'initiation_error', 'delivery_worker_error', 'queue_expired', 'mobile_evidence_unavailable', 'otp_completion_failed' ],
-		'auth.password_failed'       => [ 'authentication_rejected', 'native_only_policy' ],
-		'auth.password_reset_failed' => [ 'native_only_policy', 'reset_key_generation_failed', 'reset_key_rejected', 'password_mismatch', 'invalid_token', 'user_not_found', 'invalid_reset_key', 'reset_pipeline_failed' ],
-		'auth.logout_rejected'       => [ 'invalid_nonce' ],
-		'auth.redirect_failed'       => [ 'safe_redirect_rejected', 'headers_sent' ],
-		'otp.verify_failed'          => [ 'token_expired', 'invalid_token', 'record_not_found', 'flow_mismatch', 'purpose_mismatch', 'expired', 'already_verified', 'attempt_limit', 'ip_mismatch', 'invalid_code', 'policy_rejected', 'claim_rejected' ],
-		'otp.channel_send_failed'    => [ 'provider_returned_false', 'provider_exception' ],
-		'otp.delivery_skipped'       => [ 'policy_rejected', 'already_completed', 'provider_outcome_unknown', 'invalid_payload', 'duplicate_records', 'claim_unavailable', 'expired' ],
+		'auth.session_failed'               => [ 'policy_rejected', 'session_exception' ],
+		'auth.request_failed'               => [ 'initiation_error', 'delivery_worker_error', 'queue_expired', 'mobile_evidence_unavailable', 'otp_completion_failed' ],
+		'auth.password_failed'              => [ 'authentication_rejected', 'native_only_policy' ],
+		'auth.password_reset_failed'        => [ 'native_only_policy', 'reset_key_generation_failed', 'reset_key_rejected', 'password_mismatch', 'invalid_token', 'user_not_found', 'invalid_reset_key', 'reset_pipeline_failed' ],
+		'auth.logout_rejected'              => [ 'invalid_nonce' ],
+		'auth.redirect_failed'              => [ 'safe_redirect_rejected', 'headers_sent' ],
+		'otp.verify_failed'                 => [ 'token_expired', 'invalid_token', 'record_not_found', 'flow_mismatch', 'purpose_mismatch', 'expired', 'already_verified', 'attempt_limit', 'ip_mismatch', 'invalid_code', 'policy_rejected', 'claim_rejected' ],
+		'otp.channel_send_failed'           => [ 'provider_returned_false', 'provider_exception' ],
+		'otp.delivery_skipped'              => [ 'policy_rejected', 'already_completed', 'provider_outcome_unknown', 'invalid_payload', 'duplicate_records', 'claim_unavailable', 'expired' ],
+		'integration.operation_failed'      => [ 'profile_write_changed', 'membership_failed', 'rest_initialization_failed', 'conversion_contract_changed', 'forum_refresh_failed' ],
+		'integration.wpforo_status_changed' => IntegrationSettings::REASONS,
+		'integration.dokan_status_changed'  => IntegrationSettings::REASONS,
 	];
 
 	/** @param array<string,mixed> $stored
@@ -40,6 +45,11 @@ final class EventEvidence {
 		}
 		if ( 'logging.issue_reviewed' === $event ) {
 			$allowed['result'] = [ 'acknowledged', 'resolved_unverified' ];
+		}
+		if ( 'integration.operation_failed' === $event ) {
+			$allowed['operation'] = [ 'wpforo', 'dokan' ];
+		} elseif ( in_array( $event, [ 'integration.wpforo_status_changed', 'integration.dokan_status_changed' ], true ) ) {
+			$allowed['status'] = [ 'off', 'active', 'partial', 'unavailable' ];
 		}
 		$safe = [];
 		foreach ( $allowed as $key => $values ) {

@@ -5,9 +5,11 @@ namespace Pinova\Integrations\Dokan;
 use Pinova\Helper;
 use Pinova\Integrations\Continuation;
 use Pinova\Integrations\IntegrationSettings;
+use Pinova\Logging\EventThrottle;
 use Pinova\Pinova;
 use Pinova\Services\MobileVerificationService;
 use Pinova\Services\UserService;
+use Throwable;
 use WP_Error;
 
 /** Authenticate once, then let Dokan validate and convert the existing account. */
@@ -24,7 +26,7 @@ final class Load {
 			return;
 		}
 		self::$booted = true;
-		add_action( 'template_redirect', [ self::class, 'guard_migration' ], 8 );
+		add_action( 'template_redirect', [ self::class, 'guard_migration' ], -PHP_INT_MAX );
 		add_action( 'template_redirect', [ self::class, 'route' ], 9 );
 		add_action( 'template_redirect', [ self::class, 'clear_attempt' ], 11 );
 		add_action( 'shutdown', [ self::class, 'clear_attempt' ], 0 );
@@ -43,7 +45,7 @@ final class Load {
 	/** Preserve Dokan's native parent-order restriction on WooCommerce HPOS reports. */
 	public static function report_query( array $query ): array {
 		global $wpdb;
-		if ( ! defined( 'DOKAN_PLUGIN_VERSION' ) || ! IntegrationSettings::supports_version( 'dokan', DOKAN_PLUGIN_VERSION )
+		if ( ! function_exists( 'dokan' )
 			|| ! isset( $query['from'], $query['where'] ) || ! is_string( $query['where'] )
 			|| 'FROM ' . $wpdb->prefix . 'wc_orders AS orders' !== $query['from'] ) {
 			return $query;
@@ -59,12 +61,12 @@ SQL;
 	/** Previously owned pending attempts cannot escape by disabling routing. */
 	public static function denied( int $user_id ): bool {
 		return 'pending' === get_user_meta( $user_id, self::STATE_META, true )
-			&& ( ! IntegrationSettings::enabled( 'dokan' ) || ! MobileVerificationService::is_verified( $user_id ) );
+			&& ( ! IntegrationSettings::requested( 'dokan' ) || ! IntegrationSettings::capable( 'dokan', 'conversion' ) || ! MobileVerificationService::is_verified( $user_id ) );
 	}
 
 	public static function can_convert( int $user_id ): bool {
 		$user = get_userdata( $user_id );
-		return IntegrationSettings::enabled( 'dokan' ) && $user && ! self::privileged( $user )
+		return IntegrationSettings::requested( 'dokan' ) && IntegrationSettings::capable( 'dokan', 'conversion' ) && $user && ! self::privileged( $user )
 			&& ! dokan_is_user_seller( $user_id ) && MobileVerificationService::is_verified( $user_id );
 	}
 
@@ -94,7 +96,7 @@ SQL;
 	}
 
 	private static function protected_request(): bool {
-		return IntegrationSettings::enabled( 'dokan' ) || 'pending' === get_user_meta( get_current_user_id(), self::STATE_META, true );
+		return IntegrationSettings::requested( 'dokan' ) || 'pending' === get_user_meta( get_current_user_id(), self::STATE_META, true );
 	}
 
 	private static function migration_url(): string {
@@ -129,7 +131,7 @@ SQL;
 		return wp_unslash( $_POST['back_url'] ?? $_POST['redirect_to'] ?? $_GET['back_url'] ?? $_GET['redirect_to'] ?? '' );
 	}
 
-	/** Nonce and eligibility are checked before Dokan's priority-ten handler can mutate roles. */
+	/** Nonce and eligibility are checked before any recognized native handler can mutate roles. */
 	public static function guard_migration(): void {
 		self::clear_attempt();
 		if ( ! self::protected_request() || ! isset( $_POST['dokan_migration'], $_POST['dokan_nonce'] )
@@ -148,7 +150,10 @@ SQL;
 		if ( function_exists( 'dokan_is_user_seller' ) && dokan_is_user_seller( $user_id ) ) {
 			return;
 		}
-		if ( ! IntegrationSettings::enabled( 'dokan' ) ) {
+		if ( ! IntegrationSettings::requested( 'dokan' ) || ! IntegrationSettings::capable( 'dokan', 'conversion' ) || ! IntegrationSettings::conversion_boundary() ) {
+			if ( IntegrationSettings::requested( 'dokan' ) ) {
+				self::failure( 'conversion_contract_changed' );
+			}
 			self::unavailable();
 		}
 		update_user_meta( $user_id, self::STATE_META, 'pending' );
@@ -159,6 +164,18 @@ SQL;
 			Helper::redirect_to( MobileVerificationService::url( self::onboarding_url() ), 'login' );
 		}
 		self::$authorized = $user_id;
+		// Preserve groups even if a native update stops emitting the required-fields filter.
+		self::capture_forum( [] );
+	}
+
+	private static function failure( string $reason ): void {
+		EventThrottle::log(
+			'integration.operation_failed',
+			[
+				'operation' => 'dokan',
+				'reason'    => $reason,
+			]
+		);
 	}
 
 	private static function unavailable(): void {
@@ -173,8 +190,7 @@ SQL;
 		if ( ! self::can_convert( self::$authorized ) ) {
 			self::unavailable();
 		}
-		if ( function_exists( 'WPF' ) && defined( 'WPFORO_VERSION' ) && IntegrationSettings::supports_version( 'wpforo', WPFORO_VERSION )
-			&& [] === self::$role_hooks ) {
+		if ( function_exists( 'WPF' ) && IntegrationSettings::capable( 'dokan', 'forum_groups' ) && [] === self::$role_hooks ) {
 			global $wp_filter;
 			$callback = 'wpforo_update_usergroup_on_role_change';
 			if ( ! function_exists( $callback ) ) {
@@ -201,6 +217,11 @@ SQL;
 		return $fields;
 	}
 
+	/** The exact wrapper is temporary custody of the known native role callback. */
+	public static function is_scoped_role_callback( string $hook, $callback, int $arguments ): bool {
+		return isset( self::$role_hooks[ $hook ] ) && self::$role_hooks[ $hook ][0] === $callback && self::$role_hooks[ $hook ][2] === $arguments;
+	}
+
 	public static function clear_attempt(): void {
 		foreach ( self::$role_hooks as $hook => [ $wrapper, $priority, $accepted ] ) {
 			remove_action( $hook, $wrapper, $priority );
@@ -220,15 +241,19 @@ SQL;
 		$scoped = [] !== self::$role_hooks;
 		self::clear_attempt();
 		if ( $scoped ) {
-			WPF()->ram_cache->reset( [ get_class( WPF()->member ) . '::_get_member', [ $user_id ] ] );
-			WPF()->member->init_current_user();
-			WPF()->current_user_accesses = [];
+			try {
+				WPF()->ram_cache->reset( [ get_class( WPF()->member ) . '::_get_member', [ $user_id ] ] );
+				WPF()->member->init_current_user();
+				WPF()->current_user_accesses = [];
+			} catch ( Throwable $error ) {
+				self::failure( 'forum_refresh_failed' );
+			}
 		}
 		update_user_meta( $user_id, self::STATE_META, 'completed' );
 	}
 
 	public static function migration_redirect( string $url ): string {
-		return self::protected_request() ? self::continuation( self::requested_target(), $url ) : $url;
+		return IntegrationSettings::enabled( 'dokan' ) || self::denied( get_current_user_id() ) ? self::continuation( self::requested_target(), $url ) : $url;
 	}
 
 	public static function registration_errors( WP_Error $errors ): WP_Error {

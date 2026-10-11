@@ -4,6 +4,7 @@ namespace Pinova;
 
 use Pinova\Admin\Menu;
 use Pinova\Admin\Settings;
+use Pinova\Integrations\IntegrationHealth;
 use Pinova\Logging\EventThrottle;
 use Pinova\Logging\LogRepository;
 use Pinova\Logging\SettingsAudit;
@@ -67,6 +68,7 @@ class Pinova {
 		add_action( 'template_redirect', [ $this, 'handle_urls' ] );
 		add_filter( 'logout_url', [ $this, 'logout_url' ], 10, 2 );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin' ] );
+		add_action( 'admin_init', [ IntegrationHealth::class, 'observe_admin' ], PHP_INT_MAX );
 		add_filter( 'wp_script_attributes', [ $this, 'add_script_type_module' ], 99 );
 	}
 
@@ -82,6 +84,7 @@ class Pinova {
 
 	public function cleanup_logs(): void {
 		LogRepository::cleanup();
+		IntegrationHealth::observe();
 	}
 
 	public function register_rewrite_rules(): void {

@@ -63,5 +63,35 @@
       "url": "https://downloads.wordpress.org/plugin/elementor.4.3.3.zip",
       "sha256": "e3e1a4eb6bb458da5efcb67d3aa70e5b8a8eb8c5177c51b88876136e8a098871"
     }
+  ],
+  "deployed_plugins": [
+    {
+      "slug": "woocommerce",
+      "version": "11.2.1",
+      "main": "woocommerce.php",
+      "url": "https://downloads.wordpress.org/plugin/woocommerce.11.2.1.zip",
+      "sha256": "5317434cb381b5fdc7c1dd6ee258324f08c390976aaf8d1199f2a0e9a3ab8586"
+    },
+    {
+      "slug": "wpforo",
+      "version": "3.2.2",
+      "main": "wpforo.php",
+      "url": "https://downloads.wordpress.org/plugin/wpforo.3.2.2.zip",
+      "sha256": "8486ea03eccf59c3522fcf55393096ac846cef101e42d921a794bd610938fdbc"
+    },
+    {
+      "slug": "dokan-lite",
+      "version": "5.3.0",
+      "main": "dokan.php",
+      "url": "https://downloads.wordpress.org/plugin/dokan-lite.5.3.0.zip",
+      "sha256": "c83a3e9e77c72994fb5473bda60d11ac7bbeafdb33776a667825de94669b5d10"
+    },
+    {
+      "slug": "elementor",
+      "version": "4.3.3",
+      "main": "elementor.php",
+      "url": "https://downloads.wordpress.org/plugin/elementor.4.3.3.zip",
+      "sha256": "e3e1a4eb6bb458da5efcb67d3aa70e5b8a8eb8c5177c51b88876136e8a098871"
+    }
   ]
 }

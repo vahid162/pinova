@@ -9,10 +9,13 @@ if (process.env.PINOVA_TEST_PROFILE !== 'third-party') {
 
 const baseline = JSON.parse(readFileSync(new URL('../tests/fixtures/third-party-baseline.json', import.meta.url), 'utf8'));
 const pluginSet = process.env.PINOVA_TEST_PLUGIN_SET || 'baseline';
-if (!['baseline', 'current', 'current-wpforo', 'current-dokan'].includes(pluginSet)) {
+if (!['baseline', 'current', 'current-wpforo', 'current-dokan', 'deployed'].includes(pluginSet)) {
     throw new Error(`Unknown third-party plugin set: ${pluginSet}`);
 }
-if (baseline && pluginSet !== 'baseline') {
+if (pluginSet === 'deployed') {
+    baseline.plugins = baseline.deployed_plugins;
+    baseline.woocommerce = baseline.plugins.find(plugin => plugin.slug === 'woocommerce').version;
+} else if (baseline && pluginSet !== 'baseline') {
     baseline.plugins = baseline.plugins.map(plugin => {
         const selected = pluginSet === 'current' ||
             (pluginSet === 'current-wpforo' && plugin.slug === 'wpforo') ||

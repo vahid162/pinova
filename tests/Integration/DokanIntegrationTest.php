@@ -10,6 +10,19 @@ use Pinova\Pinova;
 
 /** Missing-dependency regressions; the exact-plugin fixture exercises native conversion. */
 final class DokanIntegrationTest extends \WP_UnitTestCase {
+	private function configure( array $settings ): void {
+		$previous = get_current_user_id();
+		$admin = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		$settings = IntegrationSettings::normalize( $settings );
+		try {
+			wp_set_current_user( $admin );
+			update_option( IntegrationSettings::OPTION, $settings );
+			self::assertSame( $settings, get_option( IntegrationSettings::OPTION ) );
+		} finally {
+			wp_set_current_user( $previous );
+		}
+	}
+
 	public function tear_down(): void {
 		Load::clear_attempt();
 		$_POST = [];
@@ -21,7 +34,7 @@ final class DokanIntegrationTest extends \WP_UnitTestCase {
 
 	public function test_missing_dependency_preserves_unowned_accounts_and_native_surfaces(): void {
 		self::assertFalse( function_exists( 'dokan' ) );
-		update_option( IntegrationSettings::OPTION, [ 'dokan_enabled' => '1' ] );
+		$this->configure( [ 'dokan_enabled' => '1' ] );
 		$id = self::factory()->user->create( [ 'role' => 'customer' ] );
 		wp_set_current_user( $id );
 		self::assertFalse( Load::can_convert( $id ) );
@@ -38,7 +51,7 @@ final class DokanIntegrationTest extends \WP_UnitTestCase {
 		wp_set_current_user( $id );
 		update_user_meta( $id, Load::STATE_META, 'pending' );
 		foreach ( [ [], [ 'dokan_enabled' => '0' ], [ 'dokan_enabled' => '1' ] ] as $settings ) {
-			update_option( IntegrationSettings::OPTION, $settings );
+			$this->configure( $settings );
 			self::assertTrue( Load::denied( $id ) );
 			self::assertFalse( Load::can_convert( $id ) );
 			$_POST['role'] = 'seller';
@@ -47,6 +60,15 @@ final class DokanIntegrationTest extends \WP_UnitTestCase {
 			self::assertSame( 'customer', Load::customer_data( [ 'role' => 'seller' ] )['role'] );
 			self::assertSame( 'pending', get_user_meta( $id, Load::STATE_META, true ) );
 		}
+	}
+
+	public function test_requested_missing_dependency_cannot_grant_a_new_public_seller_role(): void {
+		$this->configure( [ 'dokan_enabled' => '1' ] );
+		$_POST['role'] = 'seller';
+		self::assertFalse( IntegrationSettings::enabled( 'dokan' ) );
+		self::assertTrue( IntegrationSettings::requested( 'dokan' ) );
+		self::assertContains( 'pinova_vendor_login_required', Load::registration_errors( new \WP_Error() )->get_error_codes() );
+		self::assertSame( 'customer', Load::customer_data( [ 'role' => 'seller' ] )['role'] );
 	}
 
 	public function test_pending_migration_nonce_does_not_bypass_missing_dependency(): void {

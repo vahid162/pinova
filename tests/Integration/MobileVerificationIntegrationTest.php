@@ -8,6 +8,7 @@ use Pinova\API\MobileVerificationAPI;
 use Pinova\API\UserAPI;
 use Pinova\Helpers\JWT;
 use Pinova\Install;
+use Pinova\Integrations\IntegrationSettings;
 use Pinova\Integrations\Wordpress\Privacy;
 use Pinova\Integrations\Wordpress\UserProfile;
 use Pinova\Integrations\Woocommerce\Account;
@@ -388,10 +389,15 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 	public function test_self_profile_changes_require_proof_while_administrator_assignment_revokes_it(): void {
 		$id = $this->account();
 		$this->verify( $this->otp( $id ) );
-		global $wpdb;
-		$wpdb->replace( $wpdb->options, [ 'option_name' => 'pinova_integrations', 'option_value' => maybe_serialize( [ 'wpforo_enabled' => '1' ] ), 'autoload' => 'no' ] );
-		wp_cache_delete( 'pinova_integrations', 'options' );
-		wp_cache_delete( 'alloptions', 'options' );
+		$admin = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $admin );
+		delete_option( IntegrationSettings::OPTION );
+		self::assertFalse( get_option( IntegrationSettings::OPTION ) );
+		$settings = IntegrationSettings::normalize( [ 'wpforo_enabled' => '1' ] );
+		// Native option writes invalidate positive, alloptions and notoptions caches.
+		update_option( IntegrationSettings::OPTION, $settings );
+		self::assertSame( $settings, get_option( IntegrationSettings::OPTION ) );
+		self::assertTrue( IntegrationSettings::requested( 'wpforo' ) );
 		wp_set_current_user( $id );
 		$errors = ( new UserProfile() )->validate_mobile( '09129876543', $id, new \WP_Error() );
 		self::assertContains( 'mobile_proof_required', $errors->get_error_codes() );
@@ -405,7 +411,6 @@ final class MobileVerificationIntegrationTest extends WP_UnitTestCase {
 		} finally {
 			unset( $_POST['pinova_mobile'] );
 		}
-		$admin = self::factory()->user->create( [ 'role' => 'administrator' ] );
 		wp_set_current_user( $admin );
 		self::assertFalse( Proof::requires_proof_for_change( $id, '09129876543' ) );
 		update_user_meta( $id, 'pinova_mobile', '09129876543' );

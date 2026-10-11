@@ -27,7 +27,7 @@ $check = static function ( bool $condition, string $label ): void {
 };
 $manifest = json_decode( file_get_contents( dirname( __DIR__, 2 ) . '/.build/third-party/verified.json' ), true, 512, JSON_THROW_ON_ERROR );
 $versions = array_column( $manifest['plugins'], 'version', 'slug' );
-$check( defined( 'DOKAN_PLUGIN_VERSION' ) && $versions['dokan-lite'] === DOKAN_PLUGIN_VERSION && defined( 'WC_VERSION' ) && '11.1.2' === WC_VERSION
+$check( defined( 'DOKAN_PLUGIN_VERSION' ) && $versions['dokan-lite'] === DOKAN_PLUGIN_VERSION && defined( 'WC_VERSION' ) && $manifest['woocommerce'] === WC_VERSION
 	&& defined( 'WPFORO_VERSION' ) && $versions['wpforo'] === WPFORO_VERSION && ! defined( 'DOKAN_PRO_PLUGIN_VERSION' ), 'exact characterized dependencies' );
 $check( WPF()->is_installed(), 'real forum installation' );
 $check( in_array( get_option( 'woocommerce_custom_orders_table_enabled' ), [ 'yes', 'no' ], true )

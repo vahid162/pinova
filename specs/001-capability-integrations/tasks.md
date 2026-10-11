@@ -12,7 +12,8 @@
 
 - `[P]` identifies work in different files that can run in parallel after prerequisites.
 - `[US1]`, `[US2]`, `[US3]` map to the specification's user stories.
-- Checkboxes distinguish completed work from pending verification and release gates.
+- Checkboxes distinguish completed work from pending verification and release gates. A cancelled
+  task remains unchecked and carries an explicit cancellation note; it is not counted as executed.
 
 ## Phase 1: Setup (Shared Infrastructure)
 
@@ -41,7 +42,7 @@
 
 - [x] T007 [US1] Gate automatic owned-membership operations by membership capability in `src/Integrations/WpForo/Load.php`, preserving pending-state enforcement when routing is off or support disappears.
 - [x] T008 [US1] Preserve native REST topic initialization and upstream authentication errors in `src/Integrations/WpForo/Load.php`, independent of routing switches and WooCommerce.
-- [ ] T009 [US1] Verify forum deactivation/reactivation and legacy-account decisions in `tests/Integration/wpforo-integration.php` without metadata deletion or permission widening.
+- [x] T009 [US1] Verify forum deactivation/reactivation and legacy-account decisions in `tests/Integration/wpforo-integration.php` without metadata deletion or permission widening.
 
 **Checkpoint**: Forum journey works independently; missing membership support does not activate restricted accounts.
 
@@ -59,7 +60,7 @@
 
 - [x] T011 [US2] Revalidate the native mutation boundary immediately before conversion in `src/Integrations/Dokan/Load.php`; ordinary public registration/login never assigns seller status.
 - [x] T012 [US2] Scope only the recognized forum role callback during authorized conversion in `src/Integrations/Dokan/Load.php`, preserving pending restrictions and native selling/product approval.
-- [ ] T013 [US2] Characterize native vendor reports, parent-order restrictions and preserved orders under both stores in `tests/Integration/dokan-hpos-reports.php`.
+- [x] T013 [US2] Characterize native vendor reports, parent-order restrictions and preserved orders under both stores in `tests/Integration/dokan-hpos-reports.php`.
 
 **Checkpoint**: Routing and conversion degrade independently; account privileges remain governed by proof and native approval.
 
@@ -79,7 +80,7 @@
 - [x] T016 [P] [US3] Add finite transition event/status/reason handling and bounded throttling in `src/Logging/EventEvidence.php` and `src/Logging/EventThrottle.php`.
 - [x] T017 [P] [US3] Include fresh `integrations` snapshots separately from retained historical issues in `src/Logging/IssueMonitor.php` and `src/Admin/Logs.php`.
 - [x] T018 [US3] Render escaped off/active/partial/unavailable state and actionable reasons in `src/Admin/Issues.php` and the existing integration settings description in `src/Integrations/IntegrationSettings.php`.
-- [ ] T019 [US3] Verify current health, redaction, sampling and read-only report behavior in `tests/Integration/IssueMonitorIntegrationTest.php`, `tests/Integration/EventThrottleIntegrationTest.php` and `tests/Integration/logs-command.php`.
+- [x] T019 [US3] Verify current health, redaction, sampling and read-only report behavior in `tests/Integration/IssueMonitorIntegrationTest.php`, `tests/Integration/EventThrottleIntegrationTest.php` and `tests/Integration/logs-command.php`.
 
 **Checkpoint**: Reports expose health even without historical events and do not persist observations or alter account decisions.
 
@@ -88,13 +89,13 @@
 - [x] T020 [P] Add checksum-verified deployed combinations to `tests/fixtures/third-party-baseline.json`, fixture/runner Node tests, `tools/prepare-third-party-fixtures.mjs`, `tools/configure-wp-env.mjs`, `tools/run-third-party-baseline.sh` and `.github/workflows/quality.yml`.
 - [x] T021 [P] Update stable public behavior in `README.md`, `readme.txt` and the Pinova skill references; synchronize prepared-release entries in `CHANGELOG.md` and `readme.txt`.
 - [x] T022 Run lightweight syntax, governance, changelog, skill-sync and targeted Node checks; record exact outcomes under `.agents/reviews/`.
-- [ ] T023 Review and commit the focused change, open the authorized GitHub pull request and complete required exact-head CI for `.github/workflows/quality.yml`.
-- [ ] T024 Run isolated real-plugin/browser characterization for prior/current/mixed/deployed combinations and both order stores using `tools/run-third-party-baseline.sh`; record acceptance evidence under `.agents/reviews/`.
-- [ ] T025 After reviewed merge and green merged-main CI, prepare and publish an immutable prerelease through `.github/workflows/`; do not rewrite an existing tag or release.
-- [ ] T026 Independently download and verify the release ZIP, checksums, SBOM, attestations and package-content exclusion of `.specify/`, `.agents/` and `specs/`; record evidence under `.agents/reviews/`.
-- [ ] T027 Create a verified scoped rollback backup and install only that published asset on the authorized test site using the quality-reference staging procedure; record installation evidence under `.agents/reviews/`.
-- [ ] T028 Verify complete test-site login, mobile proof, forum membership/holds, native vendor conversion, orders and report surfaces; record the observation window and remaining limitations under `.agents/reviews/`.
-- [ ] T029 Reconcile all completed tasks against actual CI/release/staging evidence in `specs/001-capability-integrations/tasks.md` and notify the user for their own production installation.
+- [x] T023 Review and commit the focused change, open the authorized GitHub pull request and complete required exact-head CI for `.github/workflows/quality.yml`.
+- [x] T024 Run isolated real-plugin/browser characterization for prior/current/mixed/deployed combinations and both order stores using `tools/run-third-party-baseline.sh`; record acceptance evidence under `.agents/reviews/`.
+- [x] T025 After reviewed merge and green merged-main CI, prepare and publish an immutable prerelease through `.github/workflows/`; do not rewrite an existing tag or release.
+- [x] T026 Independently download and verify the release ZIP, checksums, SBOM, attestations and package-content exclusion of `.specify/`, `.agents/` and `specs/`; record evidence under `.agents/reviews/`.
+- [ ] T027 Create a verified scoped rollback backup and install only that published asset on the authorized test site using the quality-reference staging procedure; record installation evidence under `.agents/reviews/`. **Cancelled/superseded:** the user explicitly declined a fresh backup; backup creation was not executed. Replaced by T033, with current-database-preserving files-only rollback.
+- [x] T028 Verify complete test-site login, mobile proof, forum membership/holds, native vendor conversion, orders and report surfaces; record the observation window and remaining limitations under `.agents/reviews/`. Acceptance used actual test-site CLI/public user-API OTP completion and native cookie hooks plus remote CI Chromium; it does not establish physical SMS receipt, an on-host browser run or a 24-hour window.
+- [x] T029 Reconcile all completed tasks against actual CI/release/staging evidence in `specs/001-capability-integrations/tasks.md` and notify the user for their own production installation. The dated evidence includes final isolation/HTTP receipts and the actual bilingual user notification; production installation was not performed.
 
 ## Dependencies & Execution Order
 
@@ -148,17 +149,34 @@ and one owner to Spec Kit artifacts. Reconcile contracts and tasks at final revi
 
 ## Notes
 
-Source implementation and regression additions are marked complete based on the reviewed working
-tree. Those checkmarks do not claim execution or passing tests. CI, native package tests,
-release verification and staging remain unchecked until their actual results are recorded.
+Source implementation, regression execution, CI, publication, independent download/attestation
+verification and test-site acceptance are now recorded in
+[`capability-integrations-rc15-2026-10-11.md`](../../.agents/reviews/capability-integrations-rc15-2026-10-11.md).
+Checkmarks refer to that evidence and its stated limits. T027 was cancelled rather than executed;
+T033 records the explicitly authorized replacement. Final isolation/HTTP receipts and actual
+bilingual user notification were recorded separately from the functional tests.
 
 
 ## Phase 7: Convergence
 
-Assessment found no additional runtime scope or conflicting intent. Source implementation is
-present, while these existing evidence gates remain partial. The appended tasks consolidate
-the remaining obligations without rewriting any original task or claiming those gates passed.
+The initial assessment consolidated the remaining evidence gates without adding runtime scope.
+Their statuses below are reconciled against the actual RC15 source, CI, release and test-site
+evidence; the backup exception is recorded separately rather than claiming T027 was executed.
 
-- [ ] T030 Complete actual isolated native-plugin, browser, order-store and health-report execution through `.github/workflows/quality.yml` and `tools/run-third-party-baseline.sh`; record evidence under `.agents/reviews/` and reconcile T009/T013/T019/T024 per FR-012 and SC-001 through SC-005 (partial).
-- [ ] T031 Complete reviewed GitHub history, exact-head and merged-main checks, immutable prerelease publication and independent asset/attestation verification through `.github/workflows/`; record evidence under `.agents/reviews/` and reconcile T023/T025/T026 per FR-014 and SC-006 (partial).
-- [ ] T032 Complete verified scoped rollback, published-asset installation only on the authorized test site, full acceptance and user notification; record evidence under `.agents/reviews/` and reconcile T027/T028/T029 in `specs/001-capability-integrations/tasks.md` per FR-014, SC-006 and US1/US2 acceptance scenarios (partial).
+- [x] T030 Complete actual isolated native-plugin, browser, order-store and health-report execution through `.github/workflows/quality.yml` and `tools/run-third-party-baseline.sh`; record evidence under `.agents/reviews/` and reconcile T009/T013/T019/T024 per FR-012 and SC-001 through SC-005.
+- [x] T031 Complete reviewed GitHub history, exact-head and merged-main checks, immutable prerelease publication and independent asset/attestation verification through `.github/workflows/`; record evidence under `.agents/reviews/` and reconcile T023/T025/T026 per FR-014 and SC-006.
+- [x] T032 Complete verified scoped rollback, published-asset installation only on the authorized test site, full acceptance and user notification; record evidence under `.agents/reviews/` and reconcile T027/T028/T029 in `specs/001-capability-integrations/tasks.md` per FR-014, SC-006 and US1/US2 acceptance scenarios. T033, functional acceptance, final isolation/HTTP receipts and actual bilingual user notification are complete. T027 is reconciled as cancelled, not completed.
+- [x] T033 Verify existing rollback material and independently verified public RC14 files; install only the verified published RC15 package on the authorized test site and exercise files-only rollback preserving the current database. No fresh backup or database restore. Previously verified October 10 database material is retained as historical recovery material, not a current full-database recovery point.
+
+## Evidence reconciliation — 2026-10-11
+
+The [dated RC15 record](../../.agents/reviews/capability-integrations-rc15-2026-10-11.md) names the
+reviewed PR, exact source/tree, distinct CI runs, immutable tag/release, all four asset digests,
+independent signature/SBOM verification and actual RC14 → RC15 → RC14 → RC15 test-site cycle.
+It separates current read-only health from best-effort historical events and remote CI browser
+coverage from native test-site checks. Production installation remains the user's operation.
+
+Final reconciliation: 33 tasks total; 32 completed and one cancelled/superseded (T027), with no
+pending implementation/delivery tasks. This does not mean all 33 tasks were executed: the
+fresh-backup task was explicitly declined and was not performed. Production installation,
+physical SMS receipt and a later production observation window are outside this task completion.

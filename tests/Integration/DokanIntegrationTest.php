@@ -49,6 +49,15 @@ final class DokanIntegrationTest extends \WP_UnitTestCase {
 		}
 	}
 
+	public function test_requested_missing_dependency_cannot_grant_a_new_public_seller_role(): void {
+		update_option( IntegrationSettings::OPTION, [ 'dokan_enabled' => '1' ] );
+		$_POST['role'] = 'seller';
+		self::assertFalse( IntegrationSettings::enabled( 'dokan' ) );
+		self::assertTrue( IntegrationSettings::requested( 'dokan' ) );
+		self::assertContains( 'pinova_vendor_login_required', Load::registration_errors( new \WP_Error() )->get_error_codes() );
+		self::assertSame( 'customer', Load::customer_data( [ 'role' => 'seller' ] )['role'] );
+	}
+
 	public function test_pending_migration_nonce_does_not_bypass_missing_dependency(): void {
 		$id = self::factory()->user->create( [ 'role' => 'customer' ] );
 		wp_set_current_user( $id );

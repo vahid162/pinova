@@ -3,6 +3,7 @@
 namespace Pinova\Admin;
 
 use Pinova\Logging\BuildMetadata;
+use Pinova\Integrations\IntegrationSettings;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
 use Pinova\Pinova;
@@ -304,6 +305,7 @@ final class Logs {
 			'generated_at'        => gmdate( 'Y-m-d\TH:i:s\Z' ),
 			'plugin_version'      => PINOVA_VERSION,
 			'build'               => BuildMetadata::info(),
+			'integrations'        => IntegrationSettings::snapshot(),
 			'wordpress_version'   => get_bloginfo( 'version' ),
 			'woocommerce_version' => defined( 'WC_VERSION' ) ? WC_VERSION : null,
 			'php_version'         => PHP_VERSION,

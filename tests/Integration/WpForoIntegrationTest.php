@@ -38,13 +38,24 @@ final class WpForoIntegrationTest extends \WP_UnitTestCase {
 		self::assertSame( $fallback, Continuation::validate( home_url( '/forum-signin/?x=1' ), $fallback, [ home_url( '/forum-signin/' ) ] ) );
 	}
 
-	public function test_missing_dependency_never_enrolls_or_rewrites_native_links(): void {
+	public function test_requested_missing_dependency_retains_owned_pending_without_native_enrollment(): void {
 		self::assertFalse( function_exists( 'WPF' ), 'This PHPUnit bootstrap must not load real third-party plugins.' );
 		update_option( IntegrationSettings::OPTION, [ 'wpforo_enabled' => '1' ] );
 		$id = self::factory()->user->create();
 		do_action( 'pinova/user_registered', $id );
-		self::assertSame( '', get_user_meta( $id, Load::STATE_META, true ) );
+		self::assertSame( 'pending', get_user_meta( $id, Load::STATE_META, true ) );
 		self::assertSame( 'native', Load::login_url( 'native' ) );
+		self::assertTrue( Load::denied( $id ) );
+		update_option( IntegrationSettings::OPTION, [ 'wpforo_enabled' => '0' ] );
+		self::assertTrue( Load::denied( $id ), 'Disabling coordination cannot release the new owned restriction.' );
+		do_action( 'pinova/mobile_verified', $id );
+		self::assertSame( 'pending', get_user_meta( $id, Load::STATE_META, true ) );
+	}
+
+	public function test_default_off_missing_dependency_does_not_claim_new_accounts(): void {
+		$id = self::factory()->user->create();
+		do_action( 'pinova/user_registered', $id );
+		self::assertSame( '', get_user_meta( $id, Load::STATE_META, true ) );
 		self::assertFalse( Load::denied( $id ) );
 	}
 

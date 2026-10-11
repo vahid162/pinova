@@ -3,13 +3,14 @@
 namespace Pinova\Logging;
 
 use Pinova\Pinova;
+use Pinova\Integrations\IntegrationSettings;
 use Throwable;
 
 /** A bounded observation report, never an authentication or repair authority. */
 final class IssueMonitor {
 
 	public const MAX_ROWS          = 1000;
-	private const FAILURE_EVENTS   = [ 'admin.sms_test_failed', 'auth.request_failed', 'auth.redirect_failed', 'identity.mobile_conflict', 'logging.write_failed', 'otp.channel_send_failed', 'otp.delivery_failed', 'user.export_failed' ];
+	private const FAILURE_EVENTS   = [ 'admin.sms_test_failed', 'auth.request_failed', 'auth.redirect_failed', 'identity.mobile_conflict', 'integration.operation_failed', 'logging.write_failed', 'otp.channel_send_failed', 'otp.delivery_failed', 'user.export_failed' ];
 	private const REJECTION_EVENTS = [ 'auth.password_failed', 'auth.logout_rejected', 'auth.password_reset_failed', 'auth.session_failed', 'otp.verify_failed', 'security.rate_limited' ];
 	private const OPTION_PREFIX    = 'pinova_issue_review_';
 
@@ -49,8 +50,15 @@ final class IssueMonitor {
 				'physical_delivery'    => 'not_verified',
 			],
 			'health'         => [],
+			'integrations'   => [],
 			'issues'         => [],
 		];
+		try {
+			// Current capability health is independent of selected historical evidence.
+			$report['integrations'] = IntegrationSettings::snapshot();
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+		}
 		if ( ! $valid ) {
 			return $report;
 		}
@@ -124,7 +132,7 @@ final class IssueMonitor {
 					$outcomes[ $flow ] = true;
 				}
 			}
-			$classification = self::classify( $event['event'], $event['context']['reason'] ?? '' );
+			$classification = self::classify( $event['event'], $event['context']['reason'] ?? '', $event['context']['status'] ?? '' );
 			if ( null !== $classification ) {
 				self::add_observation( $groups, $event, $classification );
 			}
@@ -145,8 +153,14 @@ final class IssueMonitor {
 	}
 
 	/** @return array{code:string,category:string}|null */
-	private static function classify( string $event, string $reason ): ?array {
+	private static function classify( string $event, string $reason, string $status = '' ): ?array {
 		$code = $event . ( '' !== $reason ? ':' . $reason : '' );
+		if ( in_array( $event, [ 'integration.wpforo_status_changed', 'integration.dokan_status_changed' ], true ) ) {
+			return in_array( $status, [ 'partial', 'unavailable' ], true ) ? [
+				'code'     => $code,
+				'category' => 'compatibility_observation',
+			] : null;
+		}
 		if ( in_array( $event, self::FAILURE_EVENTS, true ) ) {
 			return [
 				'code'     => $code,
@@ -212,6 +226,8 @@ final class IssueMonitor {
 
 	public static function explanation( string $code ): string {
 		return match ( true ) {
+			str_starts_with( $code, 'integration.operation_failed' ) => __( 'یکی از عملیات هماهنگی تکمیل نشد. علت مجاز و وضعیت قابلیت‌های فعلی را بررسی کنید؛ این رخداد به‌تنهایی باگ پینوا یا تغییر مجوز حساب را ثابت نمی‌کند.', 'pinova' ),
+			str_starts_with( $code, 'integration.wpforo_status_changed' ), str_starts_with( $code, 'integration.dokan_status_changed' ) => __( 'در زمان مشاهده، بخشی از هماهنگی در دسترس نبود. قابلیت و علت ثبت‌شده را بررسی کنید؛ وضعیت فعلی جداگانه نمایش داده می‌شود و به معنی تأیید رفع این مشاهده نیست.', 'pinova' ),
 			'auth.session_failed:session_exception' === $code => __( 'مرحلهٔ ورود یا یکی از callbackهای آن خطا داد. رخدادهای همان درخواست را بررسی کنید؛ این مشاهده به‌تنهایی وضعیت نهایی Cookie مرورگر را ثابت نمی‌کند.', 'pinova' ),
 			'auth.session_failed:policy_rejected' === $code => __( 'پس از تأیید کد، سیاست حساب اجازهٔ ورود نداد. تغییر نقش، مسدودیت یا محدودیت افزونهٔ دیگر را بررسی کنید؛ این رد به‌تنهایی باگ نیست.', 'pinova' ),
 			'auth.request_failed:otp_completion_failed' === $code => __( 'کد پذیرفته شد، اما عملیات حساب تکمیل نشد. رکوردهای موبایل و مرحلهٔ ساخت حساب یا ثبت تأیید را بررسی کنید؛ این رخداد به معنی کد اشتباه نیست.', 'pinova' ),

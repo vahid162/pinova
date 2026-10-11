@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +14,7 @@ function fixture(action) {
     const calls = path.join(temporary, 'called');
     writeFileSync(path.join(temporary, 'npx'), [
         '#!/bin/bash',
-        'touch "$FAKE_CALLS"',
+        'printf "%s\\n" "$*" >> "$FAKE_CALLS"',
         'if [[ " $* " == *" wp pinova otp run "* ]]; then',
         '    if [[ "${FAKE_NO_MARKER:-}" != 1 ]]; then printf "Success: Processed 0 scheduled Pinova OTP jobs; consult delivery logs for provider results.\\n"; fi',
         '    exit "${FAKE_EXIT:-0}"',
@@ -30,7 +30,7 @@ function fixture(action) {
         '    if [[ " $* " == *"wallet-hpos-reports.php"* ]]; then marker=PINOVA_WALLET_REPORTS_COMPLETE; fi',
         '    if [[ " $* " == *"logs-command.php"* ]]; then marker=PINOVA_LOGS_COMMAND_COMPLETE; fi',
         '    if [[ "${FAKE_MISSING_SUITE:-}" != "$marker" ]]; then',
-        '        if [[ "$marker" == PINOVA_REST_COMPLETE || "$marker" == PINOVA_DOKAN_REPORTS_COMPLETE || "$marker" == PINOVA_WALLET_REPORTS_COMPLETE || "$marker" == PINOVA_LOGS_COMMAND_COMPLETE ]]; then printf "%s\\n" "$marker"; else printf "%s %s\\n" "$marker" "${@: -1}"; fi',
+        '        if [[ "$marker" == PINOVA_REST_COMPLETE || "$marker" == PINOVA_DOKAN_REPORTS_COMPLETE || "$marker" == PINOVA_WALLET_REPORTS_COMPLETE || "$marker" == PINOVA_LOGS_COMMAND_COMPLETE ]]; then printf "%s\\n" "$marker"; else scenario="${@: -1}"; if [[ "$scenario" == forum-only ]]; then scenario="${@: -2:1}"; fi; printf "%s %s\\n" "$marker" "$scenario"; fi',
         '    fi',
         'fi',
         'exit "${FAKE_EXIT:-0}"',
@@ -45,7 +45,7 @@ function fixture(action) {
     const execute = changes => spawnSync('bash', [runner], {
         cwd: root, env: { ...env, ...changes }, encoding: 'utf8', timeout: 10_000,
     });
-    try { action({ execute, called: () => existsSync(calls) }); }
+    try { action({ execute, called: () => existsSync(calls), calls: () => readFileSync(calls, 'utf8') }); }
     finally { rmSync(temporary, { recursive: true, force: true }); }
 }
 
@@ -63,7 +63,7 @@ test('third-party runner refuses foreign environments before invoking wp-env', (
 });
 
 test('third-party runner requires process success and explicit scenario completion', () => {
-    fixture(({ execute }) => {
+    fixture(({ execute, calls }) => {
         const result = execute();
         assert.equal(result.status, 0, result.stderr);
         assert.match(result.stdout, /PINOVA_BASELINE_COMPLETE normal/);
@@ -82,6 +82,7 @@ test('third-party runner requires process success and explicit scenario completi
         assert.match(result.stdout, /PINOVA_WPFORO_COMPLETE manual-approval/);
         assert.match(result.stdout, /PINOVA_DOKAN_COMPLETE normal/);
         assert.match(result.stdout, /PINOVA_DOKAN_COMPLETE manual-approval/);
+        assert.equal(calls().split('\n').filter(line => line.includes('--skip-plugins=woocommerce,dokan-lite')).length, 2);
         assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_WPFORO_COMPLETE' }).status, 0);
         assert.notEqual(execute({ FAKE_MISSING_SUITE: 'PINOVA_DOKAN_COMPLETE' }).status, 0);
         assert.notEqual(execute({ FAKE_NO_MARKER: '1' }).status, 0);

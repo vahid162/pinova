@@ -21,29 +21,28 @@ final class IntegrationSettingsTest extends TestCase {
 		self::assertSame( [ 'wpforo_enabled' => '0', 'dokan_enabled' => '0' ], IntegrationSettings::normalize( 'malformed' ) );
 	}
 
-	public function test_only_profile_dependencies_can_be_supported(): void {
-		$method = new \ReflectionMethod( IntegrationSettings::class, 'dependency_status' );
+	public function test_callable_contract_rejects_inaccessible_or_changed_required_arguments(): void {
+		$method = new \ReflectionMethod( IntegrationSettings::class, 'accepts' );
 		$method->setAccessible( true );
-		$versions = [ 'woocommerce' => '11.1.2', 'wpforo' => '3.2.1', 'dokan' => '5.1.3', 'dokan_pro' => false ];
-		foreach ( [ 'wpforo', 'dokan' ] as $slug ) {
-			self::assertSame( 'supported', $method->invoke( null, $slug, $versions ) );
-			self::assertSame( 'missing', $method->invoke( null, $slug, array_replace( $versions, [ $slug => '' ] ) ) );
-			self::assertSame( 'unsupported', $method->invoke( null, $slug, array_replace( $versions, [ $slug => '999.0' ] ) ) );
-			self::assertSame( 'missing', $method->invoke( null, $slug, array_replace( $versions, [ 'woocommerce' => '' ] ) ) );
-			self::assertSame( 'unsupported', $method->invoke( null, $slug, array_replace( $versions, [ 'woocommerce' => '11.1.0' ] ) ) );
-		}
-		self::assertSame( 'unsupported', $method->invoke( null, 'dokan', array_replace( $versions, [ 'dokan_pro' => true ] ) ) );
-		self::assertSame( 'supported', $method->invoke( null, 'wpforo', array_replace( $versions, [ 'dokan_pro' => true ] ) ) );
-		self::assertSame( 'unsupported', $method->invoke( null, 'unrecognized', $versions ) );
-		foreach ( [ '3.2.1', '3.2.2' ] as $forum ) {
-			foreach ( [ '5.1.3', '5.2.1' ] as $dokan ) {
-				$current = array_replace( $versions, [ 'wpforo' => $forum, 'dokan' => $dokan ] );
-				self::assertSame( 'supported', $method->invoke( null, 'wpforo', $current ) );
-				self::assertSame( 'supported', $method->invoke( null, 'dokan', $current ) );
-			}
-		}
-		self::assertSame( 'unsupported', $method->invoke( null, 'dokan', array_replace( $versions, [ 'wpforo' => '999.0' ] ) ) );
-		self::assertSame( 'supported', $method->invoke( null, 'dokan', array_replace( $versions, [ 'wpforo' => '' ] ) ) );
+		$api = new class() {
+			public function current( $value, $optional = null ): void {}
+			public function changed( $first, $second ): void {}
+			private function inaccessible(): void {}
+		};
+		self::assertTrue( $method->invoke( null, [ $api, 'current' ], 1 ) );
+		self::assertFalse( $method->invoke( null, [ $api, 'changed' ], 1 ) );
+		self::assertFalse( $method->invoke( null, [ $api, 'inaccessible' ], 0 ) );
+		self::assertFalse( $method->invoke( null, [ $api, 'missing' ], 0 ) );
+	}
+
+	public function test_diagnostic_versions_reject_arbitrary_payloads(): void {
+		$method = new \ReflectionMethod( IntegrationSettings::class, 'version' );
+		$method->setAccessible( true );
+		define( 'PINOVA_CAPABILITY_GOOD_VERSION', '999.2.3-beta.4' );
+		define( 'PINOVA_CAPABILITY_BAD_VERSION', 'private-token' );
+		self::assertSame( '999.2.3-beta.4', $method->invoke( null, 'PINOVA_CAPABILITY_GOOD_VERSION' ) );
+		self::assertSame( '', $method->invoke( null, 'PINOVA_CAPABILITY_BAD_VERSION' ) );
+		self::assertSame( '', $method->invoke( null, 'PINOVA_CAPABILITY_MISSING_VERSION' ) );
 	}
 
 	public function test_audit_retains_only_integration_key_names(): void {

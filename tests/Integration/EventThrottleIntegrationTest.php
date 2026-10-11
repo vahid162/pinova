@@ -23,7 +23,7 @@ final class EventThrottleIntegrationTest extends WP_UnitTestCase {
 		global $wpdb;
 		$this->original_server = $_SERVER;
 		$_SERVER['REMOTE_ADDR'] = '192.0.2.80';
-		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded', 'log_otp_verify_failed', 'log_auth_request_failed', 'log_otp_queued')" );
+		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded', 'log_otp_verify_failed', 'log_auth_request_failed', 'log_otp_queued', 'log_integration_failed')" );
 		LogRepository::delete_all();
 		update_option( 'pinova_logging', [ 'minimum_level' => 'info', 'diagnostic_until' => 0 ] );
 	}
@@ -54,6 +54,29 @@ final class EventThrottleIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 1, LogRepository::paginate()['total'] );
 		$site_key = hash( 'sha256', 'pinova:event-throttle:log_otp_verify_failed:site' );
 		self::assertSame( '1', $wpdb->get_var( $wpdb->prepare( 'SELECT `hits` FROM %i WHERE `bucket_key` = %s', $wpdb->prefix . 'pinova_rate_limits', $site_key ) ) );
+	}
+
+	public function test_integration_failures_are_bounded_and_preserve_safe_operation_evidence(): void {
+		$contexts = [
+			[ 'operation' => 'wpforo', 'reason' => 'membership_failed' ],
+			[ 'operation' => 'dokan', 'reason' => 'membership_failed' ],
+			[ 'operation' => 'wpforo', 'reason' => 'profile_write_changed' ],
+		];
+		$slots = [];
+		foreach ( $contexts as $context ) {
+			$source = inet_pton( $_SERVER['REMOTE_ADDR'] ) . '|' . $context['reason'] . '|' . $context['operation'];
+			$slots[ hexdec( substr( hash_hmac( 'sha256', $source, wp_salt( 'auth' ) ), 0, 4 ) ) % 1024 ] = true;
+			for ( $repeat = 0; $repeat < 10; ++$repeat ) {
+				EventThrottle::log( 'integration.operation_failed', $context + [ 'password' => 'private-operation-secret' ] );
+			}
+		}
+		self::assertSame( count( $slots ), LogRepository::paginate()['total'] );
+		foreach ( LogRepository::paginate()['rows'] as $row ) {
+			$evidence = \Pinova\Logging\EventEvidence::redact( $row );
+			self::assertContains( $evidence['context']['operation'], [ 'wpforo', 'dokan' ] );
+			self::assertStringNotContainsString( 'private-operation-secret', wp_json_encode( $evidence ) );
+		}
+		self::assertSame( 'confirmed_failure', \Pinova\Logging\IssueMonitor::summarize( LogRepository::paginate()['rows'] )[0]['category'] );
 	}
 
 	public function test_source_and_site_windows_reopen_without_new_bucket_keys(): void {

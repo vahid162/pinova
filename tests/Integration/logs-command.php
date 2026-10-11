@@ -39,6 +39,7 @@ $today = gmdate( 'Y-m-d' );
 $from = gmdate( 'Y-m-d', time() - DAY_IN_SECONDS );
 $code = 'otp.channel_send_failed:provider_returned_false';
 $review_before = IssueMonitor::review_state( $code );
+$health_before = [ get_option( 'pinova_integration_health_wpforo', false ), get_option( 'pinova_integration_health_dokan', false ) ];
 
 try {
 	$check( 1 === $wpdb->insert( $table, [
@@ -55,6 +56,7 @@ try {
 	] ), 'insert owned historical privacy fixture' );
 	$ids[] = (int) $wpdb->insert_id;
 	$stored = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM %i WHERE id = %d', $table, $ids[0] ), ARRAY_A );
+	$event_count_before = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $table ) );
 
 	$default = $read();
 	$check( [ $today, $today ] === $default['selected_range'], 'omitted dates select the current UTC day' );
@@ -62,6 +64,7 @@ try {
 	$check( [ $from, $today ] === $explicit['selected_range'], 'explicit dates select the requested range' );
 	$expected = IssueMonitor::report( [ 'created_from' => $from, 'created_to' => $today ] );
 	$check( $expected['issues'] === $explicit['issues'] && $expected['coverage'] === $explicit['coverage'], 'registered CLI uses the same report as administration' );
+	$check( $expected['integrations']['wpforo'] === $explicit['integrations']['wpforo'] && $expected['integrations']['dokan'] === $explicit['integrations']['dokan'], 'registered CLI includes the same current integration health' );
 	foreach ( [ $default, $explicit ] as $report ) {
 		$json = wp_json_encode( $report );
 		$check( false === strpos( $json, $secret ) && false === strpos( $json, $fingerprint ), 'legacy secrets and fingerprints are redacted' );
@@ -97,6 +100,8 @@ try {
 	}
 	$check( $stored === $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM %i WHERE id = %d', $table, $ids[0] ), ARRAY_A ), 'reports preserve original event bytes' );
 	$check( $review_before === IssueMonitor::review_state( $code ), 'read-only CLI preserves review state' );
+	$check( $health_before === [ get_option( 'pinova_integration_health_wpforo', false ), get_option( 'pinova_integration_health_dokan', false ) ], 'read-only CLI preserves transition observations' );
+	$check( $event_count_before === $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $table ) ), 'read-only CLI emits no transition events' );
 } finally {
 	foreach ( $ids as $id ) {
 		$check( 1 === $wpdb->delete( $table, [ 'id' => $id ] ), 'remove only owned fixture events' );

@@ -52,6 +52,15 @@ for phase in seed upgrade rollback cleanup; do
 	grep -Fxq "PINOVA_UPGRADE_COMPLETE $phase" "$result_file"
 done
 
+# Exercise the same real forum policy with neither commerce plugin loaded.
+for scenario in normal manual-approval; do
+	npx --no-install wp-env run cli \
+		--env-cwd="wp-content/plugins/$plugin_directory" \
+		wp eval-file --use-include --skip-plugins=woocommerce,dokan-lite \
+		tests/Integration/wpforo-integration.php "$scenario" forum-only | tee "$result_file"
+	grep -Fxq "PINOVA_WPFORO_COMPLETE $scenario" "$result_file"
+done
+
 for suite in third-party-baseline wpforo-integration dokan-integration; do
 	case "$suite" in
 		third-party-baseline) marker=PINOVA_BASELINE_COMPLETE ;;

@@ -7,6 +7,7 @@ namespace Pinova\Tests\Integration;
 use Pinova\Admin\Issues;
 use Pinova\Admin\Logs;
 use Pinova\Install;
+use Pinova\Integrations\IntegrationSettings;
 use Pinova\Logging\IssueMonitor;
 use Pinova\Logging\LogRepository;
 use WP_UnitTestCase;
@@ -74,6 +75,8 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 			remove_filter( 'query', $watch );
 		}
 		self::assertSame( [], $writes );
+		self::assertSame( IntegrationSettings::snapshot()['wpforo'], $report['integrations']['wpforo'] );
+		self::assertSame( IntegrationSettings::snapshot()['dokan'], $report['integrations']['dokan'] );
 		self::assertSame( 'pinova.issues.v1', $report['schema'] );
 		self::assertSame( [ gmdate( 'Y-m-d' ), gmdate( 'Y-m-d' ) ], $report['selected_range'] );
 		self::assertTrue( $report['coverage']['complete'] );
@@ -315,6 +318,8 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		}
 		self::assertFalse( $report['coverage']['complete'] );
 		self::assertSame( [], $report['issues'] );
+		self::assertContains( $report['integrations']['wpforo']['state'], IntegrationSettings::STATES );
+		self::assertContains( $report['integrations']['dokan']['state'], IntegrationSettings::STATES );
 	}
 
 	public function test_new_events_between_batches_wait_for_the_next_snapshot(): void {

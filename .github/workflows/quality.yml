@@ -333,7 +333,7 @@ jobs:
       fail-fast: false
       matrix:
         hpos: ['yes', 'no']
-        plugins: ['baseline', 'current', 'current-wpforo', 'current-dokan']
+        plugins: ['baseline', 'current', 'current-wpforo', 'current-dokan', 'deployed']
     env:
       PINOVA_TEST_PROFILE: third-party
       PINOVA_TEST_PLUGIN_SET: ${{ matrix.plugins }}

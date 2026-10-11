@@ -123,6 +123,23 @@ test('a mismatched verification receipt cannot configure the third-party profile
     });
 });
 
+test('deployed plugin set loads the verified WooCommerce archive and refuses other versions', () => {
+    fixture(({ execute, installFixtures, config }) => {
+        const manifest = structuredClone(baseline);
+        manifest.plugins = manifest.deployed_plugins;
+        manifest.woocommerce = manifest.plugins.find(plugin => plugin.slug === 'woocommerce').version;
+        installFixtures(manifest);
+        const env = { PINOVA_TEST_PROFILE: 'third-party', PINOVA_TEST_PLUGIN_SET: 'deployed' };
+        assert.equal(execute(configure, env).status, 0);
+        assert.deepEqual(config().plugins, [
+            './.build/third-party/woocommerce', './.build/third-party/wpforo',
+            './.build/third-party/dokan-lite', './.build/third-party/elementor', '.',
+        ]);
+        assert.notEqual(execute(configure, { ...env, WC_VERSION: baseline.woocommerce }).status, 0);
+        assert.notEqual(execute(configure, { ...env, PINOVA_TEST_PLUGIN_SET: 'current' }).status, 0);
+    });
+});
+
 test('fixture checksum failure occurs before extraction and leaves no reusable receipt', () => {
     fixture(({ directory, execute }) => {
         const bin = path.join(directory, 'bin');

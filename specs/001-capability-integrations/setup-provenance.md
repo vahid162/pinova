@@ -30,12 +30,15 @@ Repository ShellCheck covers every tracked Bash script, including the shared Bas
 installed by the official Python-mode workflow. Local adjustments preserve behavior while
 making source paths and eval-populated variable contracts explicit, separating declaration
 from fallible assignments, and documenting one intentional literal Codex-command prefix.
+The root lookup passes its current directory explicitly. Setup-plan and setup-tasks retain
+default path-state persistence; their optional `--no-persist` argument is deliberately
+omitted, with narrow `SC2119` annotations for older ShellCheck versions.
 No script material was removed, and no broad lint suppression was added. Original manifest
 hashes remain import-baseline evidence, so lifecycle inspection accurately recognizes these
 project customizations rather than pretending they are unchanged upstream files.
 
 The project-local ignore file also excludes Python workflow bytecode and isolated runtimes.
-ShellCheck 0.11.0 passed for all six helpers; Bash/Python prerequisite output and resolved
+ShellCheck 0.11.0 passed for all 16 tracked shell scripts; Bash/Python prerequisite output and resolved
 constitution templates agree. Setup-plan preserves the existing feature plan, and setup-tasks
 resolves the expected feature and official tasks template.
 

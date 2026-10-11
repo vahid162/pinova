@@ -32,6 +32,8 @@ source "$SCRIPT_DIR/common.sh"
 declare REPO_ROOT CURRENT_BRANCH FEATURE_DIR FEATURE_SPEC IMPL_PLAN
 
 # Get all paths and variables from common functions
+# Setup intentionally uses default persistence; --no-persist is optional.
+# shellcheck disable=SC2119
 _paths_output=$(get_feature_paths) || { echo "ERROR: Failed to resolve feature paths" >&2; exit 1; }
 eval "$_paths_output"
 unset _paths_output

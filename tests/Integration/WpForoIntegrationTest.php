@@ -11,6 +11,19 @@ use Pinova\Pinova;
 
 /** Dependency-absent regression coverage; real-plugin cases live in wpforo-integration.php. */
 final class WpForoIntegrationTest extends \WP_UnitTestCase {
+	private function configure( array $settings ): void {
+		$previous = get_current_user_id();
+		$admin = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		$settings = IntegrationSettings::normalize( $settings );
+		try {
+			wp_set_current_user( $admin );
+			update_option( IntegrationSettings::OPTION, $settings );
+			self::assertSame( $settings, get_option( IntegrationSettings::OPTION ) );
+		} finally {
+			wp_set_current_user( $previous );
+		}
+	}
+
 	public function tear_down(): void {
 		delete_option( IntegrationSettings::OPTION );
 		wp_set_current_user( 0 );
@@ -40,13 +53,13 @@ final class WpForoIntegrationTest extends \WP_UnitTestCase {
 
 	public function test_requested_missing_dependency_retains_owned_pending_without_native_enrollment(): void {
 		self::assertFalse( function_exists( 'WPF' ), 'This PHPUnit bootstrap must not load real third-party plugins.' );
-		update_option( IntegrationSettings::OPTION, [ 'wpforo_enabled' => '1' ] );
+		$this->configure( [ 'wpforo_enabled' => '1' ] );
 		$id = self::factory()->user->create();
 		do_action( 'pinova/user_registered', $id );
 		self::assertSame( 'pending', get_user_meta( $id, Load::STATE_META, true ) );
 		self::assertSame( 'native', Load::login_url( 'native' ) );
 		self::assertTrue( Load::denied( $id ) );
-		update_option( IntegrationSettings::OPTION, [ 'wpforo_enabled' => '0' ] );
+		$this->configure( [ 'wpforo_enabled' => '0' ] );
 		self::assertTrue( Load::denied( $id ), 'Disabling coordination cannot release the new owned restriction.' );
 		do_action( 'pinova/mobile_verified', $id );
 		self::assertSame( 'pending', get_user_meta( $id, Load::STATE_META, true ) );

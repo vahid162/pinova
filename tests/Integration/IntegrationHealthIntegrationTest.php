@@ -126,12 +126,14 @@ final class IntegrationHealthIntegrationTest extends WP_UnitTestCase {
 		$throw = static function (): void {
 			throw new \RuntimeException( 'private-health-payload' );
 		};
-		add_filter( 'pre_add_option_pinova_integration_health_wpforo', $throw );
+		// Native add_option() sanitizes before persistence; this is its real per-option filter.
+		add_filter( 'sanitize_option_pinova_integration_health_wpforo', $throw );
 		try {
 			IntegrationHealth::observe();
 		} finally {
-			remove_filter( 'pre_add_option_pinova_integration_health_wpforo', $throw );
+			remove_filter( 'sanitize_option_pinova_integration_health_wpforo', $throw );
 		}
+		self::assertFalse( get_option( 'pinova_integration_health_wpforo' ) );
 		self::assertSame( 1, LogRepository::paginate()['total'] );
 		$calls = 0;
 		$reenter = static function ( $value ) use ( &$calls ) {
@@ -139,13 +141,14 @@ final class IntegrationHealthIntegrationTest extends WP_UnitTestCase {
 			IntegrationHealth::observe();
 			return $value;
 		};
-		add_filter( 'pre_add_option_pinova_integration_health_wpforo', $reenter );
+		add_filter( 'sanitize_option_pinova_integration_health_wpforo', $reenter );
 		try {
 			IntegrationHealth::observe();
 		} finally {
-			remove_filter( 'pre_add_option_pinova_integration_health_wpforo', $reenter );
+			remove_filter( 'sanitize_option_pinova_integration_health_wpforo', $reenter );
 		}
 		self::assertSame( 1, $calls );
+		self::assertSame( [ 'state' => 'unavailable', 'reason' => 'missing_plugin' ], get_option( 'pinova_integration_health_wpforo' ) );
 		self::assertSame( 2, LogRepository::paginate()['total'] );
 	}
 

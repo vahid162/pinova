@@ -62,7 +62,7 @@ get_repo_root() {
 
     # First, look for .specify directory (spec-kit's own marker)
     local specify_root
-    if specify_root=$(find_specify_root); then
+    if specify_root=$(find_specify_root "$(pwd)"); then
         echo "$specify_root"
         return
     fi

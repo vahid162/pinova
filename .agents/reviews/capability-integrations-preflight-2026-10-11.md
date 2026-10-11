@@ -39,3 +39,9 @@ Official deployed fixture archives were independently downloaded and checked: Wo
 Full PHP, static-analysis, WordPress, native integration, HPOS, browser, dependency, security and package checks run on isolated GitHub Actions. Exact-head review/CI, merged-main CI, immutable prerelease publication, independent asset verification, scoped rollback backup, published-package test-site installation/rollback and acceptance are still pending. No production installation or shared-service change is authorized by this evidence. Physical SMS receipt is not established by synthetic fixtures.
 
 Status-transition history is best effort and threshold-dependent. Atomic state claims precede logging; an omitted event is not backfilled on an unchanged observation. Current read-only snapshots remain available but do not prove recovery or universal future compatibility.
+
+## Initial CI corrections
+
+Initial head `7e34a1b846a9b74d5a11a7b424b3210db68ecd80` passed all five PHP jobs, JavaScript, supply-chain, plugin-check and all ten real-plugin/order-store jobs, including forum-only invocations and the real browser suite. The broader WordPress suite exposed four fixture defects: enabled options were saved without administrator authority, a direct SQL option replacement left a cached absent-option result, and observer failure/reentry used a nonexistent native filter. Fixtures now use authorized native option writes with persistence assertions and the real per-option sanitization filter. Account-protection assertions and runtime code are unchanged.
+
+The repository-wide shell gate also exposed optional-argument diagnostics in the imported Spec Kit helpers under the runner's ShellCheck version. Root discovery now passes its working directory explicitly; two setup calls document intentionally omitted optional persistence flags. All sixteen tracked shell scripts pass the bounded local check. These corrections still require a complete green run on the replacement head.

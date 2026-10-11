@@ -270,6 +270,9 @@ namespace Pinova\Tests\Integration {
 				self::assertTrue( WC()->cart->remove_coupon( $coupon->get_code() ) );
 				WC()->cart->calculate_totals();
 				self::assertTrue( WC()->cart->needs_payment() );
+				self::assertSame( 0, wc_notice_count( 'error' ), 'The coupon transition must not introduce a native error.' );
+				// The preceding coupon response consumes its success notice before order review.
+				wc_clear_notices();
 				$response = $this->update_order_review_ajax( [ 'payment_method' => 'synthetic', 'country' => 'GB', 'address' => 'Editable after coupon removal' ] );
 				self::assertSame( 'success', $response['result'] );
 				self::assertArrayNotHasKey( '.woocommerce-billing-fields', $response['fragments'], 'Native AJAX does not rebuild the original address form.' );
@@ -354,6 +357,17 @@ namespace Pinova\Tests\Integration {
 			} finally {
 				remove_filter( 'woocommerce_checkout_fields', $before, 10 );
 				remove_filter( 'woocommerce_checkout_fields', $after, 10 );
+			}
+		}
+
+		public function test_legacy_callback_at_another_priority_remains_registered(): void {
+			$this->enable();
+			add_filter( 'woocommerce_checkout_fields', 'pante_custom_override_checkout_fields', 11 );
+			try {
+				$this->policy->replace_legacy_callback();
+				self::assertSame( 11, has_filter( 'woocommerce_checkout_fields', 'pante_custom_override_checkout_fields' ) );
+			} finally {
+				remove_filter( 'woocommerce_checkout_fields', 'pante_custom_override_checkout_fields', 11 );
 			}
 		}
 

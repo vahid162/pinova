@@ -150,8 +150,16 @@ for (const width of [1280, 390]) {
         await page.locator('#billing_last_name').fill('Shopper');
         await page.locator('#billing_email').fill(`${username}@example.test`);
         await page.locator('#billing_phone').fill('invalid');
-        await page.locator('#place_order').click();
-        await expect(page.locator('.woocommerce-error')).toContainText('شماره موبایل');
+        const [response] = await Promise.all([
+            page.waitForResponse(candidate => new URL(candidate.url()).searchParams.get('wc-ajax') === 'checkout' &&
+                candidate.request().method() === 'POST'),
+            page.locator('#place_order').click(),
+        ]);
+        expect(response.ok()).toBe(true);
+        const rejection = await response.json();
+        expect(rejection.result).toBe('failure');
+        expect(rejection.messages).toContain('شماره موبایل');
+        await expect(page.locator('.woocommerce-error[role="alert"], .wc-block-components-notice-banner.is-error[role="alert"]').first()).toContainText('شماره موبایل');
         await expect(page.locator('.pinova-auth-modal')).not.toBeVisible();
         await policy(true, true);
         await page.reload();
@@ -192,6 +200,5 @@ test('existing settings UI saves the optional policy and reports Checkout Blocks
     await cli(`update_option('woocommerce_checkout_page_id', ${fixture.blocks});`);
     await page.reload();
     await expect(page.locator('body')).toContainText('Checkout Blocks');
-    await page.screenshot({ path: 'test-results/browser/virtual-checkout-settings.png', fullPage: true });
     await policy(false);
 });

@@ -16,8 +16,13 @@ final class VirtualCheckout {
 	public const SETTING = 'woocommerce_virtual_checkout';
 
 	private const BILLING_FIELDS = [
-		'billing_company', 'billing_address_1', 'billing_address_2',
-		'billing_city', 'billing_postcode', 'billing_country', 'billing_state',
+		'billing_company',
+		'billing_address_1',
+		'billing_address_2',
+		'billing_city',
+		'billing_postcode',
+		'billing_country',
+		'billing_state',
 	];
 
 	/** @var string[] Fields actually removed during this checkout request. */
@@ -172,8 +177,10 @@ final class VirtualCheckout {
 			 * The contract covers every enabled gateway, even if currently unavailable.
 			 */
 			$keys = apply_filters( 'pinova/virtual_checkout/gateway_required_fields', $native ? [] : null, $gateway );
-			if ( ! is_array( $keys ) || array_filter( $keys, static fn( $key ): bool => ! is_string( $key )
-				|| ! in_array( $key, array_merge( self::BILLING_FIELDS, [ 'order_comments' ] ), true ) ) ) {
+			if ( ! is_array( $keys ) || array_filter(
+				$keys,
+				static fn( $key ): bool => ! is_string( $key ) || ! in_array( $key, array_merge( self::BILLING_FIELDS, [ 'order_comments' ] ), true )
+			) ) {
 				return null;
 			}
 			$required = array_merge( $required, $keys );
@@ -248,6 +255,9 @@ final class VirtualCheckout {
 	}
 
 	private static function record_failure(): void {
-		EventThrottle::log( 'integration.operation_failed', [ 'operation' => 'woocommerce', 'reason' => 'virtual_checkout_contract_failed' ] );
+		EventThrottle::log( 'integration.operation_failed', [
+			'operation' => 'woocommerce',
+			'reason'    => 'virtual_checkout_contract_failed',
+		] );
 	}
 }

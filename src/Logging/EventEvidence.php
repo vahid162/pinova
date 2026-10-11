@@ -18,7 +18,7 @@ final class EventEvidence {
 		'otp.verify_failed'                 => [ 'token_expired', 'invalid_token', 'record_not_found', 'flow_mismatch', 'purpose_mismatch', 'expired', 'already_verified', 'attempt_limit', 'ip_mismatch', 'invalid_code', 'policy_rejected', 'claim_rejected' ],
 		'otp.channel_send_failed'           => [ 'provider_returned_false', 'provider_exception' ],
 		'otp.delivery_skipped'              => [ 'policy_rejected', 'already_completed', 'provider_outcome_unknown', 'invalid_payload', 'duplicate_records', 'claim_unavailable', 'expired' ],
-		'integration.operation_failed'      => [ 'profile_write_changed', 'membership_failed', 'rest_initialization_failed', 'conversion_contract_changed', 'forum_refresh_failed' ],
+		'integration.operation_failed'      => [ 'profile_write_changed', 'membership_failed', 'rest_initialization_failed', 'conversion_contract_changed', 'forum_refresh_failed', 'virtual_checkout_contract_failed' ],
 		'integration.wpforo_status_changed' => IntegrationSettings::REASONS,
 		'integration.dokan_status_changed'  => IntegrationSettings::REASONS,
 	];
@@ -47,7 +47,7 @@ final class EventEvidence {
 			$allowed['result'] = [ 'acknowledged', 'resolved_unverified' ];
 		}
 		if ( 'integration.operation_failed' === $event ) {
-			$allowed['operation'] = [ 'wpforo', 'dokan' ];
+			$allowed['operation'] = [ 'wpforo', 'dokan', 'woocommerce' ];
 		} elseif ( in_array( $event, [ 'integration.wpforo_status_changed', 'integration.dokan_status_changed' ], true ) ) {
 			$allowed['status'] = [ 'off', 'active', 'partial', 'unavailable' ];
 		}

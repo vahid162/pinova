@@ -3,6 +3,7 @@
 namespace Pinova\Admin;
 
 use Pinova\Integrations\IntegrationSettings;
+use Pinova\Integrations\Woocommerce\VirtualCheckout;
 use Pinova\Integrations\Wordpress\NativeLoginGate;
 use Pinova\Services\SMSService;
 use Pinova\Services\UserService;
@@ -138,6 +139,14 @@ class Settings extends \Nabik\Utils\V1\Settings {
 						'yes_automatic' => 'فعال، ایجاد خودکار حساب کاربری بدون احراز هویت',
 					],
 					'default' => function_exists( 'WC' ) && WC()->checkout()->is_registration_required() ? 'yes_redirect' : 'no',
+				],
+				[
+					'id'                => VirtualCheckout::SETTING,
+					'label'             => 'تسویه‌حساب سادهٔ محصولات مجازی',
+					'type'              => 'checkbox',
+					'default'           => false,
+					'desc'              => VirtualCheckout::description(),
+					'sanitize_callback' => [ VirtualCheckout::class, 'sanitize_enabled' ],
 				],
 			],
 			'pinova_sms'                => [

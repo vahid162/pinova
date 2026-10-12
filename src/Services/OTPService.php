@@ -62,7 +62,14 @@ class OTPService {
 			if ( isset( $handled[ $flow_id ] ) || false !== wp_next_scheduled( 'pinova_otp_delivery', [ $flow_id ] ) ) {
 				continue;
 			}
-			EventThrottle::log( 'otp.queue_recovered', [ 'operation' => 'queued_otp', 'reason' => 'missing_schedule', 'flow_id' => $flow_id ] );
+			EventThrottle::log(
+				'otp.queue_recovered',
+				[
+					'operation' => 'queued_otp',
+					'reason'    => 'missing_schedule',
+					'flow_id'   => $flow_id,
+				]
+			);
 			do_action( 'pinova_otp_delivery', $flow_id );
 			++$count;
 		}
@@ -80,7 +87,14 @@ class OTPService {
 				throw new RateLimitUnavailableException( 'OTP delivery acceptance could not be persisted.' );
 			}
 		} catch ( Throwable $throwable ) {
-			EventThrottle::log( 'auth.request_failed', [ 'operation' => 'queued_otp', 'reason' => 'queue_schedule_failed', 'flow_id' => $flow_id ] );
+			EventThrottle::log(
+				'auth.request_failed',
+				[
+					'operation' => 'queued_otp',
+					'reason'    => 'queue_schedule_failed',
+					'flow_id'   => $flow_id,
+				]
+			);
 			unset( $throwable );
 			throw new RateLimitUnavailableException( 'OTP delivery is unavailable.' );
 		}
@@ -92,7 +106,13 @@ class OTPService {
 			self::run_due_delivery();
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
-			EventThrottle::log( 'auth.request_failed', [ 'operation' => 'queued_otp', 'reason' => 'delivery_worker_error' ] );
+			EventThrottle::log(
+				'auth.request_failed',
+				[
+					'operation' => 'queued_otp',
+					'reason'    => 'delivery_worker_error',
+				]
+			);
 		}
 	}
 

@@ -19,7 +19,7 @@ result_file="$(mktemp)"
 trap 'rm -f -- "$result_file"' EXIT
 
 npx --no-install wp-env run cli wp pinova otp run | tee "$result_file"
-grep -Fq 'Processed 0 scheduled Pinova OTP jobs; consult delivery logs for provider results.' "$result_file"
+grep -Fq 'Processed 0 Pinova OTP jobs; consult delivery logs for provider results.' "$result_file"
 
 npx --no-install wp-env run cli \
 	--env-cwd="wp-content/plugins/$plugin_directory" \

@@ -63,6 +63,7 @@ class Pinova {
 		add_action( 'pinova_rate_limit_cleanup', [ RateLimitService::class, 'cleanup' ] );
 		add_action( 'pinova_otp_delivery', [ OTPService::class, 'deliver_queued' ] );
 		add_action( 'pinova_otp_reconcile', [ OTPService::class, 'reconcile_queued_delivery' ] );
+		// phpcs:ignore WordPress.WP.CronInterval.CronSchedulesInterval -- Bounded OTP recovery must run before the three-minute signed expiry.
 		add_filter( 'cron_schedules', [ $this, 'otp_cron_schedules' ] );
 		add_action( 'pinova_logging_cleanup', [ $this, 'cleanup_logs' ] );
 		add_action( 'updated_option', [ SettingsAudit::class, 'updated' ], 10, 3 );
@@ -89,7 +90,10 @@ class Pinova {
 
 	/** Reconciliation remains native cron; disabled automatic cron stays disabled. */
 	public function otp_cron_schedules( array $schedules ): array {
-		$schedules['pinova_minute'] = [ 'interval' => MINUTE_IN_SECONDS, 'display' => 'Pinova OTP reconciliation' ];
+		$schedules['pinova_minute'] = [
+			'interval' => MINUTE_IN_SECONDS,
+			'display'  => 'Pinova OTP reconciliation',
+		];
 		return $schedules;
 	}
 

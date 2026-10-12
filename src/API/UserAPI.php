@@ -164,9 +164,9 @@ class UserAPI extends RestAPI {
 		$message = __( 'اگر ادامه با این شناسه مجاز باشد، کد تأیید ارسال می‌شود.', 'pinova' );
 		try {
 			RateLimitService::otp( IP::get(), $identifier->get_value() );
-			$decoy_flow = RateLimitService::decoy_flow( $identifier->get_value(), $forget ? 'forget' : 'authenticate', IP::get(), null, true );
+			$decoy_flow                    = RateLimitService::decoy_flow( $identifier->get_value(), $forget ? 'forget' : 'authenticate', IP::get(), null, true );
 			[ $data['jwt'], $data['ttl'] ] = self::decoy_otp_state( $decoy_flow );
-			$response = self::response( true, $message, $data );
+			$response                      = self::response( true, $message, $data );
 			OTPService::schedule_queued_delivery( $decoy_flow[0] );
 			add_action( 'shutdown', [ OTPService::class, 'spawn_queued_delivery' ], 100 );
 		} catch ( RateLimitException $e ) {

@@ -178,7 +178,7 @@ class RateLimitService {
 		if ( $require_acknowledgement ) {
 			$payload = 'reserved:' . $payload;
 		}
-		$queued  = $wpdb->query(
+		$queued = $wpdb->query(
 			$wpdb->prepare( 'UPDATE %i SET `payload` = %s WHERE `bucket_key` = %s AND `scope` = %s AND `reset_at` > UTC_TIMESTAMP() AND `payload` IS NULL', $table, $payload, $bucket_key, $row->scope )
 		);
 		if ( false === $queued ) {
@@ -222,11 +222,23 @@ class RateLimitService {
 		}
 		if ( 1 !== $written ) {
 			// Another accepted initiation can win the same atomic transition.
-			$current = $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s AND `reset_at` > UTC_TIMESTAMP() LIMIT 1', $table, $flow_id ) );
-			return ! $wpdb->last_error && is_string( $current ) && self::accepted_queue_payload( $current );
+			return self::queued_otp_is_acknowledged( $flow_id );
 		}
-		EventThrottle::log( 'otp.queued', [ 'flow_id' => $flow_id, 'remaining_seconds' => max( 0, (int) strtotime( $rows[0]['reset_at'] . ' UTC' ) - time() ) ] );
+		EventThrottle::log(
+			'otp.queued',
+			[
+				'flow_id'           => $flow_id,
+				'remaining_seconds' => max( 0, (int) strtotime( $rows[0]['reset_at'] . ' UTC' ) - time() ),
+			]
+		);
 		return true;
+	}
+
+	/** Read the competitor's accepted transition without hiding a read failure. */
+	private static function queued_otp_is_acknowledged( string $flow_id ): bool {
+		global $wpdb;
+		$current = $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s AND `reset_at` > UTC_TIMESTAMP() LIMIT 1', $wpdb->prefix . 'pinova_rate_limits', $flow_id ) );
+		return ! $wpdb->last_error && is_string( $current ) && self::accepted_queue_payload( $current );
 	}
 
 	private static function accepted_queue_payload( string $payload ): bool {
@@ -252,8 +264,9 @@ class RateLimitService {
 		// Exclude native schedules and held claims before the finite candidate
 		// window, so unrelated orphaned flows cannot be hidden behind them.
 		$exclude = $scheduled ? ' AND `scope` NOT IN (' . implode( ', ', array_fill( 0, count( $scheduled ), '%s' ) ) . ')' : '';
-		$params = array_merge( [ $wpdb->prefix . 'pinova_rate_limits', 'processing:%:ready:%', self::OTP_CLAIM_LEASE ], array_values( $scheduled ) );
-		$rows = $wpdb->get_col(
+		$params  = array_merge( [ $wpdb->prefix . 'pinova_rate_limits', 'processing:%:ready:%', self::OTP_CLAIM_LEASE ], array_values( $scheduled ) );
+		$rows    = $wpdb->get_col(
+			// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- The prepared array supplies three fixed values and one per generated %s placeholder.
 			$wpdb->prepare(
 				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Only fixed placeholders are generated; flow IDs are prepared.
 				"SELECT `scope` FROM %i WHERE `scope` REGEXP '^[a-f0-9]{32}$' AND `reset_at` > UTC_TIMESTAMP() AND (LEFT(`payload`, 6) = 'ready:' OR (LEFT(`payload`, 11) = 'processing:' AND `payload` LIKE %s AND `updated_at` <= UTC_TIMESTAMP() - INTERVAL %d SECOND)) AND IS_FREE_LOCK(CONCAT('pinova_otp_', `scope`)) = 1{$exclude} ORDER BY `reset_at`, `scope` LIMIT 32",
@@ -268,7 +281,15 @@ class RateLimitService {
 
 	/** Read-only bounded state facts; never decode or return queued identities. */
 	public static function queue_health(): array {
-		$health = [ 'read_success' => false, 'truncated' => false, 'pending' => 0, 'expired' => 0, 'reserved' => 0, 'processing' => 0, 'legacy' => 0 ];
+		$health = [
+			'read_success' => false,
+			'truncated'    => false,
+			'pending'      => 0,
+			'expired'      => 0,
+			'reserved'     => 0,
+			'processing'   => 0,
+			'legacy'       => 0,
+		];
 		global $wpdb;
 		$suppressed = $wpdb->suppress_errors();
 		try {
@@ -303,7 +324,14 @@ class RateLimitService {
 		try {
 			$pending = $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM %i WHERE `scope` = %s AND `reset_at` > UTC_TIMESTAMP() AND (LEFT(`payload`, 6) = 'ready:' OR `payload` LIKE %s) LIMIT 1", $wpdb->prefix . 'pinova_rate_limits', $flow_id, 'processing:%:ready:%' ) );
 			if ( ! $wpdb->last_error && null !== $pending ) {
-				EventThrottle::log( 'otp.queue_deferred', [ 'operation' => 'queued_otp', 'reason' => 'claim_unavailable', 'flow_id' => $flow_id ] );
+				EventThrottle::log(
+					'otp.queue_deferred',
+					[
+						'operation' => 'queued_otp',
+						'reason'    => 'claim_unavailable',
+						'flow_id'   => $flow_id,
+					]
+				);
 			}
 		} catch ( \Throwable $throwable ) {
 			unset( $throwable );

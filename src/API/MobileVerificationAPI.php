@@ -53,15 +53,15 @@ final class MobileVerificationAPI extends RestAPI {
 			return self::response( false, __( 'تلفن همراه معتبر وارد کنید.', 'pinova' ), [], 400 );
 		}
 		try {
-			$user_id = get_current_user_id();
-			$flow    = MobileVerificationService::with_lock(
+			$user_id  = get_current_user_id();
+			$flow     = MobileVerificationService::with_lock(
 				$user_id,
 				static function () use ( $identifier, $user_id ) {
 					RateLimitService::otp( IP::get(), $identifier->get_value() );
 					return RateLimitService::decoy_flow( $identifier->get_value(), OTP::TYPE_VERIFY_MOBILE, IP::get(), $user_id, true );
 				}
 			);
-			$ttl = max( 1, $flow[1] - time() );
+			$ttl      = max( 1, $flow[1] - time() );
 			$response = self::response(
 				true,
 				__( 'اگر ادامه با این شماره مجاز باشد، کد تأیید ارسال می‌شود.', 'pinova' ),

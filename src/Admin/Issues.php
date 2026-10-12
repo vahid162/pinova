@@ -128,13 +128,15 @@ final class Issues {
 			<table class="widefat striped">
 				<thead><tr><th><?php esc_html_e( 'وضعیت رکورد', 'pinova' ); ?></th><th><?php esc_html_e( 'تعداد مشاهده‌شدهٔ فعلی', 'pinova' ); ?></th></tr></thead>
 				<tbody>
-				<?php foreach ( [
+				<?php
+				foreach ( [
 					'pending'    => __( 'پذیرفته‌شده و در انتظار شروع پردازش', 'pinova' ),
 					'expired'    => __( 'پذیرفته‌شده؛ مهلت پیش از شروع پردازش تمام شده', 'pinova' ),
 					'reserved'   => __( 'رزروشده؛ هنوز برای ارسال پذیرفته نشده', 'pinova' ),
 					'processing' => __( 'علامت‌گذاری‌شده برای پردازش؛ نتیجهٔ نهایی مشخص نیست', 'pinova' ),
 					'legacy'     => __( 'رکورد قدیمی؛ پذیرش ارسال مشخص نیست', 'pinova' ),
-				] as $key => $label ) : ?>
+				] as $key => $label ) :
+					?>
 					<tr><td><?php echo esc_html( $label ); ?></td><td><?php echo esc_html( (string) $snapshot[ $key ] ); ?></td></tr>
 				<?php endforeach; ?>
 				</tbody>

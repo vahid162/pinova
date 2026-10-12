@@ -38,6 +38,8 @@ final class LogRepository {
 		'otp.channel_send_failed',
 		'otp.created',
 		'otp.queued',
+		'otp.queue_deferred',
+		'otp.queue_recovered',
 		'otp.delivery_failed',
 		'otp.delivery_skipped',
 		'otp.verified',

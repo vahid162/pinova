@@ -33,6 +33,8 @@ $read = static function ( string $arguments = '' ) use ( $check, $run ): array {
 global $wpdb;
 $table = $wpdb->prefix . 'pinova_logs';
 $ids = [];
+$queue_table = $wpdb->prefix . 'pinova_rate_limits';
+$queue_keys = [];
 $secret = 'pinova-cli-private-' . bin2hex( random_bytes( 8 ) );
 $fingerprint = bin2hex( random_bytes( 16 ) );
 $today = gmdate( 'Y-m-d' );
@@ -42,6 +44,16 @@ $review_before = IssueMonitor::review_state( $code );
 $health_before = [ get_option( 'pinova_integration_health_wpforo', false ), get_option( 'pinova_integration_health_dokan', false ) ];
 
 try {
+	foreach ( [ 'ready:', 'reserved:' ] as $prefix ) {
+		$key = hash( 'sha256', 'pinova-cli-queue-' . $prefix . $secret );
+		$check( 1 === $wpdb->insert( $queue_table, [
+			'bucket_key' => $key, 'scope' => bin2hex( random_bytes( 16 ) ), 'hits' => 1,
+			'reset_at' => gmdate( 'Y-m-d H:i:s', time() - 60 ),
+			'updated_at' => gmdate( 'Y-m-d H:i:s' ), 'payload' => $prefix . base64_encode( $secret ),
+		] ), 'insert only owned queue snapshot fixtures' );
+		$queue_keys[] = $key;
+	}
+	$queue_stored = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM %i WHERE bucket_key IN (%s, %s) ORDER BY bucket_key', $queue_table, ...$queue_keys ), ARRAY_A );
 	$check( 1 === $wpdb->insert( $table, [
 		'created_at' => gmdate( 'Y-m-d H:i:s' ),
 		'level' => 'warning',
@@ -65,9 +77,15 @@ try {
 	$expected = IssueMonitor::report( [ 'created_from' => $from, 'created_to' => $today ] );
 	$check( $expected['issues'] === $explicit['issues'] && $expected['coverage'] === $explicit['coverage'], 'registered CLI uses the same report as administration' );
 	$check( $expected['integrations']['wpforo'] === $explicit['integrations']['wpforo'] && $expected['integrations']['dokan'] === $explicit['integrations']['dokan'], 'registered CLI includes the same current integration health' );
+	$check( $expected['queue_health'] === $explicit['queue_health'] && true === $explicit['queue_health']['read_success'], 'registered CLI includes the same current read-only queue snapshot' );
+	$check( 0 < $explicit['queue_health']['expired'] && 0 < $explicit['queue_health']['reserved'], 'queue snapshot distinguishes expired accepted work from unaccepted reservations' );
 	foreach ( [ $default, $explicit ] as $report ) {
 		$json = wp_json_encode( $report );
 		$check( false === strpos( $json, $secret ) && false === strpos( $json, $fingerprint ), 'legacy secrets and fingerprints are redacted' );
+		$check( false === strpos( $json, base64_encode( $secret ) ), 'queue ciphertext is never exported' );
+		foreach ( $queue_keys as $key ) {
+			$check( false === strpos( $json, $key ), 'queue bucket identifiers are never exported' );
+		}
 		$found = false;
 		foreach ( $report['issues'] as $issue ) {
 			if ( $code !== $issue['code'] ) {
@@ -102,9 +120,13 @@ try {
 	$check( $review_before === IssueMonitor::review_state( $code ), 'read-only CLI preserves review state' );
 	$check( $health_before === [ get_option( 'pinova_integration_health_wpforo', false ), get_option( 'pinova_integration_health_dokan', false ) ], 'read-only CLI preserves transition observations' );
 	$check( $event_count_before === $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $table ) ), 'read-only CLI emits no transition events' );
+	$check( $queue_stored === $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM %i WHERE bucket_key IN (%s, %s) ORDER BY bucket_key', $queue_table, ...$queue_keys ), ARRAY_A ), 'read-only CLI preserves queue records and payload bytes' );
 } finally {
 	foreach ( $ids as $id ) {
 		$check( 1 === $wpdb->delete( $table, [ 'id' => $id ] ), 'remove only owned fixture events' );
+	}
+	foreach ( $queue_keys as $key ) {
+		$check( 1 === $wpdb->delete( $queue_table, [ 'bucket_key' => $key ] ), 'remove only owned queue fixtures' );
 	}
 }
 

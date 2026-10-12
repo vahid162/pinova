@@ -38,6 +38,7 @@ final class Issues {
 		<section aria-labelledby="pinova-issues-heading">
 			<h2 id="pinova-issues-heading"><?php esc_html_e( 'مشکلات و نتیجهٔ بررسی', 'pinova' ); ?></h2>
 			<?php self::render_integrations( $report['integrations'] ); ?>
+			<?php self::render_queue_health( $report['queue_health'] ); ?>
 			<p><?php esc_html_e( 'این گزارش از رخدادهای ثبت‌شده ساخته می‌شود. خرابی مشاهده‌شده لزوماً باگ پینوا نیست؛ علت اصلی باید با شواهد بررسی شود. تأیید سرویس‌دهنده نیز به معنی دریافت پیامک روی گوشی نیست.', 'pinova' ); ?></p>
 			<p><?php esc_html_e( 'بازهٔ گزارش حداکثر هفت روز تقویمی UTC است؛ پیش‌فرض، روز جاری است. فیلترهای رخداد، سطح، کاربر و کد پیگیری فقط جدول لاگ‌ها را تغییر می‌دهند و بر این خلاصه اثر ندارند.', 'pinova' ); ?></p>
 			<p>
@@ -108,6 +109,43 @@ final class Issues {
 				</form>
 			<?php endif; ?>
 		</section>
+		<?php
+	}
+
+	/** Current queue counts cannot be reviewed or resolved as historical evidence.
+	 * @param array<string,bool|int> $snapshot
+	 */
+	private static function render_queue_health( array $snapshot ): void {
+		?>
+		<h3><?php esc_html_e( 'وضعیت فعلی صف کد تأیید', 'pinova' ); ?></h3>
+		<p><?php esc_html_e( 'این شمارش فقط وضعیت فعلی رکوردهای صف است و به بازهٔ رخدادها وابسته نیست. رسیدگی یا اعلام رفع مشکل در جدول زیر، این رکوردها را تغییر نمی‌دهد؛ نبود رکورد، دریافت پیامک یا رفع خرابی قبلی را ثابت نمی‌کند.', 'pinova' ); ?></p>
+		<?php if ( ! $snapshot['read_success'] ) : ?>
+			<div class="notice notice-warning inline"><p><?php esc_html_e( 'خواندن صف انجام نشد؛ تعداد درخواست‌های در انتظار و سلامت صف مشخص نیست.', 'pinova' ); ?></p></div>
+		<?php else : ?>
+			<?php if ( $snapshot['truncated'] ) : ?>
+				<div class="notice notice-warning inline"><p><?php esc_html_e( 'خواندن صف به سقف بررسی رسیده است؛ شمارش‌ها ممکن است کمتر از مقدار واقعی باشند.', 'pinova' ); ?></p></div>
+			<?php endif; ?>
+			<table class="widefat striped">
+				<thead><tr><th><?php esc_html_e( 'وضعیت رکورد', 'pinova' ); ?></th><th><?php esc_html_e( 'تعداد مشاهده‌شدهٔ فعلی', 'pinova' ); ?></th></tr></thead>
+				<tbody>
+				<?php foreach ( [
+					'pending'    => __( 'پذیرفته‌شده و در انتظار شروع پردازش', 'pinova' ),
+					'expired'    => __( 'پذیرفته‌شده؛ مهلت پیش از شروع پردازش تمام شده', 'pinova' ),
+					'reserved'   => __( 'رزروشده؛ هنوز برای ارسال پذیرفته نشده', 'pinova' ),
+					'processing' => __( 'علامت‌گذاری‌شده برای پردازش؛ نتیجهٔ نهایی مشخص نیست', 'pinova' ),
+					'legacy'     => __( 'رکورد قدیمی؛ پذیرش ارسال مشخص نیست', 'pinova' ),
+				] as $key => $label ) : ?>
+					<tr><td><?php echo esc_html( $label ); ?></td><td><?php echo esc_html( (string) $snapshot[ $key ] ); ?></td></tr>
+				<?php endforeach; ?>
+				</tbody>
+			</table>
+			<?php if ( 0 < $snapshot['expired'] ) : ?>
+				<div class="notice notice-error inline"><p><?php esc_html_e( 'درخواست پذیرفته‌شده‌ای پیش از شروع پردازش منقضی شده است. این خرابی عملیاتی مشاهده‌شده است؛ علت دقیق را با زمان‌بندی، قفل‌ها و رخدادهای صف بررسی کنید. کد منقضی ارسال نمی‌شود.', 'pinova' ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( 0 < $snapshot['legacy'] ) : ?>
+				<p><?php esc_html_e( 'پذیرش رکوردهای قدیمی قابل تأیید نیست؛ صرف وجود آن‌ها خرابی زمان‌بندی را ثابت نمی‌کند و باعث ارسال مجدد خودکار نمی‌شود.', 'pinova' ); ?></p>
+			<?php endif; ?>
+		<?php endif; ?>
 		<?php
 	}
 

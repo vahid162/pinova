@@ -23,7 +23,7 @@ final class EventThrottleIntegrationTest extends WP_UnitTestCase {
 		global $wpdb;
 		$this->original_server = $_SERVER;
 		$_SERVER['REMOTE_ADDR'] = '192.0.2.80';
-		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded', 'log_otp_verify_failed', 'log_auth_request_failed', 'log_otp_queued', 'log_integration_failed')" );
+		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded', 'log_otp_verify_failed', 'log_auth_request_failed', 'log_otp_queued', 'log_otp_queue_recovered', 'log_otp_queue_deferred', 'log_integration_failed')" );
 		LogRepository::delete_all();
 		update_option( 'pinova_logging', [ 'minimum_level' => 'info', 'diagnostic_until' => 0 ] );
 	}
@@ -109,7 +109,8 @@ final class EventThrottleIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( '100', $wpdb->get_var( $wpdb->prepare( "SELECT hits FROM {$wpdb->prefix}pinova_rate_limits WHERE bucket_key = %s", $site_key ) ) );
 	}
 
-	public function test_distinct_queued_flows_share_the_site_budget(): void {
+	/** @dataProvider queue_observations */
+	public function test_distinct_queue_flows_share_the_site_budget( string $event, string $scope ): void {
 		global $wpdb;
 		$slots = [];
 		for ( $index = 1; count( $slots ) < 105; ++$index ) {
@@ -120,11 +121,54 @@ final class EventThrottleIntegrationTest extends WP_UnitTestCase {
 				continue;
 			}
 			$slots[ $slot ] = true;
-			EventThrottle::log( 'otp.queued', [ 'flow_id' => $flow, 'remaining_seconds' => 180 ] );
+			EventThrottle::log( $event, [ 'flow_id' => $flow, 'remaining_seconds' => 180 ] );
 		}
 		self::assertSame( 100, LogRepository::paginate()['total'] );
-		$site_key = hash( 'sha256', 'pinova:event-throttle:log_otp_queued:site' );
+		$site_key = hash( 'sha256', 'pinova:event-throttle:' . $scope . ':site' );
 		self::assertSame( '100', $wpdb->get_var( $wpdb->prepare( 'SELECT `hits` FROM %i WHERE `bucket_key` = %s', $wpdb->prefix . 'pinova_rate_limits', $site_key ) ) );
+	}
+
+	public function queue_observations(): array {
+		return [
+			[ 'otp.queued', 'log_otp_queued' ],
+			[ 'otp.queue_recovered', 'log_otp_queue_recovered' ],
+			[ 'otp.queue_deferred', 'log_otp_queue_deferred' ],
+		];
+	}
+
+	public function test_queue_observations_persist_safe_facts_and_preserve_uncertainty(): void {
+		$flow = str_repeat( 'a', 32 );
+		foreach ( [
+			'otp.queue_recovered' => [ 'info', 'missing_schedule' ],
+			'otp.queue_deferred' => [ 'warning', 'claim_unavailable' ],
+			'auth.request_failed' => [ 'error', 'queue_schedule_failed' ],
+		] as $event => [ $level, $reason ] ) {
+			for ( $repeat = 0; $repeat < 5; ++$repeat ) {
+				EventThrottle::log( $event, [
+					'operation' => 'queued_otp', 'reason' => $reason, 'flow_id' => $flow,
+					'queue_delay_seconds' => 31, 'remaining_seconds' => 149,
+					'identifier' => 'private-queue-identifier', 'payload' => 'private-ciphertext',
+					'otp' => 'private-otp', 'provider_response' => 'private-provider-response',
+				] );
+			}
+			$rows = LogRepository::paginate( 1, 50, '', [ 'event' => $event ] )['rows'];
+			self::assertCount( 1, $rows );
+			self::assertSame( $level, $rows[0]['level'] );
+			self::assertSame( $flow, $rows[0]['flow_id'] );
+			$evidence = \Pinova\Logging\EventEvidence::redact( $rows[0] );
+			self::assertSame( $reason, $evidence['context']['reason'] );
+			self::assertSame( 'queued_otp', $evidence['context']['operation'] );
+			self::assertSame( 31, $evidence['context']['queue_delay_seconds'] );
+			self::assertSame( 149, $evidence['context']['remaining_seconds'] );
+			self::assertStringNotContainsString( 'private', wp_json_encode( $rows ) );
+			$issues = \Pinova\Logging\IssueMonitor::summarize( $rows );
+			if ( 'otp.queue_recovered' === $event ) {
+				self::assertSame( [], $issues, 'Recovery dispatch is not proof of delivery or a code bug.' );
+			} else {
+				self::assertSame( 'otp.queue_deferred' === $event ? 'insufficient_evidence' : 'confirmed_failure', $issues[0]['category'] );
+				self::assertSame( 'root_cause_unconfirmed', $issues[0]['diagnosis'] );
+			}
+		}
 	}
 
 	public function test_fixed_source_slot_collisions_only_suppress_observation(): void {
@@ -223,7 +267,9 @@ final class EventThrottleIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( '0', $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded')" ) );
 		update_option( 'pinova_logging', [ 'minimum_level' => 'error', 'diagnostic_until' => 0 ] );
 		EventThrottle::log( 'auth.logout_rejected' );
+		EventThrottle::log( 'otp.queue_recovered', [ 'flow_id' => str_repeat( 'a', 32 ) ] );
+		EventThrottle::log( 'otp.queue_deferred', [ 'flow_id' => str_repeat( 'a', 32 ), 'reason' => 'claim_unavailable' ] );
 		self::assertSame( 0, LogRepository::paginate()['total'] );
-		self::assertSame( '0', $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded')" ) );
+		self::assertSame( '0', $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_logout_rejected', 'log_reset_failed', 'log_reset_succeeded', 'log_otp_queue_recovered', 'log_otp_queue_deferred')" ) );
 	}
 }

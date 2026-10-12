@@ -4,6 +4,7 @@ namespace Pinova\Logging;
 
 use Pinova\Pinova;
 use Pinova\Integrations\IntegrationSettings;
+use Pinova\Services\RateLimitService;
 use Throwable;
 
 /** A bounded observation report, never an authentication or repair authority. */
@@ -50,12 +51,27 @@ final class IssueMonitor {
 				'physical_delivery'    => 'not_verified',
 			],
 			'health'         => [],
+			'queue_health'   => [
+				'read_success' => false,
+				'truncated'    => false,
+				'pending'      => 0,
+				'expired'      => 0,
+				'reserved'     => 0,
+				'processing'   => 0,
+				'legacy'       => 0,
+			],
 			'integrations'   => [],
 			'issues'         => [],
 		];
 		try {
 			// Current capability health is independent of selected historical evidence.
 			$report['integrations'] = IntegrationSettings::snapshot();
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+		}
+		try {
+			// Queue state is a current, read-only snapshot, not historical issue evidence.
+			$report['queue_health'] = RateLimitService::queue_health();
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
 		}
@@ -177,6 +193,12 @@ final class IssueMonitor {
 				'category' => $category,
 			];
 		}
+		if ( 'otp.queue_deferred' === $event ) {
+			return [
+				'code'     => $code,
+				'category' => 'insufficient_evidence',
+			];
+		}
 		if ( in_array( $event, self::REJECTION_EVENTS, true ) ) {
 			$category = '' !== $reason || 'security.rate_limited' === $event ? 'expected_rejection' : 'insufficient_evidence';
 			if ( in_array( $reason, [ 'reset_key_generation_failed', 'reset_pipeline_failed', 'session_exception' ], true ) ) {
@@ -232,6 +254,8 @@ final class IssueMonitor {
 			'auth.session_failed:policy_rejected' === $code => __( 'پس از تأیید کد، سیاست حساب اجازهٔ ورود نداد. تغییر نقش، مسدودیت یا محدودیت افزونهٔ دیگر را بررسی کنید؛ این رد به‌تنهایی باگ نیست.', 'pinova' ),
 			'auth.request_failed:otp_completion_failed' === $code => __( 'کد پذیرفته شد، اما عملیات حساب تکمیل نشد. رکوردهای موبایل و مرحلهٔ ساخت حساب یا ثبت تأیید را بررسی کنید؛ این رخداد به معنی کد اشتباه نیست.', 'pinova' ),
 			'auth.request_failed:mobile_evidence_unavailable' === $code => __( 'خواندن وضعیت تأیید موبایل انجام نشد. رکوردهای امنیتی تکراری یا خطای پایگاه داده را بررسی کنید؛ مصرف کد در این مرحله انجام نشده است.', 'pinova' ),
+			'auth.request_failed:queue_schedule_failed' === $code => __( 'درخواست در صف برای ارسال پذیرفته نشد. ذخیرهٔ صف و زمان‌بندی وردپرس را بررسی کنید؛ این مشاهده علت دقیق خرابی را مشخص نمی‌کند.', 'pinova' ),
+			str_starts_with( $code, 'otp.queue_deferred' ) => __( 'کارگر نتوانست این نوبت را در اختیار بگیرد. قفل، لغو یا خطای پایگاه داده ممکن است علت باشد؛ درخواست پایان‌یافته یا ارسال ناموفق تأیید نشده است.', 'pinova' ),
 			'otp.outcome_unknown' === $code => __( 'نتیجهٔ این صف در بازه دیده نشد. محدودیت ثبت، رد سیاست یا نتیجهٔ خارج از بازه ممکن است علت باشد؛ ارسال ناموفق ثابت نشده است.', 'pinova' ),
 			str_contains( $code, 'token_expired' ), str_contains( $code, ':expired' ) && str_starts_with( $code, 'otp.verify_failed' ) => __( 'اعتبار کد هنگام تأیید پایان یافته بود. این رخداد به‌تنهایی نشانهٔ باگ نیست؛ زمان درخواست و ارسال را مقایسه کنید.', 'pinova' ),
 			str_contains( $code, 'queue_expired' ), 'otp.delivery_skipped:expired' === $code => __( 'مهلت صف پیش از ارسال تمام شد. زمان اجرای cron و مدت انتظار صف را بررسی کنید؛ کد منقضی نباید ارسال شود.', 'pinova' ),

@@ -91,7 +91,7 @@ class RateLimitService {
 	 *
 	 * @return array{0:string,1:int} Flow ID and absolute UTC expiry.
 	 */
-	public static function decoy_flow( string $identifier, string $purpose, string $ip, ?int $user_id = null ): array {
+	public static function decoy_flow( string $identifier, string $purpose, string $ip, ?int $user_id = null, bool $require_acknowledgement = false ): array {
 		global $wpdb;
 		$identifier = self::canonical_identifier( $identifier );
 
@@ -175,13 +175,16 @@ class RateLimitService {
 		}
 		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- Binary authenticated ciphertext needs safe SQL transport.
 		$payload = base64_encode( $nonce . $tag . $ciphertext );
+		if ( $require_acknowledgement ) {
+			$payload = 'reserved:' . $payload;
+		}
 		$queued  = $wpdb->query(
 			$wpdb->prepare( 'UPDATE %i SET `payload` = %s WHERE `bucket_key` = %s AND `scope` = %s AND `reset_at` > UTC_TIMESTAMP() AND `payload` IS NULL', $table, $payload, $bucket_key, $row->scope )
 		);
 		if ( false === $queued ) {
 			throw new RateLimitUnavailableException( 'The OTP delivery queue could not be written.' );
 		}
-		if ( 1 === $queued ) {
+		if ( 1 === $queued && ! $require_acknowledgement ) {
 			EventThrottle::log(
 				'otp.queued',
 				[
@@ -194,6 +197,139 @@ class RateLimitService {
 		return [ $row->scope, (int) strtotime( $row->reset_at . ' UTC' ) ];
 	}
 
+	/** Make a prepared, successfully scheduled public response recoverable. */
+	public static function acknowledge_queued_otp( string $flow_id ): bool {
+		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) {
+			return false;
+		}
+		global $wpdb;
+		$table = $wpdb->prefix . 'pinova_rate_limits';
+		$rows  = $wpdb->get_results( $wpdb->prepare( 'SELECT `payload`, `reset_at` FROM %i WHERE `scope` = %s AND `reset_at` > UTC_TIMESTAMP() LIMIT 2', $table, $flow_id ), ARRAY_A );
+		if ( $wpdb->last_error || ! is_array( $rows ) || 1 !== count( $rows ) ) {
+			return false;
+		}
+		$stored = (string) $rows[0]['payload'];
+		if ( self::accepted_queue_payload( $stored ) ) {
+			return true;
+		}
+		$cipher = str_starts_with( $stored, 'reserved:' ) ? substr( $stored, 9 ) : $stored;
+		if ( ! preg_match( '/\A[A-Za-z0-9+\/]+=*\z/', $cipher ) ) {
+			return false;
+		}
+		$written = $wpdb->query( $wpdb->prepare( 'UPDATE %i SET `payload` = %s WHERE `scope` = %s AND `payload` = %s AND `reset_at` > UTC_TIMESTAMP()', $table, 'ready:' . $cipher, $flow_id, $stored ) );
+		if ( false === $written ) {
+			return false;
+		}
+		if ( 1 !== $written ) {
+			// Another accepted initiation can win the same atomic transition.
+			$current = $wpdb->get_var( $wpdb->prepare( 'SELECT `payload` FROM %i WHERE `scope` = %s AND `reset_at` > UTC_TIMESTAMP() LIMIT 1', $table, $flow_id ) );
+			return ! $wpdb->last_error && is_string( $current ) && self::accepted_queue_payload( $current );
+		}
+		EventThrottle::log( 'otp.queued', [ 'flow_id' => $flow_id, 'remaining_seconds' => max( 0, (int) strtotime( $rows[0]['reset_at'] . ' UTC' ) - time() ) ] );
+		return true;
+	}
+
+	private static function accepted_queue_payload( string $payload ): bool {
+		return str_starts_with( $payload, 'ready:' ) || str_starts_with( $payload, 'processing:' ) || 'delivered' === $payload;
+	}
+
+	/** Recovery never admits a legacy or unacknowledged reservation. @return string[] */
+	public static function recoverable_queued_otp(): array {
+		global $wpdb;
+		$cron = _get_cron_array();
+		if ( ! is_array( $cron ) ) {
+			throw new RateLimitUnavailableException( 'The native OTP schedule could not be read.' );
+		}
+		$scheduled = [];
+		foreach ( $cron as $hooks ) {
+			foreach ( $hooks['pinova_otp_delivery'] ?? [] as $event ) {
+				$args = $event['args'] ?? [];
+				if ( is_array( $args ) && 1 === count( $args ) && is_string( $args[0] ?? null ) && preg_match( '/\A[a-f0-9]{32}\z/', $args[0] ) ) {
+					$scheduled[ $args[0] ] = $args[0];
+				}
+			}
+		}
+		// Exclude native schedules and held claims before the finite candidate
+		// window, so unrelated orphaned flows cannot be hidden behind them.
+		$exclude = $scheduled ? ' AND `scope` NOT IN (' . implode( ', ', array_fill( 0, count( $scheduled ), '%s' ) ) . ')' : '';
+		$params = array_merge( [ $wpdb->prefix . 'pinova_rate_limits', 'processing:%:ready:%', self::OTP_CLAIM_LEASE ], array_values( $scheduled ) );
+		$rows = $wpdb->get_col(
+			$wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Only fixed placeholders are generated; flow IDs are prepared.
+				"SELECT `scope` FROM %i WHERE `scope` REGEXP '^[a-f0-9]{32}$' AND `reset_at` > UTC_TIMESTAMP() AND (LEFT(`payload`, 6) = 'ready:' OR (LEFT(`payload`, 11) = 'processing:' AND `payload` LIKE %s AND `updated_at` <= UTC_TIMESTAMP() - INTERVAL %d SECOND)) AND IS_FREE_LOCK(CONCAT('pinova_otp_', `scope`)) = 1{$exclude} ORDER BY `reset_at`, `scope` LIMIT 32",
+				$params
+			)
+		);
+		if ( $wpdb->last_error || ! is_array( $rows ) ) {
+			throw new RateLimitUnavailableException( 'The acknowledged OTP queue could not be read.' );
+		}
+		return array_values( array_unique( $rows ) );
+	}
+
+	/** Read-only bounded state facts; never decode or return queued identities. */
+	public static function queue_health(): array {
+		$health = [ 'read_success' => false, 'truncated' => false, 'pending' => 0, 'expired' => 0, 'reserved' => 0, 'processing' => 0, 'legacy' => 0 ];
+		global $wpdb;
+		$suppressed = $wpdb->suppress_errors();
+		try {
+			$states = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT CASE WHEN LEFT(`payload`, 9) = 'reserved:' THEN 'reserved' WHEN LEFT(`payload`, 11) = 'processing:' THEN 'processing' WHEN LEFT(`payload`, 6) = 'ready:' THEN IF(`reset_at` <= UTC_TIMESTAMP(), 'expired', 'pending') ELSE 'legacy' END FROM %i WHERE `scope` REGEXP '^[a-f0-9]{32}$' AND `payload` IS NOT NULL AND `payload` <> 'delivered' AND LEFT(`payload`, 10) <> 'cancelled:' ORDER BY `reset_at`, `scope` LIMIT 1001",
+					$wpdb->prefix . 'pinova_rate_limits'
+				)
+			);
+			if ( $wpdb->last_error || ! is_array( $states ) ) {
+				return $health;
+			}
+			$health['read_success'] = true;
+			$health['truncated']    = count( $states ) > 1000;
+			foreach ( array_slice( $states, 0, 1000 ) as $state ) {
+				if ( in_array( $state, [ 'pending', 'expired', 'reserved', 'processing', 'legacy' ], true ) ) {
+					++$health[ $state ];
+				}
+			}
+		} catch ( \Throwable $throwable ) {
+			unset( $throwable );
+		} finally {
+			$wpdb->suppress_errors( $suppressed );
+		}
+		return $health;
+	}
+
+	/** A failed claim is only a deferral while an acknowledged flow remains active. */
+	public static function observe_deferred_queued_otp( string $flow_id ): void {
+		global $wpdb;
+		$suppressed = $wpdb->suppress_errors();
+		try {
+			$pending = $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM %i WHERE `scope` = %s AND `reset_at` > UTC_TIMESTAMP() AND (LEFT(`payload`, 6) = 'ready:' OR `payload` LIKE %s) LIMIT 1", $wpdb->prefix . 'pinova_rate_limits', $flow_id, 'processing:%:ready:%' ) );
+			if ( ! $wpdb->last_error && null !== $pending ) {
+				EventThrottle::log( 'otp.queue_deferred', [ 'operation' => 'queued_otp', 'reason' => 'claim_unavailable', 'flow_id' => $flow_id ] );
+			}
+		} catch ( \Throwable $throwable ) {
+			unset( $throwable );
+		} finally {
+			$wpdb->suppress_errors( $suppressed );
+		}
+	}
+
+	/** Keep a sampled missed-deadline fact even when its cron entry was lost. */
+	public static function observe_expired_acknowledged_queue(): void {
+		global $wpdb;
+		$suppressed = $wpdb->suppress_errors();
+		try {
+			$flows = $wpdb->get_col( $wpdb->prepare( "SELECT `scope` FROM %i WHERE `scope` REGEXP '^[a-f0-9]{32}$' AND `reset_at` <= UTC_TIMESTAMP() AND LEFT(`payload`, 6) = 'ready:' ORDER BY `reset_at`, `scope` LIMIT 3", $wpdb->prefix . 'pinova_rate_limits' ) );
+			if ( ! $wpdb->last_error && is_array( $flows ) ) {
+				foreach ( $flows as $flow_id ) {
+					self::observe_expired_queued_otp( $flow_id );
+				}
+			}
+		} catch ( \Throwable $throwable ) {
+			unset( $throwable );
+		} finally {
+			$wpdb->suppress_errors( $suppressed );
+		}
+	}
+
 	/** Observe only an expired, unclaimed encrypted payload; never decode its identity. */
 	public static function observe_expired_queued_otp( string $flow_id ): void {
 		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) {
@@ -204,7 +340,7 @@ class RateLimitService {
 		try {
 			$expired = $wpdb->get_var(
 				$wpdb->prepare(
-					"SELECT 1 FROM %i WHERE `scope` = %s AND `reset_at` <= UTC_TIMESTAMP() AND `payload` IS NOT NULL AND `payload` NOT IN ('delivered', 'processing') AND `payload` NOT LIKE %s AND `payload` NOT LIKE %s LIMIT 1",
+					"SELECT 1 FROM %i WHERE `scope` = %s AND `reset_at` <= UTC_TIMESTAMP() AND `payload` IS NOT NULL AND `payload` NOT IN ('delivered', 'processing') AND LEFT(`payload`, 9) <> 'reserved:' AND `payload` NOT LIKE %s AND `payload` NOT LIKE %s LIMIT 1",
 					$wpdb->prefix . 'pinova_rate_limits',
 					$flow_id,
 					'processing:%',
@@ -273,9 +409,10 @@ class RateLimitService {
 				return null;
 			}
 			$payload = $parts[2];
-		} elseif ( 'processing' === $stored || str_starts_with( $stored, 'cancelled:' ) || 'delivered' === $stored ) {
+		} elseif ( 'processing' === $stored || str_starts_with( $stored, 'reserved:' ) || str_starts_with( $stored, 'cancelled:' ) || 'delivered' === $stored ) {
 			return null;
 		}
+		$cipher = str_starts_with( $payload, 'ready:' ) ? substr( $payload, 6 ) : $payload;
 
 		$claim_token = bin2hex( random_bytes( 8 ) );
 		$claimed     = $wpdb->query(
@@ -285,7 +422,7 @@ class RateLimitService {
 			return null;
 		}
 		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- Decode authenticated ciphertext before AES-GCM verification.
-		$binary = base64_decode( $payload, true );
+		$binary = base64_decode( $cipher, true );
 		if ( ! is_string( $binary ) || strlen( $binary ) < 29 || ! function_exists( 'openssl_decrypt' ) ) {
 			self::finish_queued_otp( $flow_id, $claim_token );
 			return null;

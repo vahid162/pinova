@@ -54,7 +54,7 @@ class Pinova {
 						unset( $throwable );
 						\WP_CLI::error( 'The Pinova OTP batch could not be processed.' );
 					}
-					\WP_CLI::success( sprintf( 'Processed %d scheduled Pinova OTP jobs; consult delivery logs for provider results.', $count ) );
+					\WP_CLI::success( sprintf( 'Processed %d Pinova OTP jobs; consult delivery logs for provider results.', $count ) );
 				}
 			);
 		}
@@ -62,6 +62,8 @@ class Pinova {
 		add_action( 'init', [ $this, 'schedule_cleanup' ] );
 		add_action( 'pinova_rate_limit_cleanup', [ RateLimitService::class, 'cleanup' ] );
 		add_action( 'pinova_otp_delivery', [ OTPService::class, 'deliver_queued' ] );
+		add_action( 'pinova_otp_reconcile', [ OTPService::class, 'reconcile_queued_delivery' ] );
+		add_filter( 'cron_schedules', [ $this, 'otp_cron_schedules' ] );
 		add_action( 'pinova_logging_cleanup', [ $this, 'cleanup_logs' ] );
 		add_action( 'updated_option', [ SettingsAudit::class, 'updated' ], 10, 3 );
 		add_action( 'added_option', [ SettingsAudit::class, 'added' ], 10, 2 );
@@ -73,6 +75,9 @@ class Pinova {
 	}
 
 	public function schedule_cleanup(): void {
+		if ( ! is_multisite() && ! wp_next_scheduled( 'pinova_otp_reconcile' ) ) {
+			wp_schedule_event( time() + MINUTE_IN_SECONDS, 'pinova_minute', 'pinova_otp_reconcile' );
+		}
 		if ( ! wp_next_scheduled( 'pinova_rate_limit_cleanup' ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'pinova_rate_limit_cleanup' );
 		}
@@ -80,6 +85,12 @@ class Pinova {
 		if ( ! wp_next_scheduled( 'pinova_logging_cleanup' ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'pinova_logging_cleanup' );
 		}
+	}
+
+	/** Reconciliation remains native cron; disabled automatic cron stays disabled. */
+	public function otp_cron_schedules( array $schedules ): array {
+		$schedules['pinova_minute'] = [ 'interval' => MINUTE_IN_SECONDS, 'display' => 'Pinova OTP reconciliation' ];
+		return $schedules;
 	}
 
 	public function cleanup_logs(): void {

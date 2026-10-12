@@ -26,6 +26,7 @@ final class IssueMonitorTest extends TestCase {
 			[ 'auth.password_failed', 'authentication_rejected', 'expected_rejection' ],
 			[ 'otp.channel_send_failed', 'provider_returned_false', 'confirmed_failure' ],
 			[ 'auth.request_failed', 'delivery_worker_error', 'confirmed_failure' ],
+			[ 'auth.request_failed', 'queue_schedule_failed', 'confirmed_failure' ],
 			[ 'auth.request_failed', 'otp_completion_failed', 'confirmed_failure' ],
 			[ 'auth.request_failed', 'mobile_evidence_unavailable', 'confirmed_failure' ],
 			[ 'auth.session_failed', 'session_exception', 'confirmed_failure' ],
@@ -37,6 +38,7 @@ final class IssueMonitorTest extends TestCase {
 			[ 'otp.delivery_skipped', 'claim_unavailable', 'insufficient_evidence' ],
 			[ 'otp.delivery_skipped', 'provider_outcome_unknown', 'insufficient_evidence' ],
 			[ 'otp.delivery_skipped', 'duplicate_records', 'confirmed_failure' ],
+			[ 'otp.queue_deferred', 'claim_unavailable', 'insufficient_evidence' ],
 		];
 	}
 
@@ -133,6 +135,52 @@ final class IssueMonitorTest extends TestCase {
 		$queued['created_at'] = gmdate( 'Y-m-d H:i:s', time() - 600 );
 		$created = $this->row( 2, 'otp.created' );
 		self::assertSame( 'otp.outcome_unknown', IssueMonitor::summarize( [ $created, $queued ] )[0]['code'] );
+	}
+
+	public function test_recovery_and_deferred_claims_do_not_complete_a_queue_or_prove_delivery(): void {
+		$queued = $this->row( 1, 'otp.queued' );
+		$queued['created_at'] = gmdate( 'Y-m-d H:i:s', time() - 600 );
+		foreach ( [ 'otp.queue_recovered', 'otp.queue_deferred' ] as $event ) {
+			$observation = $this->row( 2, $event, [ 'reason' => 'claim_unavailable', 'operation' => 'queued_otp', 'remaining_seconds' => 120 ] );
+			$observation['flow_id'] = $queued['flow_id'];
+			$issues = array_column( IssueMonitor::summarize( [ $observation, $queued ] ), null, 'code' );
+			self::assertArrayHasKey( 'otp.outcome_unknown', $issues );
+			self::assertSame( 'insufficient_evidence', $issues['otp.outcome_unknown']['category'] );
+			if ( 'otp.queue_deferred' === $event ) {
+				self::assertSame( 'insufficient_evidence', $issues['otp.queue_deferred:claim_unavailable']['category'] );
+			} else {
+				self::assertCount( 1, $issues );
+			}
+		}
+	}
+
+	public function test_queue_observations_keep_only_finite_evidence_and_never_recovery_claims(): void {
+		foreach ( [ 'otp.queue_recovered', 'otp.queue_deferred', 'auth.request_failed' ] as $event ) {
+			$context = [
+				'operation' => 'queued_otp',
+				'reason' => 'auth.request_failed' === $event ? 'queue_schedule_failed' : ( 'otp.queue_recovered' === $event ? 'missing_schedule' : 'claim_unavailable' ),
+				'queue_delay_seconds' => 60,
+				'remaining_seconds' => 120,
+				'identifier' => 'private@example.test',
+				'otp' => 'private-otp',
+				'provider_response' => 'private-provider-response',
+				'payload' => 'private-ciphertext',
+				'recovery_verified' => true,
+			];
+			$redacted = EventEvidence::redact( $this->row( 1, $event, $context ) );
+			self::assertSame( $event, $redacted['event'] );
+			self::assertSame( 'queued_otp', $redacted['context']['operation'] );
+			self::assertSame( 60, $redacted['context']['queue_delay_seconds'] );
+			self::assertSame( 120, $redacted['context']['remaining_seconds'] );
+			self::assertSame( $context['reason'], $redacted['context']['reason'] );
+			self::assertStringNotContainsString( 'private', json_encode( $redacted ) );
+			self::assertArrayNotHasKey( 'recovery_verified', $redacted['context'] );
+			$context['reason'] = 'private_code_shaped_secret';
+			$context['operation'] = 'private_operation';
+			$negative = EventEvidence::redact( $this->row( 2, $event, $context ) );
+			self::assertArrayNotHasKey( 'reason', $negative['context'] );
+			self::assertArrayNotHasKey( 'operation', $negative['context'] );
+		}
 	}
 
 	public function test_review_state_reopens_for_newer_evidence_without_claiming_verified_repair(): void {

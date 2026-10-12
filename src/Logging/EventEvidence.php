@@ -10,7 +10,7 @@ final class EventEvidence {
 	/** Finite reasons are safe to expose; arbitrary code-shaped strings are not. */
 	public const REASONS = [
 		'auth.session_failed'               => [ 'policy_rejected', 'session_exception' ],
-		'auth.request_failed'               => [ 'initiation_error', 'delivery_worker_error', 'queue_expired', 'mobile_evidence_unavailable', 'otp_completion_failed' ],
+		'auth.request_failed'               => [ 'initiation_error', 'delivery_worker_error', 'queue_expired', 'queue_schedule_failed', 'mobile_evidence_unavailable', 'otp_completion_failed' ],
 		'auth.password_failed'              => [ 'authentication_rejected', 'native_only_policy' ],
 		'auth.password_reset_failed'        => [ 'native_only_policy', 'reset_key_generation_failed', 'reset_key_rejected', 'password_mismatch', 'invalid_token', 'user_not_found', 'invalid_reset_key', 'reset_pipeline_failed' ],
 		'auth.logout_rejected'              => [ 'invalid_nonce' ],
@@ -18,6 +18,8 @@ final class EventEvidence {
 		'otp.verify_failed'                 => [ 'token_expired', 'invalid_token', 'record_not_found', 'flow_mismatch', 'purpose_mismatch', 'expired', 'already_verified', 'attempt_limit', 'ip_mismatch', 'invalid_code', 'policy_rejected', 'claim_rejected' ],
 		'otp.channel_send_failed'           => [ 'provider_returned_false', 'provider_exception' ],
 		'otp.delivery_skipped'              => [ 'policy_rejected', 'already_completed', 'provider_outcome_unknown', 'invalid_payload', 'duplicate_records', 'claim_unavailable', 'expired' ],
+		'otp.queue_deferred'                => [ 'claim_unavailable' ],
+		'otp.queue_recovered'               => [ 'missing_schedule' ],
 		'integration.operation_failed'      => [ 'profile_write_changed', 'membership_failed', 'rest_initialization_failed', 'conversion_contract_changed', 'forum_refresh_failed', 'virtual_checkout_contract_failed' ],
 		'integration.wpforo_status_changed' => IntegrationSettings::REASONS,
 		'integration.dokan_status_changed'  => IntegrationSettings::REASONS,
@@ -31,7 +33,7 @@ final class EventEvidence {
 		if ( str_starts_with( $event, 'otp.' ) || str_starts_with( $event, 'admin.sms_test_' ) ) {
 			$allowed['channel'] = [ 'sms', 'email', 'bale', 'call' ];
 		}
-		if ( in_array( $event, [ 'auth.request_failed', 'otp.delivery_skipped' ], true ) ) {
+		if ( in_array( $event, [ 'auth.request_failed', 'otp.delivery_skipped', 'otp.queue_deferred', 'otp.queue_recovered' ], true ) ) {
 			$allowed['operation'] = [ 'authenticate', 'queued_otp', 'verify_otp' ];
 		} elseif ( str_starts_with( $event, 'auth.password_reset_' ) ) {
 			$allowed['operation'] = [ 'forgot_verify', 'forgot_change' ];

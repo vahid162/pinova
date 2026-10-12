@@ -164,12 +164,10 @@ class UserAPI extends RestAPI {
 		$message = __( 'اگر ادامه با این شناسه مجاز باشد، کد تأیید ارسال می‌شود.', 'pinova' );
 		try {
 			RateLimitService::otp( IP::get(), $identifier->get_value() );
-			$decoy_flow = RateLimitService::decoy_flow( $identifier->get_value(), $forget ? 'forget' : 'authenticate', IP::get() );
-			$flow_args  = [ $decoy_flow[0] ];
-			if ( ! wp_next_scheduled( 'pinova_otp_delivery', $flow_args )
-				&& true !== wp_schedule_single_event( time(), 'pinova_otp_delivery', $flow_args ) ) {
-				throw new RateLimitUnavailableException( 'OTP delivery could not be scheduled.' );
-			}
+			$decoy_flow = RateLimitService::decoy_flow( $identifier->get_value(), $forget ? 'forget' : 'authenticate', IP::get(), null, true );
+			[ $data['jwt'], $data['ttl'] ] = self::decoy_otp_state( $decoy_flow );
+			$response = self::response( true, $message, $data );
+			OTPService::schedule_queued_delivery( $decoy_flow[0] );
 			add_action( 'shutdown', [ OTPService::class, 'spawn_queued_delivery' ], 100 );
 		} catch ( RateLimitException $e ) {
 			self::minimum_response_time( $started );
@@ -195,9 +193,8 @@ class UserAPI extends RestAPI {
 			return self::response( false, __( 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید. اگر مشکل ادامه داشت، کد پیگیری را به پشتیبانی بدهید.', 'pinova' ), [], 503 );
 		}
 
-		[ $data['jwt'], $data['ttl'] ] = self::decoy_otp_state( $decoy_flow );
 		self::minimum_response_time( $started );
-		return self::response( true, $message, $data );
+		return $response;
 	}
 
 	/**

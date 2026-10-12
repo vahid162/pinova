@@ -197,6 +197,7 @@ class Install extends \Nabik\Utils\V1\Install {
 			'pinova_rate_limit_cleanup',
 			'pinova_logging_cleanup',
 			'pinova_otp_delivery',
+			'pinova_otp_reconcile',
 		];
 
 		return array_values( array_unique( array_filter( (array) apply_filters( 'pinova_scheduled_hooks', $hooks ), 'is_string' ) ) );

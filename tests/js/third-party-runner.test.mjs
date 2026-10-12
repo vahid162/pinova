@@ -16,7 +16,7 @@ function fixture(action) {
         '#!/bin/bash',
         'printf "%s\\n" "$*" >> "$FAKE_CALLS"',
         'if [[ " $* " == *" wp pinova otp run "* ]]; then',
-        '    if [[ "${FAKE_NO_MARKER:-}" != 1 ]]; then printf "Success: Processed 0 scheduled Pinova OTP jobs; consult delivery logs for provider results.\\n"; fi',
+        '    if [[ "${FAKE_NO_MARKER:-}" != 1 ]]; then printf "Success: Processed 0 Pinova OTP jobs; consult delivery logs for provider results.\\n"; fi',
         '    exit "${FAKE_EXIT:-0}"',
         'fi',
         '[[ " $* " == *" wp eval-file --use-include "* ]] || exit 9',

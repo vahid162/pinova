@@ -25,6 +25,14 @@ final class EventThrottle {
 			'scope' => 'log_otp_queued',
 			'level' => 'info',
 		],
+		'otp.queue_recovered'           => [
+			'scope' => 'log_otp_queue_recovered',
+			'level' => 'info',
+		],
+		'otp.queue_deferred'            => [
+			'scope' => 'log_otp_queue_deferred',
+			'level' => 'warning',
+		],
 		'otp.delivery_skipped'          => [
 			'scope' => 'log_otp_delivery_skipped',
 			'level' => 'info',
@@ -75,7 +83,7 @@ final class EventThrottle {
 				if ( 'integration.operation_failed' === $event ) {
 					$source .= '|' . (string) ( $context['operation'] ?? 'unknown' );
 				}
-			} elseif ( in_array( $event, [ 'otp.queued', 'otp.delivery_skipped' ], true ) ) {
+			} elseif ( in_array( $event, [ 'otp.queued', 'otp.delivery_skipped', 'otp.queue_recovered', 'otp.queue_deferred' ], true ) ) {
 				$source .= '|' . (string) ( $context['flow_id'] ?? '' );
 			}
 			$hash = hash_hmac( 'sha256', (string) $source, wp_salt( 'auth' ) );
@@ -88,7 +96,7 @@ final class EventThrottle {
 				return;
 			}
 
-			$event_context = in_array( $event, [ 'otp.verify_failed', 'otp.queued', 'otp.delivery_skipped' ], true )
+			$event_context = in_array( $event, [ 'otp.verify_failed', 'otp.queued', 'otp.delivery_skipped', 'otp.queue_recovered', 'otp.queue_deferred' ], true )
 				? $context
 				: $context + [ 'ip_fingerprint' => $logger->fingerprint( $ip, 'ip' ) ];
 			$logger->log( $level, $event, $event_context );

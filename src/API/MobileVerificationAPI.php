@@ -53,21 +53,16 @@ final class MobileVerificationAPI extends RestAPI {
 			return self::response( false, __( 'تلفن همراه معتبر وارد کنید.', 'pinova' ), [], 400 );
 		}
 		try {
-			$user_id = get_current_user_id();
-			$flow    = MobileVerificationService::with_lock(
+			$user_id  = get_current_user_id();
+			$flow     = MobileVerificationService::with_lock(
 				$user_id,
 				static function () use ( $identifier, $user_id ) {
 					RateLimitService::otp( IP::get(), $identifier->get_value() );
-					return RateLimitService::decoy_flow( $identifier->get_value(), OTP::TYPE_VERIFY_MOBILE, IP::get(), $user_id );
+					return RateLimitService::decoy_flow( $identifier->get_value(), OTP::TYPE_VERIFY_MOBILE, IP::get(), $user_id, true );
 				}
 			);
-			$args    = [ $flow[0] ];
-			if ( ! wp_next_scheduled( 'pinova_otp_delivery', $args ) && true !== wp_schedule_single_event( time(), 'pinova_otp_delivery', $args ) ) {
-				throw new \Exception( 'OTP scheduling failed.' );
-			}
-			add_action( 'shutdown', [ OTPService::class, 'spawn_queued_delivery' ], 100 );
-			$ttl = max( 1, $flow[1] - time() );
-			return self::response(
+			$ttl      = max( 1, $flow[1] - time() );
+			$response = self::response(
 				true,
 				__( 'اگر ادامه با این شماره مجاز باشد، کد تأیید ارسال می‌شود.', 'pinova' ),
 				[
@@ -82,6 +77,9 @@ final class MobileVerificationAPI extends RestAPI {
 					'ttl' => $ttl,
 				]
 			);
+			OTPService::schedule_queued_delivery( $flow[0] );
+			add_action( 'shutdown', [ OTPService::class, 'spawn_queued_delivery' ], 100 );
+			return $response;
 		} catch ( RateLimitException $exception ) {
 			return self::response( false, __( 'تعداد درخواست‌ها بیش از حد مجاز است. کمی بعد دوباره تلاش کنید.', 'pinova' ), [], 429, [ 'Retry-After' => $exception->get_retry_after() ] );
 		} catch ( Throwable $throwable ) {

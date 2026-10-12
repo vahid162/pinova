@@ -8,6 +8,8 @@ use Pinova\Exceptions\AuthenticationPolicyException;
 use Pinova\Exceptions\ExpiredTokenException;
 use Pinova\Exceptions\BlockedException;
 use Pinova\Exceptions\OTPCompletionException;
+use Pinova\Exceptions\ProviderOutcomeUnknownException;
+use Pinova\Exceptions\RateLimitUnavailableException;
 use Pinova\Exceptions\SendOTPException;
 use Pinova\Helpers\IP;
 use Pinova\Helpers\JWT;
@@ -31,6 +33,8 @@ class OTPService {
 		}
 		$started = microtime( true );
 		$count   = 0;
+		$handled = [];
+		RateLimitService::observe_expired_acknowledged_queue();
 		foreach ( $ready as $timestamp => $hooks ) {
 			foreach ( $hooks['pinova_otp_delivery'] ?? [] as $event ) {
 				if ( 3 <= $count || 20 <= microtime( true ) - $started ) {
@@ -45,10 +49,71 @@ class OTPService {
 					throw new Exception( 'The due OTP event could not be unscheduled.' );
 				}
 				do_action_ref_array( 'pinova_otp_delivery', $args );
+				$handled[ $args[0] ] = true;
 				++$count;
 			}
 		}
+		foreach ( RateLimitService::recoverable_queued_otp() as $flow_id ) {
+			if ( 3 <= $count || 20 <= microtime( true ) - $started ) {
+				break;
+			}
+			// Native future/recurring entries retain their original meaning. Only
+			// a positively absent one-shot can be recovered from durable acceptance.
+			if ( isset( $handled[ $flow_id ] ) || false !== wp_next_scheduled( 'pinova_otp_delivery', [ $flow_id ] ) ) {
+				continue;
+			}
+			EventThrottle::log(
+				'otp.queue_recovered',
+				[
+					'operation' => 'queued_otp',
+					'reason'    => 'missing_schedule',
+					'flow_id'   => $flow_id,
+				]
+			);
+			do_action( 'pinova_otp_delivery', $flow_id );
+			++$count;
+		}
 		return $count;
+	}
+
+	/** The signed success envelope must already exist before durable acceptance. */
+	public static function schedule_queued_delivery( string $flow_id ): void {
+		try {
+			$args = [ $flow_id ];
+			if ( ! wp_next_scheduled( 'pinova_otp_delivery', $args ) && true !== wp_schedule_single_event( time(), 'pinova_otp_delivery', $args ) ) {
+				throw new RateLimitUnavailableException( 'OTP delivery could not be scheduled.' );
+			}
+			if ( ! RateLimitService::acknowledge_queued_otp( $flow_id ) ) {
+				throw new RateLimitUnavailableException( 'OTP delivery acceptance could not be persisted.' );
+			}
+		} catch ( Throwable $throwable ) {
+			EventThrottle::log(
+				'auth.request_failed',
+				[
+					'operation' => 'queued_otp',
+					'reason'    => 'queue_schedule_failed',
+					'flow_id'   => $flow_id,
+				]
+			);
+			unset( $throwable );
+			throw new RateLimitUnavailableException( 'OTP delivery is unavailable.' );
+		}
+	}
+
+	/** Native cron sites reconcile lost delivery events without a server change. */
+	public static function reconcile_queued_delivery(): void {
+		try {
+			self::run_due_delivery();
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+			EventThrottle::log(
+				'auth.request_failed',
+				[
+					'operation' => 'queued_otp',
+					'reason'    => 'delivery_worker_error',
+				]
+			);
+		}
 	}
 
 	/**
@@ -85,20 +150,28 @@ class OTPService {
 		try {
 			$successful_channels = ChannelService::send( $otp, $code, $queue_claim_token );
 		} catch ( Throwable $e ) {
-			Logger::instance()->error(
-				'otp.delivery_failed',
-				[
-					'user_id'                => $user_id,
-					'flow_id'                => $otp->flow_id,
-					'otp_type'               => $type,
-					'identifier_type'        => $identifier->get_type(),
-					'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
-					'channels'               => $channels,
-					'exception'              => $e,
-				]
-			);
-
-			$otp->delete();
+			$uncertain = null !== $queue_claim_token && ( ! $e instanceof SendOTPException || $e instanceof ProviderOutcomeUnknownException );
+			if ( $uncertain ) {
+				self::observe_delivery_skipped( (string) $otp->flow_id, 'provider_outcome_unknown' );
+			} else {
+				Logger::instance()->error(
+					'otp.delivery_failed',
+					[
+						'user_id'                => $user_id,
+						'flow_id'                => $otp->flow_id,
+						'otp_type'               => $type,
+						'identifier_type'        => $identifier->get_type(),
+						'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
+						'channels'               => $channels,
+						'exception'              => $e,
+					]
+				);
+			}
+			// Keep a code whose provider acceptance is unknown. An explicit false
+			// is still removed so a later initiation can deliberately retry it.
+			if ( ! $uncertain ) {
+				$otp->delete();
+			}
 
 			throw $e;
 		}
@@ -132,6 +205,9 @@ class OTPService {
 			$queued = RateLimitService::claim_queued_otp( $flow_id );
 			if ( null === $queued || $queued['deadline'] <= time() ) {
 				RateLimitService::observe_expired_queued_otp( $flow_id );
+				if ( null === $queued ) {
+					RateLimitService::observe_deferred_queued_otp( $flow_id );
+				}
 				if ( null !== $queued ) {
 					self::observe_delivery_skipped( $flow_id, 'expired' );
 				}
@@ -203,6 +279,10 @@ class OTPService {
 				return;
 			}
 			self::create( $identifier, ChannelService::get_channels( $identifier ), $type, $user_id, true, $queued['deadline'], $flow_id, $queued['ip'], $queued['claim_token'] );
+		} catch ( ProviderOutcomeUnknownException $exception ) {
+			RateLimitService::retire_queued_otp( $flow_id );
+			self::observe_delivery_skipped( $flow_id, 'provider_outcome_unknown' );
+			unset( $exception );
 		} catch ( SendOTPException $exception ) {
 			// ChannelService already recorded the privacy-safe provider failure.
 			RateLimitService::release_queued_otp( $flow_id, $queued['claim_token'] );

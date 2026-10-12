@@ -9,6 +9,7 @@ use Pinova\Channels\Call;
 use Pinova\Channels\Email;
 use Pinova\Channels\SMS;
 use Pinova\Exceptions\SendOTPException;
+use Pinova\Exceptions\ProviderOutcomeUnknownException;
 use Pinova\Models\OTP;
 use Pinova\Logging\Logger;
 use Pinova\Objects\Identifier;
@@ -22,6 +23,7 @@ class ChannelService {
 
 		$identifier = new Identifier( $otp->identifier );
 		$channels   = $otp->channels;
+		$uncertain  = false;
 
 		foreach ( $channels as $channel => &$success ) {
 
@@ -39,6 +41,7 @@ class ChannelService {
 					$success = self::send_channel( $channel, $identifier, $code, $otp->type );
 				} catch ( \Throwable $e ) {
 					$exception = $e;
+					$uncertain = true;
 				}
 				if ( false === $success || null !== $exception ) {
 					Logger::instance()->warning(
@@ -65,6 +68,9 @@ class ChannelService {
 		$successful_channels = array_keys( $channels, true, true );
 
 		if ( empty( $successful_channels ) ) {
+			if ( $uncertain ) {
+				throw new ProviderOutcomeUnknownException( 'OTP provider acceptance is unknown.' );
+			}
 			throw new SendOTPException( 'خطایی در زمان ارسال کد تایید رخ داده است.' );
 		}
 

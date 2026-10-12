@@ -1,0 +1,246 @@
+{
+  "status": "complete",
+  "verdict": "Ready with fixes",
+  "scope": {
+    "base": "07fafff425914531e80c3a9c01f15b9f20432fd8",
+    "branch": "fix/otp-queue-recovery",
+    "head_sha": "07fafff425914531e80c3a9c01f15b9f20432fd8",
+    "pr_url": null,
+    "files_changed": 25,
+    "tree": "staged and unstaged working tree; runtime frozen during review"
+  },
+  "intent": "Make accepted OTP queue entries recoverable when their WordPress cron delivery event disappears, while retaining public response uniformity, purpose binding, deadlines, cancellation and provider-uncertainty safeguards. Add privacy-safe finite queue observations and read-only health visible to administrators and the authorized AI through the same report. This release changes only Pinova; live deployment is outside this review.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "project-standards",
+    "testing",
+    "maintainability",
+    "agent-native",
+    "security",
+    "performance",
+    "api-contract",
+    "reliability",
+    "adversarial"
+  ],
+  "findings": [
+    {
+      "#": 1,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "tests/Integration/OTPQueueRecoveryIntegrationTest.php",
+      "first_evidence": "tests/Integration/OTPQueueRecoveryIntegrationTest.php:252 -- self::assertNotNull( $original );",
+      "independent_reviewers": [],
+      "line": 252,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "orchestrator-source"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Install a narrowly scoped test-local dispatcher implementing the existing Illuminate Events contract, or inject the persistence failure through the scoped connection resolver; restore an originally null dispatcher with unsetEventDispatcher in finally, without adding dependencies.",
+      "title": "Build the save-failure fixture without a preinstalled event dispatcher",
+      "why_it_matters": "The new post-provider-acceptance persistence-failure test stops before executing its safety scenario in the normal isolated integration bootstrap: Eloquent is configured with a connection resolver but no event dispatcher. Its non-null assertion therefore fails and prevents the queue/provider uncertainty regression from being validated. Build and restore the fault injector locally in the test instead of requiring unrelated application event infrastructure.",
+      "evidence": [
+        "tests/Integration/OTPQueueRecoveryIntegrationTest.php:252 -- self::assertNotNull( $original );",
+        "utils/class-database.php:49 -- Model::setConnectionResolver( $resolver );",
+        "tests/integration-bootstrap.php:58 -- The bootstrap checks only getConnectionResolver; no event-dispatcher installation occurs.",
+        "composer.lock:835 -- illuminate/events appears as a suggestion, not an installed package."
+      ]
+    },
+    {
+      "#": 2,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "src/Services/OTPService.php",
+      "first_evidence": "src/Services/OTPService.php:67 -- \t\t\t++$count;",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 67,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Exclude positively lock-held orphan candidates before consuming recovery dispatch attempts, for example by the existing native IS_FREE_LOCK predicate in the bounded selection; keep the final GET_LOCK/CAS/deadline guards, three-job and 20-second bounds. Add three earlier lock-held candidates followed by an unlocked orphan regression.",
+      "title": "Prevent deferred claims from starving later orphaned flows",
+      "why_it_matters": "A lost-event backlog can repeatedly attempt the same three contended claims while never reaching otherwise deliverable requests. Recovery sorts by deadline on every pass and increments its three-job budget even when deliver_queued returns without acquiring a claim; three earlier ready or stale-processing rows with held locks therefore block all later orphaned flows until the blockers expire. With the 180-second signed lifetime and minute watchdog, nearby later requests can expire before another pass reaches them. Preserve bounded attempts while allowing unrelated claims to make progress.",
+      "evidence": [
+        "src/Services/OTPService.php:67 -- \t\t\t++$count;",
+        "src/Services/OTPService.php:57 -- \t\t\tif ( 3 <= $count || 20 <= microtime( true ) - $started ) {",
+        "src/Services/RateLimitService.php:234 -- Recovery SELECT uses ORDER BY `reset_at`, `scope` LIMIT 32 on every invocation, without rotating deferred candidates.",
+        "src/Services/OTPService.php:185-196 -- A null claim emits deferral and returns without provider delivery.",
+        "tests/Integration/OTPQueueRecoveryIntegrationTest.php:test_claim_contention_remains_recoverable_after_its_one_shot_is_consumed -- A held lock leaves ready ciphertext and run_due_delivery still returns 1; this covers one contended flow but no following independent flow.",
+        "src/Helpers/JWT.php:12 -- const DEFAULT_TTL = 180;"
+      ]
+    },
+    {
+      "#": 3,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "src/Services/RateLimitService.php",
+      "first_evidence": "src/Services/RateLimitService.php:223 -- return ! $wpdb->last_error && is_string( $current ) && str_starts_with( $current, 'ready:' );",
+      "independent_reviewers": [],
+      "line": 223,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "orchestrator-source"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Use the same accepted-state predicate for the initial row and the CAS-loser readback: ready, processing and delivered, while preserving deadline, database-error and cancellation rejection. Add a deterministic regression where another acknowledgement wins and its worker moves the row to processing before readback.",
+      "title": "Accept a completed acknowledgement after losing its CAS race",
+      "why_it_matters": "Concurrent initiation of the same flow can return a 503 and log a rejected queue request even though its delivery was durably accepted. After both initiators read the reservation, one can acknowledge it and a worker can claim it before the losing initiator reads back the row; that path rejects processing even though the initial-read path explicitly treats it as accepted. Consistent accepted-state checks avoid the spurious unavailable response without admitting cancelled or unacknowledged work.",
+      "evidence": [
+        "src/Services/RateLimitService.php:223 -- return ! $wpdb->last_error && is_string( $current ) && str_starts_with( $current, 'ready:' );",
+        "src/Services/RateLimitService.php:212 -- if ( str_starts_with( $stored, 'ready:' ) || str_starts_with( $stored, 'processing:' ) || 'delivered' === $stored ) {",
+        "src/Services/RateLimitService.php:219 -- The guarded UPDATE requires the old payload; a competing acknowledgement causes zero affected rows.",
+        "src/Services/OTPService.php:79 -- A false acknowledgement throws RateLimitUnavailableException and logs queue_schedule_failed."
+      ]
+    }
+  ],
+  "actionable_findings": [
+    {
+      "#": 1,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "tests/Integration/OTPQueueRecoveryIntegrationTest.php",
+      "first_evidence": "tests/Integration/OTPQueueRecoveryIntegrationTest.php:252 -- self::assertNotNull( $original );",
+      "independent_reviewers": [],
+      "line": 252,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "orchestrator-source"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Install a narrowly scoped test-local dispatcher implementing the existing Illuminate Events contract, or inject the persistence failure through the scoped connection resolver; restore an originally null dispatcher with unsetEventDispatcher in finally, without adding dependencies.",
+      "title": "Build the save-failure fixture without a preinstalled event dispatcher",
+      "why_it_matters": "The new post-provider-acceptance persistence-failure test stops before executing its safety scenario in the normal isolated integration bootstrap: Eloquent is configured with a connection resolver but no event dispatcher. Its non-null assertion therefore fails and prevents the queue/provider uncertainty regression from being validated. Build and restore the fault injector locally in the test instead of requiring unrelated application event infrastructure.",
+      "evidence": [
+        "tests/Integration/OTPQueueRecoveryIntegrationTest.php:252 -- self::assertNotNull( $original );",
+        "utils/class-database.php:49 -- Model::setConnectionResolver( $resolver );",
+        "tests/integration-bootstrap.php:58 -- The bootstrap checks only getConnectionResolver; no event-dispatcher installation occurs.",
+        "composer.lock:835 -- illuminate/events appears as a suggestion, not an installed package."
+      ]
+    },
+    {
+      "#": 2,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "src/Services/OTPService.php",
+      "first_evidence": "src/Services/OTPService.php:67 -- \t\t\t++$count;",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 67,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Exclude positively lock-held orphan candidates before consuming recovery dispatch attempts, for example by the existing native IS_FREE_LOCK predicate in the bounded selection; keep the final GET_LOCK/CAS/deadline guards, three-job and 20-second bounds. Add three earlier lock-held candidates followed by an unlocked orphan regression.",
+      "title": "Prevent deferred claims from starving later orphaned flows",
+      "why_it_matters": "A lost-event backlog can repeatedly attempt the same three contended claims while never reaching otherwise deliverable requests. Recovery sorts by deadline on every pass and increments its three-job budget even when deliver_queued returns without acquiring a claim; three earlier ready or stale-processing rows with held locks therefore block all later orphaned flows until the blockers expire. With the 180-second signed lifetime and minute watchdog, nearby later requests can expire before another pass reaches them. Preserve bounded attempts while allowing unrelated claims to make progress.",
+      "evidence": [
+        "src/Services/OTPService.php:67 -- \t\t\t++$count;",
+        "src/Services/OTPService.php:57 -- \t\t\tif ( 3 <= $count || 20 <= microtime( true ) - $started ) {",
+        "src/Services/RateLimitService.php:234 -- Recovery SELECT uses ORDER BY `reset_at`, `scope` LIMIT 32 on every invocation, without rotating deferred candidates.",
+        "src/Services/OTPService.php:185-196 -- A null claim emits deferral and returns without provider delivery.",
+        "tests/Integration/OTPQueueRecoveryIntegrationTest.php:test_claim_contention_remains_recoverable_after_its_one_shot_is_consumed -- A held lock leaves ready ciphertext and run_due_delivery still returns 1; this covers one contended flow but no following independent flow.",
+        "src/Helpers/JWT.php:12 -- const DEFAULT_TTL = 180;"
+      ]
+    },
+    {
+      "#": 3,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "src/Services/RateLimitService.php",
+      "first_evidence": "src/Services/RateLimitService.php:223 -- return ! $wpdb->last_error && is_string( $current ) && str_starts_with( $current, 'ready:' );",
+      "independent_reviewers": [],
+      "line": 223,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "orchestrator-source"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Use the same accepted-state predicate for the initial row and the CAS-loser readback: ready, processing and delivered, while preserving deadline, database-error and cancellation rejection. Add a deterministic regression where another acknowledgement wins and its worker moves the row to processing before readback.",
+      "title": "Accept a completed acknowledgement after losing its CAS race",
+      "why_it_matters": "Concurrent initiation of the same flow can return a 503 and log a rejected queue request even though its delivery was durably accepted. After both initiators read the reservation, one can acknowledge it and a worker can claim it before the losing initiator reads back the row; that path rejects processing even though the initial-read path explicitly treats it as accepted. Consistent accepted-state checks avoid the spurious unavailable response without admitting cancelled or unacknowledged work.",
+      "evidence": [
+        "src/Services/RateLimitService.php:223 -- return ! $wpdb->last_error && is_string( $current ) && str_starts_with( $current, 'ready:' );",
+        "src/Services/RateLimitService.php:212 -- if ( str_starts_with( $stored, 'ready:' ) || str_starts_with( $stored, 'processing:' ) || 'delivered' === $stored ) {",
+        "src/Services/RateLimitService.php:219 -- The guarded UPDATE requires the old payload; a competing acknowledgement causes zero affected rows.",
+        "src/Services/OTPService.php:79 -- A false acknowledgement throws RateLimitUnavailableException and logs queue_schedule_failed."
+      ]
+    }
+  ],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": null,
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "Source-only review: integration, browser, package and staging validation remain separate required gates on isolated CI or the authorized staging target.",
+    "Predecessor workers cannot decode the new reserved:/ready: payload format and can retire requests without sending. Hold the site cron lock with scoped maintenance until old workers exit before replacement; drain or expire prefixed rows before predecessor rollback."
+  ],
+  "testing_gaps": [
+    "The bounded recovery test creates six reservations, whereas recoverable_queued_otp() selects only the first 32 rows before run_due_delivery() skips future/recurring schedules. Add a fixture with 32 earlier-deadline acknowledged flows retaining future schedules and a later missing-schedule flow; assert that repeated dispatcher passes recover the latter before expiry. This would detect accepted work being hidden behind excluded rows in the finite candidate window.",
+    "Queue-health tests exercise five states and failed reads, but only assert truncated=false. Add 1,001 queue rows and verify truncated=true, counts totaling 1,000, and the shared admin/JSON/CLI indication that counts are incomplete; the existing 1,001-row test covers historical log evidence rather than queue_health."
+  ],
+  "coverage": {
+    "selected_reviewers": 10,
+    "completed_reviewers": 10,
+    "failed_reviewers": [],
+    "recovered_dispatch_failures": [
+      "The first performance review ended in a model-capacity failure before reviewing; the balanced-model retry completed."
+    ],
+    "cross_model": "not run: no different-provider CLI installed; adversarial lens completed with the local fallback",
+    "validator_batch": {
+      "findings_selected": 3,
+      "shortcuts": 0,
+      "verdicts": [
+        {
+          "#": 1,
+          "validated": true,
+          "reason": "The integration bootstrap and database initializer install only a connection resolver, no source installs an Eloquent event dispatcher, and the new test asserts that this otherwise null dispatcher exists before reaching its save-failure scenario."
+        },
+        {
+          "#": 2,
+          "validated": true,
+          "reason": "Recovery selects the same earliest candidates without excluding held locks, while each unsuccessful claim still consumes one of three dispatch attempts, so three contended orphaned flows repeatedly prevent later unlocked flows from being attempted."
+        },
+        {
+          "#": 3,
+          "validated": true,
+          "reason": "Concurrent initiators can read the same reservation, after which the winning acknowledgement and worker move it to processing or delivered before the losing CAS readback, which rejects those states despite explicitly accepting them on the initial read."
+        }
+      ],
+      "dropped": 0,
+      "validation_degraded": false
+    },
+    "suppressed_by_confidence": {},
+    "malformed_findings": 0,
+    "malformed_returns": 0,
+    "mode_aware_demotions": 0,
+    "settlement_suppression": "not evaluated: no implementation-plan artifact was selected",
+    "standards": "Root AGENTS.md fallback governs all changed files; CLAUDE.md is an adapter.",
+    "source_attribution": "Finding #1 originated with the implementation caller and was confirmed by the coordinator; #3 originated with the coordinator. Neither counts as an independent persona or earns agreement promotion. All three findings received fresh independent validation.",
+    "compute": "Bounded read-only source inspection on a shared host; no dependency installs, suites, site writes, Git mutations or service changes.",
+    "source_writes": 0
+  },
+  "artifact_path": ".agents/reviews/2026-10-12-otp-queue-recovery-code-review.json",
+  "durable_artifact": ".agents/reviews/2026-10-12-otp-queue-recovery-code-review.json",
+  "run_id": "20261012-074824-4bed127e"
+}

@@ -10,6 +10,7 @@ use Pinova\Install;
 use Pinova\Integrations\IntegrationSettings;
 use Pinova\Logging\IssueMonitor;
 use Pinova\Logging\LogRepository;
+use Pinova\Services\RateLimitService;
 use WP_UnitTestCase;
 
 final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
@@ -18,6 +19,7 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 	private array $saved_get;
 	private array $saved_post;
 	private array $saved_request;
+	private array $queue_fixture_keys = [];
 
 	public static function set_up_before_class(): void {
 		parent::set_up_before_class();
@@ -29,6 +31,7 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		$this->saved_get = $_GET;
 		$this->saved_post = $_POST;
 		$this->saved_request = $_REQUEST;
+		$this->queue_fixture_keys = [];
 		$_GET = [];
 		$_POST = [];
 		$_REQUEST = [];
@@ -41,6 +44,14 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
+		global $wpdb;
+		foreach ( array_chunk( $this->queue_fixture_keys, 100 ) as $keys ) {
+			$wpdb->query( $wpdb->prepare(
+				'DELETE FROM %i WHERE bucket_key IN (' . implode( ', ', array_fill( 0, count( $keys ), '%s' ) ) . ')',
+				$wpdb->prefix . 'pinova_rate_limits',
+				...$keys
+			) );
+		}
 		remove_filter( 'wp_die_handler', [ $this, 'die_handler' ] );
 		$this->clear_reviews();
 		LogRepository::delete_all();
@@ -75,6 +86,8 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 			remove_filter( 'query', $watch );
 		}
 		self::assertSame( [], $writes );
+		self::assertSame( RateLimitService::queue_health(), $report['queue_health'] );
+		self::assertTrue( $report['queue_health']['read_success'] );
 		self::assertSame( IntegrationSettings::snapshot()['wpforo'], $report['integrations']['wpforo'] );
 		self::assertSame( IntegrationSettings::snapshot()['dokan'], $report['integrations']['dokan'] );
 		self::assertSame( 'pinova.issues.v1', $report['schema'] );
@@ -111,6 +124,162 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 'open', $reopened['state'] );
 		self::assertSame( 2, $reopened['observed_count'] );
 		self::assertSame( 'resolved_unverified', $reopened['review']['state'] );
+	}
+
+	public function test_current_queue_snapshot_is_separate_from_history_and_exposes_no_payload_or_ids(): void {
+		global $wpdb;
+		$before = RateLimitService::queue_health();
+		$private = base64_encode( 'private-queue-identifier-and-ciphertext' );
+		foreach ( [
+			'pending' => [ 'ready:' . $private, 600 ],
+			'expired' => [ 'ready:' . $private, -60 ],
+			'reserved' => [ 'reserved:' . $private, 600 ],
+			'processing' => [ 'processing:' . str_repeat( 'c', 16 ) . ':ready:' . $private, 600 ],
+			'legacy' => [ $private, 600 ],
+		] as $label => [ $payload, $seconds ] ) {
+			$key = hash( 'sha256', 'issue-monitor-queue-fixture-' . $label );
+			self::assertSame( 1, $wpdb->insert( $wpdb->prefix . 'pinova_rate_limits', [
+				'bucket_key' => $key,
+				'scope' => md5( 'issue-monitor-flow-' . $label ),
+				'hits' => 1,
+				'reset_at' => gmdate( 'Y-m-d H:i:s', time() + $seconds ),
+				'updated_at' => gmdate( 'Y-m-d H:i:s' ),
+				'payload' => $payload,
+			] ) );
+			$this->queue_fixture_keys[] = $key;
+		}
+		$report = IssueMonitor::report();
+		$queue = $report['queue_health'];
+		self::assertTrue( $queue['read_success'] );
+		self::assertFalse( $queue['truncated'] );
+		foreach ( [ 'pending', 'expired', 'reserved', 'processing', 'legacy' ] as $key ) {
+			self::assertSame( $before[ $key ] + 1, $queue[ $key ] );
+		}
+		self::assertSame( [], $report['issues'], 'A snapshot must not fabricate historical events or manual review state.' );
+		$yesterday = gmdate( 'Y-m-d', time() - DAY_IN_SECONDS );
+		self::assertSame( $queue, IssueMonitor::report( [ 'created_from' => $yesterday, 'created_to' => $yesterday ] )['queue_health'] );
+		self::assertSame( $queue, IssueMonitor::report( [ 'created_from' => 'invalid', 'created_to' => 'invalid' ] )['queue_health'] );
+		$this->post( 'pinova_export_issues' );
+		$export = json_decode( $this->invoke( 'export_response', false ), true );
+		self::assertSame( $queue, $export['queue_health'] );
+		ob_start();
+		Issues::render();
+		$html = (string) ob_get_clean();
+		self::assertStringContainsString( 'وضعیت فعلی صف کد تأیید', $html );
+		self::assertStringContainsString( 'مهلت پیش از شروع پردازش تمام شده', $html );
+		self::assertStringContainsString( 'خرابی عملیاتی مشاهده‌شده', $html );
+		self::assertStringContainsString( 'پذیرش ارسال مشخص نیست', $html );
+		self::assertStringNotContainsString( 'name="action" value="pinova_review_issue"', $html );
+		foreach ( [ wp_json_encode( $report ), wp_json_encode( $export ), $html ] as $output ) {
+			self::assertStringNotContainsString( 'private-queue', $output );
+			self::assertStringNotContainsString( $private, $output );
+			foreach ( $this->queue_fixture_keys as $key ) {
+				self::assertStringNotContainsString( $key, $output );
+			}
+		}
+	}
+
+	public function test_queue_snapshot_limit_is_explicit_in_report_export_and_administration(): void {
+		global $wpdb;
+		$table = $wpdb->prefix . 'pinova_rate_limits';
+		$private = base64_encode( 'private-bounded-queue-identifier-and-ciphertext' );
+		$now = time();
+		$states = [ 'pending', 'expired', 'reserved', 'processing', 'legacy' ];
+		$rows = [];
+		for ( $index = 0; $index < 1001; ++$index ) {
+			$state = $states[ $index % count( $states ) ];
+			$key = hash( 'sha256', 'issue-monitor-queue-boundary-' . $index );
+			$payload = [
+				'pending' => 'ready:' . $private,
+				'expired' => 'ready:' . $private,
+				'reserved' => 'reserved:' . $private,
+				'processing' => 'processing:' . str_repeat( 'c', 16 ) . ':ready:' . $private,
+				'legacy' => $private,
+			][ $state ];
+			$rows[] = [ $key, md5( 'issue-monitor-boundary-flow-' . $index ), 1, gmdate( 'Y-m-d H:i:s', $now + ( 'expired' === $state ? -600 : 600 ) ), gmdate( 'Y-m-d H:i:s', $now ), $payload ];
+			$this->queue_fixture_keys[] = $key;
+		}
+		foreach ( array_chunk( $rows, 100 ) as $batch ) {
+			$values = array_merge( ...$batch );
+			self::assertSame( count( $batch ), $wpdb->query( $wpdb->prepare(
+				'INSERT INTO %i (bucket_key, scope, hits, reset_at, updated_at, payload) VALUES ' . implode( ', ', array_fill( 0, count( $batch ), '(%s, %s, %d, %s, %s, %s)' ) ),
+				$table,
+				...$values
+			) ) );
+		}
+		$writes = [];
+		$watch = static function ( string $query ) use ( &$writes, $table ): string {
+			if ( str_contains( $query, $table ) && preg_match( '/\A\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|TRUNCATE)\b/i', $query ) ) {
+				$writes[] = $query;
+			}
+			return $query;
+		};
+		add_filter( 'query', $watch );
+		try {
+			$queue = RateLimitService::queue_health();
+			$report = IssueMonitor::report();
+			$this->post( 'pinova_export_issues' );
+			$json = $this->invoke( 'export_response', false );
+			$export = json_decode( $json, true );
+			ob_start();
+			try {
+				Issues::render();
+				$html = (string) ob_get_clean();
+			} finally {
+				if ( ! isset( $html ) ) {
+					ob_end_clean();
+				}
+			}
+		} finally {
+			remove_filter( 'query', $watch );
+		}
+		self::assertSame( [], $writes, 'Reading or exporting a truncated snapshot must not repair or delete queue rows.' );
+		self::assertSame( [ 'read_success', 'truncated', 'pending', 'expired', 'reserved', 'processing', 'legacy' ], array_keys( $queue ) );
+		self::assertTrue( $queue['read_success'] );
+		self::assertTrue( $queue['truncated'] );
+		self::assertSame( 1000, array_sum( array_intersect_key( $queue, array_flip( $states ) ) ) );
+		foreach ( $states as $state ) {
+			self::assertIsInt( $queue[ $state ] );
+			self::assertGreaterThanOrEqual( 199, $queue[ $state ] );
+			self::assertLessThanOrEqual( 201, $queue[ $state ] );
+		}
+		self::assertSame( $queue, $report['queue_health'] );
+		self::assertSame( $queue, $export['queue_health'] );
+		self::assertTrue( $report['coverage']['complete'], 'Current queue truncation must not imply that the separate retained-event report was truncated.' );
+		self::assertSame( [], $report['issues'], 'A current snapshot must not fabricate a historical incident.' );
+		self::assertStringContainsString( 'خواندن صف به سقف بررسی رسیده است؛ شمارش‌ها ممکن است کمتر از مقدار واقعی باشند.', $html );
+		self::assertStringNotContainsString( 'name="action" value="pinova_review_issue"', $html );
+		foreach ( [ wp_json_encode( $report ), $json, $html ] as $output ) {
+			self::assertStringNotContainsString( 'private-bounded-queue', $output );
+			self::assertStringNotContainsString( $private, $output );
+			self::assertStringNotContainsString( $this->queue_fixture_keys[0], $output );
+			self::assertStringNotContainsString( $this->queue_fixture_keys[1000], $output );
+			self::assertStringNotContainsString( $rows[0][1], $output );
+			self::assertStringNotContainsString( $rows[1000][1], $output );
+		}
+	}
+
+	public function test_unreadable_queue_is_unknown_in_the_report_and_administration(): void {
+		global $wpdb;
+		$deny = static function ( string $query ): string {
+			return preg_match( '/\A\s*SELECT\b/i', $query ) && str_contains( $query, 'pinova_rate_limits' ) ? 'SELECT * FROM pinova_missing_queue_fixture_table' : $query;
+		};
+		$previous = $wpdb->suppress_errors( true );
+		add_filter( 'query', $deny );
+		try {
+			$report = IssueMonitor::report();
+			ob_start();
+			Issues::render();
+			$html = (string) ob_get_clean();
+		} finally {
+			remove_filter( 'query', $deny );
+			$wpdb->suppress_errors( $previous );
+			$wpdb->last_error = '';
+		}
+		self::assertFalse( $report['queue_health']['read_success'] );
+		self::assertTrue( $report['coverage']['complete'], 'Queue and retained-event reads have separate completeness.' );
+		self::assertStringContainsString( 'خواندن صف انجام نشد', $html );
+		self::assertStringNotContainsString( 'پذیرفته‌شده و در انتظار شروع پردازش', $html );
 	}
 
 	public function test_stale_observation_unknown_issue_and_incomplete_report_cannot_be_reviewed(): void {
@@ -171,6 +340,7 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		$export = json_decode( $json, true );
 		self::assertSame( $expected['issues'], $export['issues'] );
 		self::assertSame( $expected['coverage'], $export['coverage'] );
+		self::assertSame( $expected['queue_health'], $export['queue_health'] );
 		self::assertLessThanOrEqual( 2097152, strlen( $json ) );
 		ob_start();
 		try {

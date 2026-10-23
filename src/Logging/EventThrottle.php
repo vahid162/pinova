@@ -13,48 +13,55 @@ final class EventThrottle {
 	private const SOURCE_SLOTS   = 1024;
 
 	private const EVENTS = [
-		'identity.account_link_failed' => [ 'scope' => 'log_account_link_failed', 'level' => 'warning' ],
-		'integration.operation_failed'  => [
+		'identity.legacy_contact_overlap' => [
+			'scope' => 'log_legacy_contact_overlap',
+			'level' => 'warning',
+		],
+		'identity.account_link_failed'    => [
+			'scope' => 'log_account_link_failed',
+			'level' => 'warning',
+		],
+		'integration.operation_failed'    => [
 			'scope' => 'log_integration_failed',
 			'level' => 'error',
 		],
-		'auth.session_failed'           => [
+		'auth.session_failed'             => [
 			'scope' => 'log_session_failed',
 			'level' => 'error',
 		],
-		'otp.queued'                    => [
+		'otp.queued'                      => [
 			'scope' => 'log_otp_queued',
 			'level' => 'info',
 		],
-		'otp.queue_recovered'           => [
+		'otp.queue_recovered'             => [
 			'scope' => 'log_otp_queue_recovered',
 			'level' => 'info',
 		],
-		'otp.queue_deferred'            => [
+		'otp.queue_deferred'              => [
 			'scope' => 'log_otp_queue_deferred',
 			'level' => 'warning',
 		],
-		'otp.delivery_skipped'          => [
+		'otp.delivery_skipped'            => [
 			'scope' => 'log_otp_delivery_skipped',
 			'level' => 'info',
 		],
-		'auth.request_failed'           => [
+		'auth.request_failed'             => [
 			'scope' => 'log_auth_request_failed',
 			'level' => 'error',
 		],
-		'auth.logout_rejected'          => [
+		'auth.logout_rejected'            => [
 			'scope' => 'log_logout_rejected',
 			'level' => 'notice',
 		],
-		'auth.password_reset_failed'    => [
+		'auth.password_reset_failed'      => [
 			'scope' => 'log_reset_failed',
 			'level' => 'notice',
 		],
-		'auth.password_reset_succeeded' => [
+		'auth.password_reset_succeeded'   => [
 			'scope' => 'log_reset_succeeded',
 			'level' => 'info',
 		],
-		'otp.verify_failed'             => [
+		'otp.verify_failed'               => [
 			'scope' => 'log_otp_verify_failed',
 			'level' => 'notice',
 		],

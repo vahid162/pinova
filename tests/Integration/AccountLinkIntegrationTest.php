@@ -11,9 +11,10 @@ use Pinova\Services\UserService;
 use WP_UnitTestCase;
 
 final class AccountLinkIntegrationTest extends WP_UnitTestCase {
-	private int $canonical;
-	private int $source;
-	private int $administrator;
+	private int $canonical = 0;
+	private int $source = 0;
+	private int $administrator = 0;
+	private int $autocommit = 1;
 	private string $mobile = '09124445566';
 
 	public static function set_up_before_class(): void {
@@ -24,7 +25,9 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 	public function set_up(): void {
 		parent::set_up();
 		global $wpdb;
-		$wpdb->query( 'COMMIT' ); // This service owns its transaction; fixtures are explicitly cleaned below.
+		$this->autocommit = (int) $wpdb->get_var( 'SELECT @@autocommit' );
+		$wpdb->query( 'COMMIT' );
+		$wpdb->query( 'SET autocommit = 1' ); // Commit fixtures before the service opens its independent transaction.
 		$this->administrator = self::factory()->user->create( [ 'role' => 'administrator' ] );
 		wp_set_current_user( $this->administrator );
 		$this->canonical = self::factory()->user->create( [ 'role' => 'customer' ] );
@@ -33,8 +36,9 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
+		global $wpdb;
 		wp_set_current_user( $this->administrator );
-		foreach ( [ $this->canonical, $this->source ] as $id ) {
+		foreach ( array_filter( [ $this->canonical, $this->source ] ) as $id ) {
 			foreach ( wc_get_orders( [ 'customer_id' => $id, 'limit' => -1 ] ) as $order ) {
 				$order->delete( true );
 			}
@@ -42,6 +46,7 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 		}
 		wp_set_current_user( 0 );
 		wp_delete_user( $this->administrator );
+		$wpdb->query( $this->autocommit ? 'SET autocommit = 1' : 'SET autocommit = 0' );
 		parent::tear_down();
 	}
 
@@ -186,6 +191,48 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 		self::assertNull( UserService::get_by_mobile( $this->mobile ) );
 		self::assertFalse( UserService::mobile_is_available_for_user( $this->mobile, $this->canonical ) );
 	}
+	public function test_new_contact_overlap_is_observed_without_claiming_the_legacy_account(): void {
+		global $wpdb;
+		$mobile = '09124445577';
+		update_user_meta( $this->canonical, 'billing_phone', $mobile );
+		$before = get_option( 'pinova_logging', [] );
+		update_option( 'pinova_logging', [ 'minimum_level' => 'info', 'diagnostic_until' => 0 ] );
+		$id = UserService::create( $mobile );
+		try {
+			self::assertSame( $id, UserService::get_by_mobile( $mobile ) );
+			$row = $wpdb->get_row( $wpdb->prepare( 'SELECT user_id,context FROM %i WHERE event = %s AND user_id = %d ORDER BY id DESC LIMIT 1', $wpdb->prefix . 'pinova_logs', 'identity.legacy_contact_overlap', $id ), ARRAY_A );
+			self::assertIsArray( $row );
+			$context = json_decode( $row['context'], true );
+			self::assertSame( 1, $context['candidate_count'] );
+			self::assertStringNotContainsString( $mobile, $row['context'] );
+		} finally {
+			wp_delete_user( $id );
+			update_option( 'pinova_logging', $before );
+		}
+	}
+
+	public function test_a_released_number_can_register_without_rewriting_its_old_username(): void {
+		$old_username = get_userdata( $this->source )->user_login;
+		$plan = Link::plan( $this->canonical, $this->source );
+		Link::apply( $this->canonical, $this->source, $plan['fingerprint'], true );
+		update_user_meta( $this->canonical, 'pinova_mobile', '09124445588' );
+		$id = UserService::create( $this->mobile );
+		try {
+			self::assertSame( $id, UserService::get_by_mobile( $this->mobile ) );
+			self::assertNotSame( $old_username, get_userdata( $id )->user_login );
+			self::assertSame( $old_username, get_userdata( $this->source )->user_login );
+			$otp = \Pinova\Models\OTP::query()->create( [
+				'user_id' => $id, 'identifier' => $this->mobile, 'type' => \Pinova\Models\OTP::TYPE_LOGIN,
+				'code' => '4821', 'flow_id' => bin2hex( random_bytes( 16 ) ), 'channels' => [ 'sms' => true ],
+			] );
+			\Pinova\Services\OTPService::verify_with_flow( \Pinova\Services\OTPService::signed_state( $otp ), '4821', [ \Pinova\Models\OTP::TYPE_LOGIN ] );
+			self::assertTrue( Proof::is_verified( $id ) );
+		} finally {
+			\Pinova\Models\OTP::query()->where( 'user_id', $id )->delete();
+			wp_delete_user( $id );
+		}
+	}
+
 }
 
 

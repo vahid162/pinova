@@ -177,8 +177,14 @@ final class IssueMonitor {
 				'category' => 'compatibility_observation',
 			] : null;
 		}
+		if ( 'identity.legacy_contact_overlap' === $event ) {
+			return [ 'code' => $code, 'category' => 'insufficient_evidence' ];
+		}
 		if ( 'identity.account_link_failed' === $event ) {
-			return [ 'code' => $code, 'category' => in_array( $reason, [ 'write_failed', 'operation_failed' ], true ) ? 'confirmed_failure' : ( '' === $reason ? 'insufficient_evidence' : 'expected_rejection' ) ];
+			return [
+				'code'     => $code,
+				'category' => in_array( $reason, [ 'write_failed', 'operation_failed' ], true ) ? 'confirmed_failure' : ( '' === $reason ? 'insufficient_evidence' : 'expected_rejection' ),
+			];
 		}
 		if ( in_array( $event, self::FAILURE_EVENTS, true ) ) {
 			return [
@@ -251,6 +257,7 @@ final class IssueMonitor {
 
 	public static function explanation( string $code ): string {
 		return match ( true ) {
+			str_starts_with( $code, 'identity.legacy_contact_overlap' ) => __( 'شمارهٔ حساب تازه در اطلاعات تماس حساب قدیمی دیده شده است. این تطابق اثبات مالکیت نیست؛ مشتری باید از مسیر حساب قبلی یا بررسی مستقل پشتیبانی ادامه دهد. خریدی منتقل نشده است.', 'pinova' ),
 			str_starts_with( $code, 'integration.operation_failed' ) => __( 'یکی از عملیات هماهنگی تکمیل نشد. علت مجاز و وضعیت قابلیت‌های فعلی را بررسی کنید؛ این رخداد به‌تنهایی باگ پینوا یا تغییر مجوز حساب را ثابت نمی‌کند.', 'pinova' ),
 			str_starts_with( $code, 'integration.wpforo_status_changed' ), str_starts_with( $code, 'integration.dokan_status_changed' ) => __( 'در زمان مشاهده، بخشی از هماهنگی در دسترس نبود. قابلیت و علت ثبت‌شده را بررسی کنید؛ وضعیت فعلی جداگانه نمایش داده می‌شود و به معنی تأیید رفع این مشاهده نیست.', 'pinova' ),
 			'auth.session_failed:session_exception' === $code => __( 'مرحلهٔ ورود یا یکی از callbackهای آن خطا داد. رخدادهای همان درخواست را بررسی کنید؛ این مشاهده به‌تنهایی وضعیت نهایی Cookie مرورگر را ثابت نمی‌کند.', 'pinova' ),

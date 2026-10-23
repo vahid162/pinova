@@ -9,7 +9,8 @@ final class EventEvidence {
 
 	/** Finite reasons are safe to expose; arbitrary code-shaped strings are not. */
 	public const REASONS = [
-		'identity.account_link_failed' => [ 'not_authorized', 'unsupported_accounts', 'identity_conflict', 'stale_state', 'ownership_not_confirmed', 'active_delivery', 'write_failed', 'unsupported_storage', 'data_changed', 'operation_failed' ],
+		'identity.legacy_contact_overlap'   => [ 'unverified_contact' ],
+		'identity.account_link_failed'      => [ 'not_authorized', 'unsupported_accounts', 'identity_conflict', 'stale_state', 'ownership_not_confirmed', 'active_delivery', 'write_failed', 'unsupported_storage', 'data_changed', 'operation_failed' ],
 		'auth.session_failed'               => [ 'policy_rejected', 'session_exception' ],
 		'auth.request_failed'               => [ 'initiation_error', 'delivery_worker_error', 'queue_expired', 'queue_schedule_failed', 'mobile_evidence_unavailable', 'otp_completion_failed' ],
 		'auth.password_failed'              => [ 'authentication_rejected', 'native_only_policy' ],
@@ -56,7 +57,7 @@ final class EventEvidence {
 		}
 		if ( in_array( $event, [ 'identity.account_linked', 'identity.account_link_rolled_back', 'identity.account_link_failed' ], true ) ) {
 			$allowed['operation'] = [ 'account_link' ];
-			$allowed['result'] = [ 'success' ];
+			$allowed['result']    = [ 'success' ];
 		}
 		$safe = [];
 		foreach ( $allowed as $key => $values ) {

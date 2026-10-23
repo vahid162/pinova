@@ -218,4 +218,9 @@ final class IssueMonitorTest extends TestCase {
 		self::assertSame( 'confirmed_failure', $categories['identity.account_link_failed:write_failed'] );
 		self::assertStringNotContainsString( 'secret', json_encode( EventEvidence::redact( $rows[0] ) ) );
 	}
+
+	public function test_contact_overlap_is_insufficient_evidence_not_a_verified_duplicate(): void {
+		$issues = IssueMonitor::summarize( [ $this->row( 1, 'identity.legacy_contact_overlap', [ 'reason' => 'unverified_contact', 'candidate_count' => 2 ] ) ] );
+		self::assertSame( 'insufficient_evidence', $issues[0]['category'] );
+	}
 }

@@ -221,7 +221,8 @@ final class AccountLinkService {
 		global $wpdb;
 		$previous = $wpdb->suppress_errors( true );
 		try {
-			$post = $wpdb->get_var( $wpdb->prepare( 'SELECT ID FROM %i WHERE post_author = %d LIMIT 1', $wpdb->posts, $source ) );
+			// WooCommerce order ownership is checked through its data store, never post_author.
+			$post = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM %i WHERE post_author = %d AND post_type NOT IN ('shop_order','shop_order_refund','shop_order_placehold') LIMIT 1", $wpdb->posts, $source ) );
 			self::require_ownership_read();
 			$comment = $wpdb->get_var( $wpdb->prepare( 'SELECT comment_ID FROM %i WHERE user_id = %d LIMIT 1', $wpdb->comments, $source ) );
 			self::require_ownership_read();

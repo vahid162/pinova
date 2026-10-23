@@ -233,6 +233,22 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_order_post_author_is_not_customer_ownership(): void {
+		global $wpdb;
+		$order = wc_create_order( [ 'customer_id' => $this->canonical ] );
+		$order->save();
+		// A synchronized legacy order post can retain the creating session's author.
+		if ( get_post( $order->get_id() ) ) {
+			$wpdb->update( $wpdb->posts, [ 'post_author' => $this->source ], [ 'ID' => $order->get_id() ] );
+		} else {
+			self::assertSame( $order->get_id(), wp_insert_post( [ 'import_id' => $order->get_id(), 'post_author' => $this->source, 'post_type' => 'shop_order', 'post_status' => 'wc-pending' ] ) );
+		}
+		$plan = Link::plan( $this->canonical, $this->source );
+		self::assertSame( 'ready', $plan['state'] );
+		self::assertSame( 0, $plan['source_orders'] );
+		self::assertSame( 1, $plan['orders_preserved'] );
+	}
+
 	public function test_source_wallet_transactions_require_a_separate_migration(): void {
 		global $wpdb;
 		$this->assert_owned_adapter_rejected( $wpdb->base_prefix . 'woo_wallet_transactions', 'user_id', 'source_has_wallet_activity' );

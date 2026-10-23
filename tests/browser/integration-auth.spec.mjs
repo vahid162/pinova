@@ -42,10 +42,19 @@ function fixture(script) {
 async function login(page) {
     await page.goto('/login');
     await page.locator('#pinova-identifier').fill(username);
+    // REST completion precedes the rendered-step assertion, within the client's request budget.
+    const identification = page.waitForResponse(response => response.url().includes('/pinova/user/authenticate') && response.request().method() === 'POST', { timeout: 30_000 });
     await page.locator('#authenticate button[type="submit"]').click();
+    const identified = await identification;
+    expect(identified.status()).toBe(200);
+    expect((await identified.json()).success).toBe(true);
     await expect(page.locator('#loginByPassword')).toBeVisible();
     await page.locator('#pinova-password').fill(password);
+    const authentication = page.waitForResponse(response => response.url().includes('/pinova/user/login/password') && response.request().method() === 'POST', { timeout: 30_000 });
     await page.locator('#loginByPassword button[type="submit"]').click();
+    const authenticated = await authentication;
+    expect(authenticated.status()).toBe(200);
+    expect((await authenticated.json()).success).toBe(true);
     await expect.poll(() => new URL(page.url()).pathname).not.toMatch(/^\/login\/?$/);
 }
 

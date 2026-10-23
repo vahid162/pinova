@@ -14,7 +14,10 @@ namespace Pinova\Tests\Unit {
 	use PHPUnit\Framework\TestCase;
 	use Pinova\Integrations\Woocommerce\WalletReports;
 
-	class WalletReportFixture {}
+	class WalletReportFixture {
+		public function woocommerce_reports_get_order_report_query( $query ) { return $query; }
+	}
+	class WalletMissingCallbackFixture {}
 
 	/**
 	 * @runTestsInSeparateProcesses
@@ -22,10 +25,10 @@ namespace Pinova\Tests\Unit {
 	 */
 	final class WalletReportsTest extends TestCase {
 
-		private function prepare( string $version ): void {
-			define( 'WOO_WALLET_PLUGIN_VERSION', $version );
-			class_alias( WalletReportFixture::class, 'Woo_Wallet' );
-			$GLOBALS['woo_wallet'] = new WalletReportFixture();
+		private function prepare( ?string $version, string $class = WalletReportFixture::class ): void {
+			if ( null !== $version ) { define( 'WOO_WALLET_PLUGIN_VERSION', $version ); }
+			class_alias( $class, 'Woo_Wallet' );
+			$GLOBALS['woo_wallet'] = new $class();
 			$GLOBALS['wpdb'] = (object) [ 'prefix' => 'test_' ];
 			$GLOBALS['pinova_wallet_test_priority'] = 10;
 		}
@@ -68,7 +71,7 @@ SQL;
 		public function test_missing_or_reordered_native_callback_is_untouched(): void {
 			$this->prepare( '1.7.1' );
 			$query = [ 'from' => 'FROM test_wc_orders AS orders', 'where' => 'WHERE posts.ID NOT IN (101)' ];
-			foreach ( [ false, 9, 12 ] as $priority ) {
+			foreach ( [ false, 11, 12 ] as $priority ) {
 				$GLOBALS['pinova_wallet_test_priority'] = $priority;
 				self::assertSame( $query, WalletReports::report_query( $query ) );
 			}
@@ -79,8 +82,22 @@ SQL;
 			self::assertSame( $query, WalletReports::report_query( $query ) );
 		}
 
-		public function test_unsupported_wallet_version_is_untouched(): void {
-			$this->prepare( '1.7.2' );
+		/** @dataProvider wallet_versions */
+		public function test_callback_and_query_capabilities_do_not_depend_on_version_strings( ?string $version ): void {
+			$this->prepare( $version );
+			$query = [ 'from' => 'FROM test_wc_orders AS orders', 'where' => 'WHERE posts.ID NOT IN (101)' ];
+			foreach ( [ -1, 0, 9, 10 ] as $priority ) {
+				$GLOBALS['pinova_wallet_test_priority'] = $priority;
+				self::assertSame( 'WHERE orders.id NOT IN (101)', WalletReports::report_query( $query )['where'] );
+			}
+		}
+
+		public static function wallet_versions(): array {
+			return [ [ '1.7.1' ], [ '1.7.3' ], [ '99.0.0' ], [ null ] ];
+		}
+
+		public function test_a_missing_native_method_is_untouched(): void {
+			$this->prepare( '1.7.3', WalletMissingCallbackFixture::class );
 			$query = [ 'from' => 'FROM test_wc_orders AS orders', 'where' => 'WHERE posts.ID NOT IN (101)' ];
 			self::assertSame( $query, WalletReports::report_query( $query ) );
 		}

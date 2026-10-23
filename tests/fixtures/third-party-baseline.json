@@ -12,10 +12,10 @@
   "callback_fixtures": [
     {
       "slug": "woo-wallet",
-      "version": "1.7.1",
+      "version": "1.7.3",
       "main": "woo-wallet.php",
-      "url": "https://downloads.wordpress.org/plugin/woo-wallet.1.7.1.zip",
-      "sha256": "a44d0c5577612533642164938663e954caa9017e594c06a7b10e0013113ac0f8"
+      "url": "https://downloads.wordpress.org/plugin/woo-wallet.1.7.3.zip",
+      "sha256": "aeb9e17c593e6f207003812eb2642719d95cb2ec337e61d56de069ff888e74b7"
     }
   ],
   "plugins": [

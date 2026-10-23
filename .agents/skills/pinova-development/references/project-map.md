@@ -139,7 +139,9 @@ IntegrationHealth exposes the same current capability snapshot in settings, Logs
 
 ## Wallet report compatibility
 
-`src/Integrations/Woocommerce/WalletReports.php` corrects TeraWallet's numeric `posts.ID NOT IN (...)` exclusion only for the characterized 1.7.1 native callback and exact HPOS report FROM clause. It registers independently of Dokan, changes only the unquoted outer identifier and preserves recharge exclusions, comments, literals and CPT queries. New versions require native callback characterization before widening the guard.
+`src/Integrations/Woocommerce/WalletReports.php` corrects TeraWallet's numeric `posts.ID NOT IN (...)` exclusion when its callable Woo_Wallet report method is registered before Pinova's priority 11 adapter and the exact HPOS report FROM clause matches. No dependency version constant is required or compared. It registers independently of Dokan, changes only the characterized unquoted identifier and preserves recharge exclusions, comments, literals, already-corrected queries and CPT reports. Missing APIs, absent/later callbacks and unknown query shapes remain unchanged. Archive versions and hashes characterize real callbacks in CI; they are not runtime allowlists.
+
+`ElementorDocuments` similarly recognizes only the two exact native WooCommerce document classes and callable enqueue/get_post methods at the characterized priority. Remove only callbacks belonging to prototypes whose post is null; keep real documents, preview assets, subclasses and unrelated hooks. Dependency version strings do not control this guard.
 
 
 ## Optional classic virtual checkout

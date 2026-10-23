@@ -101,6 +101,100 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 		Link::plan( $this->canonical, $this->source );
 	}
 
+	public function test_a_legacy_filter_cannot_remove_the_authoritative_mobile_binding(): void {
+		update_user_meta( $this->source, 'pinova_mobile', $this->mobile );
+		$filter = static fn(): array => [ 'custom_phone' ];
+		add_filter( 'pinova/mobile_possible_meta_keys', $filter );
+		try {
+			self::assertContains( 'pinova_mobile', UserService::mobile_possible_meta_keys() );
+			self::assertSame( $this->source, UserService::get_by_mobile( $this->mobile ) );
+		} finally {
+			remove_filter( 'pinova/mobile_possible_meta_keys', $filter );
+		}
+	}
+
+	public function test_an_existing_canonical_alias_cannot_be_masked_by_linking(): void {
+		add_user_meta( $this->canonical, 'Digits_Phone', '09124445577' );
+		$this->expectException( \RuntimeException::class );
+		Link::plan( $this->canonical, $this->source );
+	}
+
+	public function test_oversized_alias_metadata_refuses_linking_without_changing_identity(): void {
+		update_user_meta( $this->source, 'digits_phone', str_repeat( 'x', 257 ) );
+		$this->expectException( \RuntimeException::class );
+		Link::plan( $this->canonical, $this->source );
+	}
+
+	public function test_multiple_effective_source_numbers_require_separate_review(): void {
+		update_user_meta( $this->source, 'digits_phone', '09124445577' );
+		$this->expectException( \RuntimeException::class );
+		Link::plan( $this->canonical, $this->source );
+	}
+
+	public function test_a_physical_override_keeps_older_source_aliases_inactive_on_rollback(): void {
+		update_user_meta( $this->source, 'pinova_mobile', $this->mobile );
+		update_user_meta( $this->source, 'digits_phone', '09124445577' );
+		$plan = Link::plan( $this->canonical, $this->source );
+		Link::apply( $this->canonical, $this->source, $plan['fingerprint'], true );
+		$undo = Link::plan( $this->canonical, $this->source );
+		Link::rollback( $this->canonical, $this->source, $undo['fingerprint'] );
+		self::assertSame( $this->source, UserService::get_by_mobile( $this->mobile ) );
+		self::assertNull( UserService::get_by_mobile( '09124445577' ) );
+	}
+
+	public function test_changed_source_aliases_cannot_be_revived_into_another_customer(): void {
+		$plan = Link::plan( $this->canonical, $this->source );
+		Link::apply( $this->canonical, $this->source, $plan['fingerprint'], true );
+		$other_mobile = '09124445577';
+		$other        = UserService::create( $other_mobile );
+		try {
+			update_user_meta( $this->source, 'pinova_mobile', $other_mobile );
+			$undo = Link::plan( $this->canonical, $this->source );
+			try {
+				Link::rollback( $this->canonical, $this->source, $undo['fingerprint'] );
+				self::fail( 'Undo cannot revive a changed alias.' );
+			} catch ( \RuntimeException $exception ) {
+				self::assertSame( 'data_changed', Link::failure_reason( $exception ) );
+			}
+			self::assertSame( $other, UserService::get_by_mobile( $other_mobile ) );
+			self::assertSame( $this->canonical, UserService::get_by_mobile( $this->mobile ) );
+			self::assertTrue( Link::retired_state( $this->source ) );
+		} finally {
+			wp_delete_user( $other );
+		}
+	}
+
+	public function test_new_canonical_fallback_aliases_block_identity_rollback(): void {
+		$plan = Link::plan( $this->canonical, $this->source );
+		Link::apply( $this->canonical, $this->source, $plan['fingerprint'], true );
+		update_user_meta( $this->canonical, 'digits_phone', $this->mobile );
+		$undo = Link::plan( $this->canonical, $this->source );
+		try {
+			Link::rollback( $this->canonical, $this->source, $undo['fingerprint'] );
+			self::fail( 'Undo cannot introduce duplicate fallback ownership.' );
+		} catch ( \RuntimeException $exception ) {
+			self::assertSame( 'data_changed', Link::failure_reason( $exception ) );
+		}
+		self::assertSame( $this->canonical, UserService::get_by_mobile( $this->mobile ) );
+	}
+
+	public function test_legacy_journals_are_readable_but_require_manual_migration_review(): void {
+		$plan = Link::plan( $this->canonical, $this->source );
+		Link::apply( $this->canonical, $this->source, $plan['fingerprint'], true );
+		$journal = json_decode( get_user_meta( $this->canonical, Link::JOURNAL_META, true ), true );
+		unset( $journal['version'] );
+		update_user_meta( $this->canonical, Link::JOURNAL_META, wp_json_encode( $journal ) );
+		$undo = Link::plan( $this->canonical, $this->source );
+		self::assertSame( 1, $undo['journal_version'] );
+		try {
+			Link::rollback( $this->canonical, $this->source, $undo['fingerprint'] );
+			self::fail( 'Legacy safety digests cannot authorize the new undo.' );
+		} catch ( \RuntimeException $exception ) {
+			self::assertSame( 'unsupported_storage', Link::failure_reason( $exception ) );
+		}
+		self::assertSame( $this->canonical, UserService::get_by_mobile( $this->mobile ) );
+	}
+
 	public function test_existing_source_orders_require_a_separate_migration(): void {
 		$order = wc_create_order( [ 'customer_id' => $this->source ] );
 		try {

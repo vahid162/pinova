@@ -505,6 +505,7 @@ class UserService {
 			$mobile_possible_meta_keys,
 			static fn( $key ): bool => is_string( $key ) && '' !== trim( $key ) && ! in_array( strtolower( trim( $key ) ), [ 'billing_phone', 'shipping_phone' ], true )
 		);
+		$mobile_possible_meta_keys[] = 'pinova_mobile'; // Extensions cannot remove Pinova's authoritative binding.
 		return array_values( array_unique( $mobile_possible_meta_keys ) );
 	}
 

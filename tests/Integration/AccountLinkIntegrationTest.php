@@ -119,8 +119,9 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 
 	public function test_failed_journal_write_rolls_back_both_identity_rows(): void {
 		$plan = Link::plan( $this->canonical, $this->source );
-		$fail = static fn( $check, $id, $key ) => Link::JOURNAL_META === $key ? false : $check;
-		add_filter( 'add_user_metadata', $fail, 999, 3 );
+		$pdo = \Pinova\Models\OTP::resolveConnection()->getPdo();
+		$previous = $pdo->getAttribute( \PDO::ATTR_STATEMENT_CLASS );
+		$pdo->setAttribute( \PDO::ATTR_STATEMENT_CLASS, [ AccountLinkFailingStatement::class ] );
 		try {
 			Link::apply( $this->canonical, $this->source, $plan['fingerprint'], true );
 			self::fail( 'Journal failure must abort the operation.' );
@@ -129,7 +130,7 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 			self::assertFalse( Link::retired_state( $this->source ) );
 			self::assertSame( $this->source, UserService::get_by_mobile( $this->mobile ) );
 		} finally {
-			remove_filter( 'add_user_metadata', $fail, 999 );
+			$pdo->setAttribute( \PDO::ATTR_STATEMENT_CLASS, $previous );
 		}
 	}
 
@@ -184,5 +185,14 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 		self::assertNull( Link::retired_state( $this->source ) );
 		self::assertNull( UserService::get_by_mobile( $this->mobile ) );
 		self::assertFalse( UserService::mobile_is_available_for_user( $this->mobile, $this->canonical ) );
+	}
+}
+
+
+final class AccountLinkFailingStatement extends \PDOStatement {
+	protected function __construct() {}
+
+	public function execute( ?array $params = null ): bool {
+		return in_array( Link::JOURNAL_META, $params ?? [], true ) ? false : parent::execute( $params );
 	}
 }

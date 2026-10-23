@@ -35,7 +35,11 @@ final class AccountLinkCommand {
 		$valid = ! $args && ! array_diff( array_keys( $flags ), [ 'canonical', 'source', 'apply', 'ownership-verified', 'expected', 'rollback' ] );
 		$canonical = (string) ( $flags['canonical'] ?? '' );
 		$source = (string) ( $flags['source'] ?? '' );
+		foreach ( [ 'apply', 'rollback', 'ownership-verified' ] as $flag ) {
+			$valid = $valid && ( ! isset( $flags[ $flag ] ) || true === $flags[ $flag ] );
+		}
 		if ( ! $valid || ! preg_match( '/\A[1-9][0-9]*\z/', $canonical ) || ! preg_match( '/\A[1-9][0-9]*\z/', $source )
+			|| (string) (int) $canonical !== $canonical || (string) (int) $source !== $source
 			|| ( isset( $flags['apply'] ) && isset( $flags['rollback'] ) ) ) {
 			\WP_CLI::error( 'Supply explicit canonical/source IDs and one supported operation.' );
 		}
@@ -46,7 +50,7 @@ final class AccountLinkCommand {
 					\WP_CLI::error( 'Preview first and supply its exact --expected fingerprint.' );
 				}
 				if ( isset( $flags['apply'] ) ) {
-					AccountLinkService::apply( (int) $canonical, (int) $source, $expected, isset( $flags['ownership-verified'] ) );
+					AccountLinkService::apply( (int) $canonical, (int) $source, $expected, true === ( $flags['ownership-verified'] ?? false ) );
 				} else {
 					AccountLinkService::rollback( (int) $canonical, (int) $source, $expected );
 				}

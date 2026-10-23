@@ -27,7 +27,7 @@ final class LegacyCheckoutCompatibility {
 	}
 
 	public function check_owner( WC_Order $order ): void {
-		if ( (int) $order->get_customer_id() === get_current_user_id() ) {
+		if ( (int) $order->get_customer_id() === get_current_user_id() && ( ! get_current_user_id() || false === \Pinova\Services\AccountLinkService::retired_state( get_current_user_id() ) ) ) {
 			return;
 		}
 		EventThrottle::log( 'integration.operation_failed', [ 'operation' => 'woocommerce', 'reason' => 'order_owner_mismatch' ] );

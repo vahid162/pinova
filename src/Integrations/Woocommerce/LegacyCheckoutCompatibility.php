@@ -30,7 +30,13 @@ final class LegacyCheckoutCompatibility {
 		if ( (int) $order->get_customer_id() === get_current_user_id() && ( ! get_current_user_id() || false === \Pinova\Services\AccountLinkService::retired_state( get_current_user_id() ) ) ) {
 			return;
 		}
-		EventThrottle::log( 'integration.operation_failed', [ 'operation' => 'woocommerce', 'reason' => 'order_owner_mismatch' ] );
+		EventThrottle::log(
+			'integration.operation_failed',
+			[
+				'operation' => 'woocommerce',
+				'reason'    => 'order_owner_mismatch',
+			]
+		);
 		throw new Exception( __( 'حساب سفارش با حساب واردشده مطابقت ندارد. صفحه را تازه کنید و دوباره تلاش کنید؛ اگر مشکل ادامه داشت با پشتیبانی تماس بگیرید.', 'pinova' ) );
 	}
 }

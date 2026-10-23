@@ -26,6 +26,7 @@ final class LogRepository {
 		'auth.session_failed',
 		'auth.session_destroyed',
 		'identity.mobile_conflict',
+		'identity.legacy_contact_overlap',
 		'identity.account_linked',
 		'identity.account_link_rolled_back',
 		'identity.account_link_failed',

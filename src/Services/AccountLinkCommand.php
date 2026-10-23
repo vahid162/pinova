@@ -32,9 +32,9 @@ final class AccountLinkCommand {
 	 * Use --user=<administrator> and obtain an approved private rollback backup before applying.
 	 */
 	public function __invoke( array $args, array $flags ): void {
-		$valid = ! $args && ! array_diff( array_keys( $flags ), [ 'canonical', 'source', 'apply', 'ownership-verified', 'expected', 'rollback' ] );
+		$valid     = ! $args && ! array_diff( array_keys( $flags ), [ 'canonical', 'source', 'apply', 'ownership-verified', 'expected', 'rollback' ] );
 		$canonical = (string) ( $flags['canonical'] ?? '' );
-		$source = (string) ( $flags['source'] ?? '' );
+		$source    = (string) ( $flags['source'] ?? '' );
 		foreach ( [ 'apply', 'rollback', 'ownership-verified' ] as $flag ) {
 			$valid = $valid && ( ! isset( $flags[ $flag ] ) || true === $flags[ $flag ] );
 		}
@@ -50,7 +50,7 @@ final class AccountLinkCommand {
 					\WP_CLI::error( 'Preview first and supply its exact --expected fingerprint.' );
 				}
 				if ( isset( $flags['apply'] ) ) {
-					AccountLinkService::apply( (int) $canonical, (int) $source, $expected, true === ( $flags['ownership-verified'] ?? false ) );
+					AccountLinkService::apply( (int) $canonical, (int) $source, $expected, isset( $flags['ownership-verified'] ) );
 				} else {
 					AccountLinkService::rollback( (int) $canonical, (int) $source, $expected );
 				}

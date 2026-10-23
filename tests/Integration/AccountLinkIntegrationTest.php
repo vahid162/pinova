@@ -233,6 +233,34 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_source_wallet_transactions_require_a_separate_migration(): void {
+		global $wpdb;
+		$this->assert_owned_adapter_rejected( $wpdb->base_prefix . 'woo_wallet_transactions', 'user_id', 'source_has_wallet_activity' );
+	}
+
+	public function test_source_forum_posts_require_a_separate_migration(): void {
+		global $wpdb;
+		$this->assert_owned_adapter_rejected( $wpdb->prefix . 'wpforo_link_test_posts', 'userid', 'source_has_forum_activity' );
+	}
+
+	private function assert_owned_adapter_rejected( string $table, string $column, string $reason ): void {
+		global $wpdb;
+		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) );
+		self::assertNotFalse( $wpdb->query( $wpdb->prepare( 'CREATE TABLE %i (%i BIGINT UNSIGNED NOT NULL)', $table, $column ) ) );
+		try {
+			self::assertSame( 1, $wpdb->insert( $table, [ $column => $this->source ] ) );
+			try {
+				Link::plan( $this->canonical, $this->source );
+				self::fail( 'Source-owned activity cannot be stranded.' );
+			} catch ( \RuntimeException $exception ) {
+				self::assertSame( $reason, Link::failure_reason( $exception ) );
+			}
+			self::assertSame( $this->source, UserService::get_by_mobile( $this->mobile ) );
+		} finally {
+			$wpdb->query( $wpdb->prepare( 'DROP TABLE %i', $table ) );
+		}
+	}
+
 	public function test_source_authored_content_requires_a_separate_migration(): void {
 		$id = self::factory()->post->create( [ 'post_author' => $this->source, 'post_status' => 'draft' ] );
 		try {

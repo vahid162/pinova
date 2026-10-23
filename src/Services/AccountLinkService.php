@@ -222,9 +222,9 @@ final class AccountLinkService {
 		$previous = $wpdb->suppress_errors( true );
 		try {
 			$post = $wpdb->get_var( $wpdb->prepare( 'SELECT ID FROM %i WHERE post_author = %d LIMIT 1', $wpdb->posts, $source ) );
-			self::require_state( ! $wpdb->last_error, 13 );
+			self::require_ownership_read();
 			$comment = $wpdb->get_var( $wpdb->prepare( 'SELECT comment_ID FROM %i WHERE user_id = %d LIMIT 1', $wpdb->comments, $source ) );
-			self::require_state( ! $wpdb->last_error, 13 );
+			self::require_ownership_read();
 			self::require_state( null === $post && null === $comment, 10 );
 			$wallet_table = $wpdb->base_prefix . 'woo_wallet_transactions';
 			$pattern      = $wpdb->esc_like( $wpdb->prefix . 'wpforo' ) . '%' . $wpdb->esc_like( '_posts' );
@@ -236,12 +236,18 @@ final class AccountLinkService {
 				$is_wallet = $wallet_table === $table;
 				$column    = $is_wallet ? 'user_id' : 'userid';
 				$exists    = $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM %i WHERE %i = %d LIMIT 1', $table, $column, $source ) );
-				self::require_state( ! $wpdb->last_error, 13 );
+				self::require_ownership_read();
 				self::require_state( null === $exists, $is_wallet ? 11 : 12 );
 			}
 		} finally {
 			$wpdb->suppress_errors( $previous );
 		}
+	}
+
+	/** wpdb mutates last_error on every read, including after an earlier successful read. */
+	private static function require_ownership_read(): void {
+		global $wpdb;
+		self::require_state( '' === $wpdb->last_error, 13 );
 	}
 
 	/** Snapshot hashes remain private; no billing data, tokens or identifiers leave the service. */

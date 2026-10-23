@@ -178,7 +178,10 @@ final class IssueMonitor {
 			] : null;
 		}
 		if ( 'identity.legacy_contact_overlap' === $event ) {
-			return [ 'code' => $code, 'category' => 'insufficient_evidence' ];
+			return [
+				'code'     => $code,
+				'category' => 'insufficient_evidence',
+			];
 		}
 		if ( 'identity.account_link_failed' === $event ) {
 			return [

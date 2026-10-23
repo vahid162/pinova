@@ -233,6 +233,16 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_source_authored_content_requires_a_separate_migration(): void {
+		$id = self::factory()->post->create( [ 'post_author' => $this->source, 'post_status' => 'draft' ] );
+		try {
+			$this->expectException( \RuntimeException::class );
+			Link::plan( $this->canonical, $this->source );
+		} finally {
+			wp_delete_post( $id, true );
+		}
+	}
+
 }
 
 

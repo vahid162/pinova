@@ -18,15 +18,19 @@ final class AccountLinkService {
 	public const JOURNAL_META = '_pinova_account_link_journal';
 
 	private const REASONS = [
-		1 => 'not_authorized',
-		2 => 'unsupported_accounts',
-		3 => 'identity_conflict',
-		4 => 'stale_state',
-		5 => 'ownership_not_confirmed',
-		6 => 'active_delivery',
-		7 => 'write_failed',
-		8 => 'unsupported_storage',
-		9 => 'data_changed',
+		1  => 'not_authorized',
+		2  => 'unsupported_accounts',
+		3  => 'identity_conflict',
+		4  => 'stale_state',
+		5  => 'ownership_not_confirmed',
+		6  => 'active_delivery',
+		7  => 'write_failed',
+		8  => 'unsupported_storage',
+		9  => 'data_changed',
+		10 => 'source_has_content',
+		11 => 'source_has_wallet_activity',
+		12 => 'source_has_forum_activity',
+		13 => 'unsupported_ownership_adapter',
 	];
 
 	/** Null is an unreadable/malformed security record, never an available alias. */
@@ -114,7 +118,7 @@ final class AccountLinkService {
 			self::check_applied( $canonical, $source, $persisted );
 			self::finish( $canonical, $source, 'identity.account_linked' );
 		} catch ( Throwable $throwable ) {
-			self::observe_failure( $canonical, $source, $throwable );
+			self::observe_failure( $canonical, $throwable );
 			throw $throwable;
 		}
 	}
@@ -160,7 +164,7 @@ final class AccountLinkService {
 			);
 			self::finish( $canonical, $source, 'identity.account_link_rolled_back' );
 		} catch ( Throwable $throwable ) {
-			self::observe_failure( $canonical, $source, $throwable );
+			self::observe_failure( $canonical, $throwable );
 			throw $throwable;
 		}
 	}
@@ -207,8 +211,37 @@ final class AccountLinkService {
 			&& null === self::meta( $canonical, 'pinova_mobile' ) && null === UserService::get_mobile( $canonical ),
 			3
 		);
+		self::source_activity( $source );
 		self::require_state( '' !== $state['mobile'] && UserService::get_by_mobile( $state['mobile'] ) === $source, 3 );
 		return $state;
+	}
+
+	/** Do not strand source-owned content or finance/forum history behind retired login. */
+	private static function source_activity( int $source ): void {
+		global $wpdb;
+		$previous = $wpdb->suppress_errors( true );
+		try {
+			$post = $wpdb->get_var( $wpdb->prepare( 'SELECT ID FROM %i WHERE post_author = %d LIMIT 1', $wpdb->posts, $source ) );
+			self::require_state( ! $wpdb->last_error, 13 );
+			$comment = $wpdb->get_var( $wpdb->prepare( 'SELECT comment_ID FROM %i WHERE user_id = %d LIMIT 1', $wpdb->comments, $source ) );
+			self::require_state( ! $wpdb->last_error, 13 );
+			self::require_state( null === $post && null === $comment, 10 );
+			$wallet_table = $wpdb->base_prefix . 'woo_wallet_transactions';
+			$pattern      = $wpdb->esc_like( $wpdb->prefix . 'wpforo' ) . '%' . $wpdb->esc_like( '_posts' );
+			$tables       = $wpdb->get_col( $wpdb->prepare( 'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME = %s OR TABLE_NAME LIKE %s) LIMIT 11', $wallet_table, $pattern ) );
+			self::require_state( ! $wpdb->last_error && is_array( $tables ) && count( $tables ) <= 10, 13 );
+			self::require_state( ! function_exists( 'woo_wallet' ) || in_array( $wallet_table, $tables, true ), 13 );
+			self::require_state( ! function_exists( 'wpforo' ) || (bool) array_diff( $tables, [ $wallet_table ] ), 13 );
+			foreach ( $tables as $table ) {
+				$is_wallet = $wallet_table === $table;
+				$column    = $is_wallet ? 'user_id' : 'userid';
+				$exists    = $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM %i WHERE %i = %d LIMIT 1', $table, $column, $source ) );
+				self::require_state( ! $wpdb->last_error, 13 );
+				self::require_state( null === $exists, $is_wallet ? 11 : 12 );
+			}
+		} finally {
+			$wpdb->suppress_errors( $previous );
+		}
 	}
 
 	/** Snapshot hashes remain private; no billing data, tokens or identifiers leave the service. */
@@ -282,7 +315,7 @@ final class AccountLinkService {
 		$placeholders = implode( ',', array_fill( 0, count( $keys ), '%s' ) );
 		return [
 			$wpdb->prepare( 'SELECT ID,user_login,user_email,user_pass FROM %i WHERE ID IN (%d,%d) ORDER BY ID', $wpdb->users, $canonical, $source ),
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Dynamic fragment contains only placeholders.
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Dynamic fragment contains only placeholders.
 			$wpdb->prepare( "SELECT umeta_id,user_id,meta_key,meta_value FROM %i WHERE user_id IN (%d,%d) AND meta_key IN ({$placeholders}) ORDER BY umeta_id LIMIT 1001", array_merge( [ $wpdb->usermeta, $canonical, $source ], $keys ) ),
 		];
 	}
@@ -313,6 +346,8 @@ final class AccountLinkService {
 			'canonical_id'          => $canonical,
 			'source_id'             => $source,
 			'state'                 => $phase,
+			'source_orders'         => $state['source_orders'],
+			'source_permissions'    => $state['source_permissions'],
 			'orders_preserved'      => $state['canonical_orders'],
 			'permissions_preserved' => $state['canonical_permissions'],
 			'fingerprint'           => self::digest( [ $canonical, $source, $state['digest'], $journal ] ),
@@ -321,6 +356,7 @@ final class AccountLinkService {
 
 	private static function check_applied( int $canonical, int $source, array $journal ): void {
 		global $wpdb;
+		self::source_activity( $source );
 		$mobile = self::meta( $canonical, 'pinova_mobile' );
 		$ids    = $wpdb->get_col( $wpdb->prepare( 'SELECT umeta_id FROM %i WHERE (user_id = %d AND meta_key = %s) OR (user_id = %d AND meta_key = %s) ORDER BY umeta_id', $wpdb->usermeta, $canonical, 'pinova_mobile', $source, self::RETIRED_META ) );
 		self::require_state(
@@ -453,8 +489,12 @@ final class AccountLinkService {
 		);
 	}
 
-	private static function observe_failure( int $canonical, int $source, Throwable $throwable ): void {
-		$reason = $throwable instanceof RuntimeException ? ( self::REASONS[ $throwable->getCode() ] ?? 'operation_failed' ) : 'operation_failed';
+	public static function failure_reason( Throwable $throwable ): string {
+		return $throwable instanceof RuntimeException ? ( self::REASONS[ $throwable->getCode() ] ?? 'operation_failed' ) : 'operation_failed';
+	}
+
+	private static function observe_failure( int $canonical, Throwable $throwable ): void {
+		$reason = self::failure_reason( $throwable );
 		EventThrottle::log(
 			'identity.account_link_failed',
 			[

@@ -410,7 +410,7 @@ class UserService {
 		$username = $mobile->get_sanitized_username();
 		if ( username_exists( $username ) ) {
 			// The unclaimed number can outlive its immutable, retired/overridden username.
-			$username .= '_' . wp_generate_password( 12, false );
+			$username                               .= '_' . wp_generate_password( 12, false );
 			$userdata['meta_input']['pinova_mobile'] = $mobile->get_formatted();
 		}
 

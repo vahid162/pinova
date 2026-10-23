@@ -57,8 +57,7 @@ final class AccountLinkCommand {
 			}
 			\WP_CLI::line( wp_json_encode( AccountLinkService::plan( (int) $canonical, (int) $source ) ) );
 		} catch ( Throwable $throwable ) {
-			unset( $throwable );
-			\WP_CLI::error( 'Account reconciliation was not completed. Check Pinova issues and the current read-only preview; do not delete users or regenerate permissions.' );
+			\WP_CLI::error( sprintf( 'Account reconciliation stopped (%s). Review the read-only preview; do not delete users or regenerate permissions.', AccountLinkService::failure_reason( $throwable ) ) );
 		}
 	}
 }

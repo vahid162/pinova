@@ -127,11 +127,16 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 	}
 
 	public function test_contact_fields_cannot_be_reintroduced_by_alias_filter(): void {
-		$filter = static fn( array $keys ): array => array_merge( $keys, [ 'billing_phone', 'shipping_phone' ] );
+		$mobile = '09124445577';
+		update_user_meta( $this->canonical, 'billing_phone', $mobile );
+		$filter = static fn( array $keys ): array => array_merge( $keys, [ 'billing_phone', 'shipping_phone', 'Billing_Phone', 'SHIPPING_PHONE', 'billing_phone ', ' Shipping_Phone ', 'bílling_phone', 'custom_phone' ] );
 		add_filter( 'pinova/mobile_possible_meta_keys', $filter );
 		try {
 			self::assertNotContains( 'billing_phone', UserService::mobile_possible_meta_keys() );
 			self::assertNotContains( 'shipping_phone', UserService::mobile_possible_meta_keys() );
+			self::assertContains( 'custom_phone', UserService::mobile_possible_meta_keys() );
+			self::assertNull( UserService::get_by_mobile( $mobile ) );
+			self::assertTrue( UserService::mobile_is_available_for_user( $mobile, 0 ) );
 		} finally {
 			remove_filter( 'pinova/mobile_possible_meta_keys', $filter );
 		}

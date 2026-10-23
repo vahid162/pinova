@@ -113,7 +113,7 @@ class UserService {
 		$meta_keys     = self::mobile_possible_meta_keys();
 		$key_tokens    = implode( ', ', array_fill( 0, count( $meta_keys ), '%s' ) );
 		$value_tokens  = implode( ', ', array_fill( 0, count( $possible_formats ), '%s' ) );
-		$meta_query    = "SELECT DISTINCT `user_id` FROM %i WHERE `meta_key` IN ({$key_tokens}) AND `meta_value` IN ({$value_tokens}) ORDER BY `user_id`";
+		$meta_query    = "SELECT DISTINCT `user_id` FROM %i WHERE `meta_key` IN ({$key_tokens}) AND `meta_key` NOT IN ('billing_phone', 'shipping_phone') AND `meta_value` IN ({$value_tokens}) ORDER BY `user_id`";
 		$meta_params   = array_merge( [ $wpdb->usermeta ], $meta_keys, $possible_formats );
 		$meta_user_ids = array_map(
 			'intval',
@@ -500,7 +500,12 @@ class UserService {
 
 		$mobile_possible_meta_keys = apply_filters( 'pinova/mobile_possible_meta_keys', $mobile_possible_meta_keys );
 
-		return array_values( array_unique( array_filter( array_diff( $mobile_possible_meta_keys, [ 'billing_phone', 'shipping_phone' ] ) ) ) );
+		// Metadata comparisons may ignore letter case and trailing spaces in the database.
+		$mobile_possible_meta_keys = array_filter(
+			$mobile_possible_meta_keys,
+			static fn( $key ): bool => is_string( $key ) && '' !== trim( $key ) && ! in_array( strtolower( trim( $key ) ), [ 'billing_phone', 'shipping_phone' ], true )
+		);
+		return array_values( array_unique( $mobile_possible_meta_keys ) );
 	}
 
 	public static function allowed_registration_roles(): array {

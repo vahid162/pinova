@@ -264,6 +264,25 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 1, $plan['orders_preserved'] );
 	}
 
+	public function test_rollback_restores_source_access_without_changing_later_wallet_history(): void {
+		global $wpdb;
+		$table = $wpdb->base_prefix . 'woo_wallet_transactions';
+		self::assertNull( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) );
+		self::assertNotFalse( $wpdb->query( $wpdb->prepare( 'CREATE TABLE %i (user_id BIGINT UNSIGNED NOT NULL)', $table ) ) );
+		try {
+			$plan = Link::plan( $this->canonical, $this->source );
+			Link::apply( $this->canonical, $this->source, $plan['fingerprint'], true );
+			// A separate ownership adapter can append history after cutover.
+			self::assertSame( 1, $wpdb->insert( $table, [ 'user_id' => $this->source ] ) );
+			$rollback = Link::plan( $this->canonical, $this->source );
+			Link::rollback( $this->canonical, $this->source, $rollback['fingerprint'] );
+			self::assertSame( $this->source, UserService::get_by_mobile( $this->mobile ) );
+			self::assertSame( (string) $this->source, $wpdb->get_var( $wpdb->prepare( 'SELECT user_id FROM %i', $table ) ) );
+		} finally {
+			$wpdb->query( $wpdb->prepare( 'DROP TABLE %i', $table ) );
+		}
+	}
+
 	public function test_source_wallet_transactions_require_a_separate_migration(): void {
 		global $wpdb;
 		$this->assert_owned_adapter_rejected( $wpdb->base_prefix . 'woo_wallet_transactions', 'user_id', 'source_has_wallet_activity' );

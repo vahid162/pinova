@@ -73,6 +73,7 @@ final class AccountLinkService {
 					&& ( hash_equals( $journal['plan'], $expected ) || hash_equals( self::plan( $canonical, $source )['fingerprint'], $expected ) ),
 					4
 				);
+				self::source_activity( $source );
 				self::check_applied( $canonical, $source, $journal );
 				self::finish( $canonical, $source, 'identity.account_linked' );
 				return;
@@ -115,6 +116,7 @@ final class AccountLinkService {
 			);
 			$persisted = self::journal( $canonical );
 			self::require_state( null !== $persisted, 7 );
+			self::source_activity( $source );
 			self::check_applied( $canonical, $source, $persisted );
 			self::finish( $canonical, $source, 'identity.account_linked' );
 		} catch ( Throwable $throwable ) {
@@ -364,7 +366,6 @@ final class AccountLinkService {
 
 	private static function check_applied( int $canonical, int $source, array $journal ): void {
 		global $wpdb;
-		self::source_activity( $source );
 		$mobile = self::meta( $canonical, 'pinova_mobile' );
 		$ids    = $wpdb->get_col( $wpdb->prepare( 'SELECT umeta_id FROM %i WHERE (user_id = %d AND meta_key = %s) OR (user_id = %d AND meta_key = %s) ORDER BY umeta_id', $wpdb->usermeta, $canonical, 'pinova_mobile', $source, self::RETIRED_META ) );
 		self::require_state(

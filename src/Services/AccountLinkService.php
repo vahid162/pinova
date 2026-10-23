@@ -5,6 +5,7 @@ namespace Pinova\Services;
 use Pinova\Logging\EventThrottle;
 use Pinova\Logging\Logger;
 use Pinova\Objects\Identifier;
+use Pinova\Objects\Mobile;
 use RuntimeException;
 use PDO;
 use PDOStatement;
@@ -68,6 +69,7 @@ final class AccountLinkService {
 			self::require_state( $ownership_confirmed, 5 );
 			$journal = self::journal( $canonical );
 			if ( null !== $journal ) {
+				self::require_state( 2 === ( $journal['version'] ?? 1 ), 8 );
 				self::require_state(
 					'applied' === $journal['state'] && $source === $journal['source']
 					&& ( hash_equals( $journal['plan'], $expected ) || hash_equals( self::plan( $canonical, $source )['fingerprint'], $expected ) ),
@@ -98,6 +100,7 @@ final class AccountLinkService {
 							$mobile_id  = self::insert_meta( $pdo, $canonical, 'pinova_mobile', $mobile );
 							self::require_state( 0 < $retired_id && 0 < $mobile_id, 7 );
 							$journal = [
+								'version'             => 2,
 								'state'               => 'applied',
 								'source'              => $source,
 								'actor'               => get_current_user_id(),
@@ -133,6 +136,7 @@ final class AccountLinkService {
 			if ( 'rolled_back' === $journal['state'] ) {
 				return;
 			}
+			self::require_state( 2 === ( $journal['version'] ?? 1 ), 8 );
 			$mobile = (string) UserService::get_mobile( $canonical );
 			self::locked(
 				$canonical,
@@ -214,8 +218,44 @@ final class AccountLinkService {
 			3
 		);
 		self::source_activity( $source );
+		self::check_initial_aliases( $canonical, $source, $state, $old->user_login );
 		self::require_state( '' !== $state['mobile'] && UserService::get_by_mobile( $state['mobile'] ) === $source, 3 );
 		return $state;
+	}
+
+	/** A source with multiple effective numbers needs a separate migration, not alias retirement. */
+	private static function check_initial_aliases( int $canonical, int $source, array $state, string $source_login ): void {
+		$physical = UserService::get_persisted_mobile_result( $source );
+		self::require_state( $physical['success'] && ( null === $physical['value'] || $physical['value'] === $state['mobile'] ), 3 );
+		$values = $state['aliases'];
+		if ( null === $physical['value'] ) {
+			$values[] = [
+				'user_id'    => $source,
+				'meta_value' => $source_login,
+			];
+		}
+		foreach ( $values as $row ) {
+			if ( $source === (int) $row['user_id'] && null !== $physical['value'] ) {
+				continue; // The unchanged physical override suppresses older aliases.
+			}
+			$mobile = new Mobile( (string) $row['meta_value'] );
+			self::require_state( ! $mobile->is_valid() || ( $canonical !== (int) $row['user_id'] && $mobile->get_formatted() === $state['mobile'] ), 3 );
+		}
+	}
+
+	/** Exact fallback rows are part of rollback safety; exclude only the operation-owned binding. */
+	private static function aliases( int $canonical, int $source ): array {
+		global $wpdb;
+		$keys = UserService::mobile_possible_meta_keys();
+		self::require_state( count( $keys ) <= 40, 2 );
+		$tokens = implode( ',', array_fill( 0, count( $keys ), '%s' ) );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Only generated placeholders are interpolated.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT umeta_id,user_id,meta_key,CASE WHEN OCTET_LENGTH(meta_value)<=256 THEN meta_value ELSE NULL END AS meta_value,OCTET_LENGTH(meta_value) AS value_size FROM %i WHERE user_id IN (%d,%d) AND meta_key IN ({$tokens}) AND meta_key NOT IN ('billing_phone','shipping_phone') AND NOT (user_id=%d AND meta_key='pinova_mobile') ORDER BY umeta_id LIMIT 1001", array_merge( [ $wpdb->usermeta, $canonical, $source ], $keys, [ $canonical ] ) ), ARRAY_A );
+		self::require_state( ! $wpdb->last_error && is_array( $rows ) && count( $rows ) <= 1000, 3 );
+		foreach ( $rows as $row ) {
+			self::require_state( (int) $row['value_size'] <= 256, 2 );
+		}
+		return $rows;
 	}
 
 	/** Do not strand source-owned content or finance/forum history behind retired login. */
@@ -286,10 +326,12 @@ final class AccountLinkService {
 		$permissions = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM %i WHERE user_id IN (%d,%d) ORDER BY permission_id LIMIT 1001', $wpdb->prefix . 'woocommerce_downloadable_product_permissions', $canonical, $source ), ARRAY_A );
 		self::require_state( is_array( $permissions ) && ! $wpdb->last_error && count( $permissions ) <= 1000, 2 );
 		$mobile    = UserService::get_mobile( $source ) ?? '';
-		$safety    = self::digest( [ $users, $orders, $permissions ] );
+		$aliases   = self::aliases( $canonical, $source );
+		$safety    = self::digest( [ $users, $orders, $permissions, $aliases ] );
 		$guard_sql = self::guard_sql( $canonical, $source );
 		$guard     = self::guard( $guard_sql );
 		return [
+			'aliases'               => $aliases,
 			'mobile_digest'         => MobileVerificationService::identity_digest( $canonical, new Identifier( $mobile ) ),
 			'guard_sql'             => $guard_sql,
 			'guard'                 => $guard,
@@ -353,6 +395,7 @@ final class AccountLinkService {
 
 	private static function preview( int $canonical, int $source, array $state, string $phase, ?array $journal ): array {
 		return [
+			'journal_version'       => $journal['version'] ?? ( null === $journal ? 0 : 1 ),
 			'canonical_id'          => $canonical,
 			'source_id'             => $source,
 			'state'                 => $phase,
@@ -529,6 +572,7 @@ final class AccountLinkService {
 		$journal = json_decode( $raw, true );
 		self::require_state(
 			is_array( $journal ) && in_array( $journal['state'] ?? null, [ 'applied', 'rolled_back' ], true )
+			&& ( ! array_key_exists( 'version', $journal ) || is_int( $journal['version'] ) )
 			&& is_int( $journal['source'] ?? null ) && is_string( $journal['plan'] ?? null )
 			&& is_string( $journal['safety'] ?? null ) && is_string( $journal['mobile_digest'] ?? null )
 			&& is_int( $journal['mobile_id'] ?? null ) && is_int( $journal['retired_id'] ?? null ),

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -118,6 +118,8 @@ async function main() {
         { name: 'healthy-after', repeats: 1 },
     ];
     for (const item of cases) {
+        const reportPath = path.join(output, `${item.name}.json`);
+        await rm(reportPath, { force: true }); // A crashed reporter must not reuse stale evidence.
         const result = spawnSync(path.join(root, 'node_modules/.bin/playwright'), [
             'test', '--config', 'tests/browser/playwright.config.mjs',
             '--grep', `^.*${selectedTest}$`, '--workers=1', '--retries=0',
@@ -125,13 +127,14 @@ async function main() {
             `--output=${path.join(output, item.name)}`,
         ], {
             cwd: root, encoding: 'utf8', timeout: 240_000, maxBuffer: 16 * 1024 * 1024,
-            env: { ...process.env, PINOVA_MODAL_TEST_MUTATION: item.mutation?.name || '' },
+            env: { ...process.env, PINOVA_MODAL_TEST_MUTATION: item.mutation?.name || '',
+                PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath },
         });
-        await writeFile(path.join(output, `${item.name}.json`), result.stdout || '');
+        await writeFile(path.join(output, `${item.name}.stdout.log`), result.stdout || '');
         await writeFile(path.join(output, `${item.name}.stderr.log`), result.stderr || '');
         assert.ifError(result.error);
         assert.equal(result.signal, null, 'Runner was interrupted');
-        checkSensitivityReport(JSON.parse(result.stdout), result.status, item.mutation, item.repeats);
+        checkSensitivityReport(JSON.parse(await readFile(reportPath, 'utf8')), result.status, item.mutation, item.repeats);
         console.log(`${item.name}: ${item.mutation ? 'intended product fault detected' : `${item.repeats} clean pass(es), no retries`}`);
     }
 }

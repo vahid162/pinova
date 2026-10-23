@@ -7,10 +7,11 @@ final class WalletReports {
 
 	public static function report_query( array $query ): array {
 		global $wpdb;
-		$wallet = $GLOBALS['woo_wallet'] ?? null;
-		if ( ! defined( 'WOO_WALLET_PLUGIN_VERSION' ) || '1.7.1' !== WOO_WALLET_PLUGIN_VERSION
-			|| ! is_object( $wallet ) || ! is_a( $wallet, 'Woo_Wallet' )
-			|| 10 !== has_filter( 'woocommerce_reports_get_order_report_query', [ $wallet, 'woocommerce_reports_get_order_report_query' ] )
+		$wallet   = $GLOBALS['woo_wallet'] ?? null;
+		$callback = [ $wallet, 'woocommerce_reports_get_order_report_query' ];
+		$priority = is_callable( $callback ) ? has_filter( 'woocommerce_reports_get_order_report_query', $callback ) : false;
+		if ( ! is_object( $wallet ) || ! is_a( $wallet, 'Woo_Wallet' )
+			|| ! is_int( $priority ) || $priority >= 11
 			|| ! isset( $query['from'], $query['where'] ) || ! is_string( $query['where'] )
 			|| 'FROM ' . $wpdb->prefix . 'wc_orders AS orders' !== $query['from'] ) {
 			return $query;

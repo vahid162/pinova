@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { checkSensitivityReport, modalMutations, requireLocalTestOrigin } from '../../tools/check-modal-test-sensitivity.mjs';
 
 function reportFor(mutation, repeats = 1) {
@@ -77,4 +81,47 @@ test('a marker in an adjacent source snippet cannot certify a different failure'
     assert.throws(() => checkSensitivityReport(report, 1, mutation));
     delete firstResult(report).error;
     assert.throws(() => checkSensitivityReport(report, 1, mutation));
+});
+
+
+test('sensitivity runner reads a fresh JSON file even when diagnostics pollute stdout', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pinova-sensitivity-'));
+    try {
+        await mkdir(path.join(directory, 'tools'));
+        await mkdir(path.join(directory, 'node_modules/.bin'), { recursive: true });
+        const runner = path.join(directory, 'tools/check-modal-test-sensitivity.mjs');
+        await copyFile(new URL('../../tools/check-modal-test-sensitivity.mjs', import.meta.url), runner);
+        const reports = Object.fromEntries(modalMutations.map(mutation => [mutation.name, reportFor(mutation)]));
+        reports['healthy-before'] = reportFor(null, 3);
+        reports['healthy-after'] = reportFor(null);
+        const executable = path.join(directory, 'node_modules/.bin/playwright');
+        await writeFile(executable, `#!${process.execPath}
+const fs = require('node:fs');
+const reports = ${JSON.stringify(reports)};
+const mutation = process.env.PINOVA_MODAL_TEST_MUTATION;
+const name = mutation || (process.argv.includes('--repeat-each=3') ? 'healthy-before' : 'healthy-after');
+console.log('GitCommitInfo: timeout diagnostic, not reporter JSON');
+if (process.env.PINOVA_TEST_OMIT_REPORT !== '1') {
+    fs.writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE, JSON.stringify(reports[name]));
+}
+process.exit(mutation ? 1 : 0);
+`, { mode: 0o700 });
+        const run = environment => spawnSync(process.execPath, [runner], {
+            cwd: directory, encoding: 'utf8', timeout: 10_000,
+            env: { ...process.env, PLAYWRIGHT_BASE_URL: 'http://localhost:8890', ...environment },
+        });
+        const complete = run({ PINOVA_TEST_OMIT_REPORT: '0' });
+        assert.equal(complete.status, 0, complete.stderr);
+        assert.match(complete.stdout, /healthy-after: 1 clean pass/);
+        const output = path.join(directory, 'test-results/modal-sensitivity');
+        assert.match(await readFile(path.join(output, 'back-position.stdout.log'), 'utf8'), /GitCommitInfo/);
+        assert.deepEqual(JSON.parse(await readFile(path.join(output, 'back-position.json'), 'utf8')), reports['back-position']);
+        // Existing good evidence cannot hide a reporter that fails to produce a new file.
+        const missing = run({ PINOVA_TEST_OMIT_REPORT: '1' });
+        assert.notEqual(missing.status, 0);
+        assert.match(missing.stderr, /ENOENT/);
+        assert.doesNotMatch(missing.stdout, /healthy-before: 3 clean pass/);
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
 });

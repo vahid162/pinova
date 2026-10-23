@@ -75,18 +75,18 @@ namespace Pinova\Tests\Integration {
 			foreach ( $callbacks as [ $callback, $priority ] ) { self::assertSame( $priority, has_action( 'wp_enqueue_scripts', $callback ) ); }
 		}
 
-		/** @dataProvider unsupported_versions */
-		public function test_missing_or_uncharacterized_dependencies_are_untouched( ?string $core, ?string $pro ): void {
+		/** @dataProvider dependency_versions */
+		public function test_matching_postless_callbacks_are_guarded_independently_of_version_strings( ?string $core, ?string $pro ): void {
 			if ( null !== $core ) { define( 'ELEMENTOR_VERSION', $core ); }
 			if ( null !== $pro ) { define( 'ELEMENTOR_PRO_VERSION', $pro ); }
 			$callback = [ new Product(), 'enqueue_scripts' ];
 			add_action( 'wp_enqueue_scripts', $callback, 11 );
 			ElementorDocuments::guard_enqueue_scripts();
-			self::assertSame( 11, has_action( 'wp_enqueue_scripts', $callback ) );
+			self::assertFalse( has_action( 'wp_enqueue_scripts', $callback ) );
 		}
 
-		public static function unsupported_versions(): array {
-			return [ [ null, null ], [ '4.3.3', null ], [ null, '4.3.0' ], [ '4.3.4', '4.3.0' ], [ '4.3.3', '4.3.1' ] ];
+		public static function dependency_versions(): array {
+			return [ [ null, null ], [ '4.3.3', null ], [ null, '4.3.0' ], [ '4.3.4', '4.3.0' ], [ '4.3.3', '4.3.1' ], [ '99.0.0', '99.0.0' ] ];
 		}
 	}
 }

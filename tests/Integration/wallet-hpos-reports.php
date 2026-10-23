@@ -27,7 +27,7 @@ $manifest = json_decode( file_get_contents( $root . '/.build/third-party/verifie
 $fixtures = array_column( $manifest['callback_fixtures'], null, 'slug' );
 $fixture = $fixtures['woo-wallet'];
 $path = $root . '/.build/third-party/woo-wallet';
-$check( '1.7.1' === $fixture['version'], 'pinned supported wallet version' );
+$check( '1.7.3' === $fixture['version'], 'pinned native wallet characterization version' );
 $check( ! class_exists( 'Woo_Wallet', false ) && ! defined( 'WOO_WALLET_PLUGIN_VERSION' ), 'wallet payment plugin is not active in this fixture' );
 $check( 11 === has_filter( 'woocommerce_reports_get_order_report_query', [ WalletReports::class, 'report_query' ] ), 'Pinova registered wallet compatibility independently' );
 

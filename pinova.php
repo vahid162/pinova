@@ -15,7 +15,7 @@
  * Requires PHP: 8.1
  *
  * WC requires at least: 7.6.0
- * WC tested up to: 11.1.0
+ * WC tested up to: 11.2.1
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -59,6 +59,7 @@ if ( ! ( new \Pinova\Version() )->migrate() ) {
 
 \Pinova\Pinova::instance();
 \Pinova\Services\MobileVerificationService::boot();
+add_filter( 'determine_current_user', [ \Pinova\Services\AccountLinkService::class, 'current_user' ], PHP_INT_MAX );
 
 \Pinova\Integrations\Wordpress\Load::instance();
 \Pinova\Integrations\WpForo\Load::boot();

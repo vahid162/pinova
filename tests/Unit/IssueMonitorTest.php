@@ -206,4 +206,21 @@ final class IssueMonitorTest extends TestCase {
 			'context' => json_encode( $context ),
 		];
 	}
+
+	public function test_account_link_rejections_are_not_reported_as_code_failures(): void {
+		$rows = [
+			$this->row( 1, 'identity.account_link_failed', [ 'reason' => 'ownership_not_confirmed', 'operation' => 'account_link', 'identifier' => 'secret@example.test', 'jwt' => 'secret-token' ] ),
+			$this->row( 2, 'identity.account_link_failed', [ 'reason' => 'write_failed', 'operation' => 'account_link' ] ),
+		];
+		$summary = IssueMonitor::summarize( $rows );
+		$categories = array_column( $summary, 'category', 'code' );
+		self::assertSame( 'expected_rejection', $categories['identity.account_link_failed:ownership_not_confirmed'] );
+		self::assertSame( 'confirmed_failure', $categories['identity.account_link_failed:write_failed'] );
+		self::assertStringNotContainsString( 'secret', json_encode( EventEvidence::redact( $rows[0] ) ) );
+	}
+
+	public function test_contact_overlap_is_insufficient_evidence_not_a_verified_duplicate(): void {
+		$issues = IssueMonitor::summarize( [ $this->row( 1, 'identity.legacy_contact_overlap', [ 'reason' => 'unverified_contact', 'candidate_count' => 2 ] ) ] );
+		self::assertSame( 'insufficient_evidence', $issues[0]['category'] );
+	}
 }

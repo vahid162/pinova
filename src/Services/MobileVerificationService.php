@@ -53,6 +53,9 @@ final class MobileVerificationService {
 
 	/** Resolve the same precedence as Pinova without trusting the metadata cache. */
 	public static function current_mobile( int $user_id ): ?string {
+		if ( false !== AccountLinkService::retired_state( $user_id ) ) {
+			return null;
+		}
 		global $wpdb;
 		$override = new Mobile( self::meta( $user_id, 'pinova_mobile' ) ?? '' );
 		if ( $override->is_valid() ) {

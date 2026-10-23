@@ -17,7 +17,7 @@ final class AuthenticationPolicy {
 		try {
 			clean_user_cache( $user_id );
 			$user = get_userdata( $user_id );
-			if ( ! $user instanceof WP_User || UserService::is_native_only( $user ) || FirewallService::is_ip_blocked() ) {
+			if ( false !== AccountLinkService::retired_state( $user_id ) || ! $user instanceof WP_User || UserService::is_native_only( $user ) || FirewallService::is_ip_blocked() ) {
 				return self::denied();
 			}
 			if ( null !== $identifier && ( ! $identifier->is_valid() || UserService::match( $identifier ) !== $user_id ) ) {

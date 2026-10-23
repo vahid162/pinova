@@ -131,6 +131,13 @@ class UserService {
 		$candidate_ids = array_values( array_unique( array_filter( array_merge( $login_user_ids, $meta_user_ids ) ) ) );
 		$matching_ids  = [];
 		foreach ( $candidate_ids as $candidate_id ) {
+			$retired = AccountLinkService::retired_state( $candidate_id );
+			if ( null === $retired ) {
+				return null;
+			}
+			if ( $retired ) {
+				continue;
+			}
 			$explicit_mobile = self::get_persisted_mobile_result( $candidate_id );
 			if ( ! $explicit_mobile['success'] ) {
 				return null;
@@ -189,6 +196,9 @@ class UserService {
 	 * @return string|null
 	 */
 	public static function get_mobile( int $user_id ): ?string {
+		if ( false !== AccountLinkService::retired_state( $user_id ) ) {
+			return null;
+		}
 
 		$user = get_userdata( $user_id );
 
@@ -398,6 +408,11 @@ class UserService {
 		}
 
 		$username = $mobile->get_sanitized_username();
+		if ( username_exists( $username ) ) {
+			// The unclaimed number can outlive its immutable, retired/overridden username.
+			$username                               .= '_' . wp_generate_password( 12, false );
+			$userdata['meta_input']['pinova_mobile'] = $mobile->get_formatted();
+		}
 
 		if ( is_email( $email ) ) {
 			$userdata['user_email'] = $email;
@@ -438,7 +453,36 @@ class UserService {
 			]
 		);
 
+		self::observe_legacy_contact( $mobile, $user_id, $flow_id );
 		return $user_id;
+	}
+
+	/** A contact overlap is a support observation, never identity or account authority. */
+	private static function observe_legacy_contact( Mobile $mobile, int $user_id, ?string $flow_id ): void {
+		global $wpdb;
+		$previous = $wpdb->suppress_errors( true );
+		try {
+			$formats = array_values( array_unique( $mobile->possible_formats() ) );
+			$tokens  = implode( ',', array_fill( 0, count( $formats ), '%s' ) );
+			$sql     = "SELECT DISTINCT user_id FROM %i WHERE user_id <> %d AND meta_key IN ('billing_phone','shipping_phone') AND meta_value IN ({$tokens}) LIMIT 2";
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
+			$ids = $wpdb->get_col( $wpdb->prepare( $sql, array_merge( [ $wpdb->usermeta, $user_id ], $formats ) ) );
+			if ( ! $wpdb->last_error && is_array( $ids ) && $ids ) {
+				\Pinova\Logging\EventThrottle::log(
+					'identity.legacy_contact_overlap',
+					[
+						'user_id'         => $user_id,
+						'candidate_count' => count( $ids ),
+						'reason'          => 'unverified_contact',
+						'flow_id'         => $flow_id,
+					]
+				);
+			}
+		} catch ( \Throwable $throwable ) {
+			unset( $throwable );
+		} finally {
+			$wpdb->suppress_errors( $previous );
+		}
 	}
 
 	public static function mobile_possible_meta_keys(): array {
@@ -456,7 +500,7 @@ class UserService {
 
 		$mobile_possible_meta_keys = apply_filters( 'pinova/mobile_possible_meta_keys', $mobile_possible_meta_keys );
 
-		return array_values( array_unique( array_filter( $mobile_possible_meta_keys ) ) );
+		return array_values( array_unique( array_filter( array_diff( $mobile_possible_meta_keys, [ 'billing_phone', 'shipping_phone' ] ) ) ) );
 	}
 
 	public static function allowed_registration_roles(): array {

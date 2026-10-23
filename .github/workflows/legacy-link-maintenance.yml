@@ -1,0 +1,41 @@
+name: Legacy link maintenance diagnostics
+on:
+  push:
+    branches: [ci/legacy-link-maintenance]
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.1'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:2.10.3
+      - name: Resolve the affected production dependency without unrelated upgrades
+        run: composer update symfony/http-foundation --with-dependencies --minimal-changes --no-install --no-scripts --no-interaction --no-progress
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - name: Format only changed runtime PHP
+        shell: bash
+        run: |
+          mapfile -t changed < <(git diff --name-only 1a249ee980f915aedfc443080db7f65ad1d66120 HEAD -- '*.php' | sed '/^tests\//d')
+          set +e
+          vendor/bin/phpcbf --standard=phpcs.xml.dist "${changed[@]}"
+          result=$?
+          set -e
+          if [ "$result" -gt 1 ]; then exit "$result"; fi
+      - name: Emit the source-only patch for review
+        run: |
+          python3 - <<'PY'
+          import subprocess,base64,gzip
+          patch=subprocess.check_output(['git','diff','--binary','--','composer.lock','*.php'])
+          print('PINOVA_PATCH_BEGIN:'+base64.b64encode(gzip.compress(patch)).decode()+':PINOVA_PATCH_END')
+          PY
+      - name: Diagnose candidate types without weakening normal CI
+        run: vendor/bin/phpstan analyse --configuration=phpstan.neon.dist --no-progress --memory-limit=2G --error-format=raw

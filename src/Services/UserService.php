@@ -501,7 +501,7 @@ class UserService {
 		$mobile_possible_meta_keys = apply_filters( 'pinova/mobile_possible_meta_keys', $mobile_possible_meta_keys );
 
 		// Metadata comparisons may ignore letter case and trailing spaces in the database.
-		$mobile_possible_meta_keys = array_filter(
+		$mobile_possible_meta_keys   = array_filter(
 			$mobile_possible_meta_keys,
 			static fn( $key ): bool => is_string( $key ) && '' !== trim( $key ) && ! in_array( strtolower( trim( $key ) ), [ 'billing_phone', 'shipping_phone' ], true )
 		);

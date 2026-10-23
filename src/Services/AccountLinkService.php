@@ -229,7 +229,10 @@ final class AccountLinkService {
 		self::require_state( $physical['success'] && ( null === $physical['value'] || $physical['value'] === $state['mobile'] ), 3 );
 		$values = $state['aliases'];
 		if ( null === $physical['value'] ) {
-			$values[] = [ 'user_id' => $source, 'meta_value' => $source_login ];
+			$values[] = [
+				'user_id'    => $source,
+				'meta_value' => $source_login,
+			];
 		}
 		foreach ( $values as $row ) {
 			if ( $source === (int) $row['user_id'] && null !== $physical['value'] ) {

@@ -60,6 +60,8 @@ Baseline assertions deliberately record existing behavior, including behavior th
 
 Synchronize keyboard assertions with product-driven heading focus, not fixed sleeps or test-created focus. Keep whole-test retries disabled. The mutation audit must run healthy controls and verify that each isolated product mutation reaches its intended assertion; runner errors, unrelated failures, timeouts, skips, retries, and surviving mutations fail the gate.
 
+Read sensitivity evidence from a fresh dedicated JSON reporter file; stdout may contain Git metadata diagnostics. Preserve stdout/stderr separately, remove only that case’s previous report before each subprocess, and fail if a new report is absent or invalid. Do not strip arbitrary text from stdout or accept stale reports.
+
 The browser geometry matrix selects presentation states; it is not a count of authentication transactions. Preserve small nonsensitive evidence summaries under `.agents/reviews/`, but never commit raw traces, credentials, sessions, or private host coordinates.
 
 ### Environment cleanup

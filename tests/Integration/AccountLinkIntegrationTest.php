@@ -111,6 +111,21 @@ final class AccountLinkIntegrationTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_trashed_source_orders_are_still_customer_history(): void {
+		$order = wc_create_order( [ 'customer_id' => $this->source ] );
+		$id = $order->get_id();
+		$order->delete( false );
+		try {
+			$this->expectException( \RuntimeException::class );
+			Link::plan( $this->canonical, $this->source );
+		} finally {
+			$trashed = wc_get_order( $id );
+			if ( $trashed ) {
+				$trashed->delete( true );
+			}
+		}
+	}
+
 	public function test_contact_fields_cannot_be_reintroduced_by_alias_filter(): void {
 		$filter = static fn( array $keys ): array => array_merge( $keys, [ 'billing_phone', 'shipping_phone' ] );
 		add_filter( 'pinova/mobile_possible_meta_keys', $filter );

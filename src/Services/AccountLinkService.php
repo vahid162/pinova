@@ -265,6 +265,7 @@ final class AccountLinkService {
 			$ids     = wc_get_orders(
 				[
 					'customer_id' => $id,
+					'status'      => array_values( array_unique( array_merge( array_keys( wc_get_order_statuses() ), array_values( get_post_stati() ) ) ) ),
 					'type'        => wc_get_order_types(),
 					'limit'       => 101,
 					'return'      => 'ids',

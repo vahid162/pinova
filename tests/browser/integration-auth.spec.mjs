@@ -54,7 +54,7 @@ async function login(page) {
     await page.locator('#loginByPassword button[type="submit"]').click();
     const authenticated = await authentication;
     expect(authenticated.status()).toBe(200);
-    expect((await authenticated.json()).success).toBe(true);
+    // The application may already have navigated; native cookies and the next page prove completion.
     await expect.poll(() => new URL(page.url()).pathname).not.toMatch(/^\/login\/?$/);
 }
 

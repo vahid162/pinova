@@ -59,6 +59,7 @@ if ( ! ( new \Pinova\Version() )->migrate() ) {
 
 \Pinova\Pinova::instance();
 \Pinova\Services\MobileVerificationService::boot();
+add_filter( 'determine_current_user', [ \Pinova\Services\AccountLinkService::class, 'current_user' ], PHP_INT_MAX );
 
 \Pinova\Integrations\Wordpress\Load::instance();
 \Pinova\Integrations\WpForo\Load::boot();

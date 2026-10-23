@@ -9,6 +9,7 @@ final class EventEvidence {
 
 	/** Finite reasons are safe to expose; arbitrary code-shaped strings are not. */
 	public const REASONS = [
+		'identity.account_link_failed' => [ 'not_authorized', 'unsupported_accounts', 'identity_conflict', 'stale_state', 'ownership_not_confirmed', 'active_delivery', 'write_failed', 'unsupported_storage', 'data_changed', 'operation_failed' ],
 		'auth.session_failed'               => [ 'policy_rejected', 'session_exception' ],
 		'auth.request_failed'               => [ 'initiation_error', 'delivery_worker_error', 'queue_expired', 'queue_schedule_failed', 'mobile_evidence_unavailable', 'otp_completion_failed' ],
 		'auth.password_failed'              => [ 'authentication_rejected', 'native_only_policy' ],
@@ -20,7 +21,7 @@ final class EventEvidence {
 		'otp.delivery_skipped'              => [ 'policy_rejected', 'already_completed', 'provider_outcome_unknown', 'invalid_payload', 'duplicate_records', 'claim_unavailable', 'expired' ],
 		'otp.queue_deferred'                => [ 'claim_unavailable' ],
 		'otp.queue_recovered'               => [ 'missing_schedule' ],
-		'integration.operation_failed'      => [ 'profile_write_changed', 'membership_failed', 'rest_initialization_failed', 'conversion_contract_changed', 'forum_refresh_failed', 'virtual_checkout_contract_failed' ],
+		'integration.operation_failed'      => [ 'profile_write_changed', 'membership_failed', 'rest_initialization_failed', 'conversion_contract_changed', 'forum_refresh_failed', 'virtual_checkout_contract_failed', 'order_owner_mismatch' ],
 		'integration.wpforo_status_changed' => IntegrationSettings::REASONS,
 		'integration.dokan_status_changed'  => IntegrationSettings::REASONS,
 	];
@@ -52,6 +53,10 @@ final class EventEvidence {
 			$allowed['operation'] = [ 'wpforo', 'dokan', 'woocommerce' ];
 		} elseif ( in_array( $event, [ 'integration.wpforo_status_changed', 'integration.dokan_status_changed' ], true ) ) {
 			$allowed['status'] = [ 'off', 'active', 'partial', 'unavailable' ];
+		}
+		if ( in_array( $event, [ 'identity.account_linked', 'identity.account_link_rolled_back', 'identity.account_link_failed' ], true ) ) {
+			$allowed['operation'] = [ 'account_link' ];
+			$allowed['result'] = [ 'success' ];
 		}
 		$safe = [];
 		foreach ( $allowed as $key => $values ) {

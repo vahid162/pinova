@@ -104,9 +104,10 @@ $account_asset_version = PINOVA_VERSION . '.7';
 			<template pinova-if="stepName === 'authenticate'">
 				<form id="authenticate" class="pinova-auth-form" pinova-on:submit.prevent="submit()" novalidate>
 					<h2 data-pinova-step-heading tabindex="-1">ورود / ثبت‌نام</h2>
+					<p id="pinova-legacy-help" class="pinova-auth-description">خرید قبلی دارید؟ با ایمیل یا نام کاربری همان حساب وارد شوید و بعد موبایلش را تأیید کنید.</p>
 					<div class="pinova-auth-field pinova-auth-field--lead">
 						<label for="pinova-identifier">شماره موبایل، نام کاربری یا ایمیل خود را وارد کنید</label>
-						<input id="pinova-identifier" pinova-model="forms.authenticate.inputs.identifier.value" pinova-bind:aria-invalid="Boolean(forms.authenticate.inputs.identifier.errorMsg)" aria-describedby="pinova-identifier-error" name="username" type="text" autocomplete="username" autocapitalize="none" dir="auto" required>
+						<input id="pinova-identifier" pinova-model="forms.authenticate.inputs.identifier.value" pinova-bind:aria-invalid="Boolean(forms.authenticate.inputs.identifier.errorMsg)" aria-describedby="pinova-identifier-error pinova-legacy-help" name="username" type="text" autocomplete="username" autocapitalize="none" dir="auto" required>
 						<p id="pinova-identifier-error" class="pinova-auth-error" pinova-show="forms.authenticate.inputs.identifier.errorMsg" pinova-text="forms.authenticate.inputs.identifier.errorMsg" role="alert" aria-atomic="true"></p>
 					</div>
 					<button class="pinova-auth-primary" type="submit">ادامه</button>

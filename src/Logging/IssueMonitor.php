@@ -177,6 +177,9 @@ final class IssueMonitor {
 				'category' => 'compatibility_observation',
 			] : null;
 		}
+		if ( 'identity.account_link_failed' === $event ) {
+			return [ 'code' => $code, 'category' => in_array( $reason, [ 'write_failed', 'operation_failed' ], true ) ? 'confirmed_failure' : ( '' === $reason ? 'insufficient_evidence' : 'expected_rejection' ) ];
+		}
 		if ( in_array( $event, self::FAILURE_EVENTS, true ) ) {
 			return [
 				'code'     => $code,

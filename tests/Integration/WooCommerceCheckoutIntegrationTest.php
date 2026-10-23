@@ -75,4 +75,52 @@ final class WooCommerceCheckoutIntegrationTest extends WP_UnitTestCase {
 			$errors->get_error_codes()
 		);
 	}
+
+	public function test_legacy_email_callbacks_are_removed_without_changing_guest_intent(): void {
+		add_action( 'woocommerce_checkout_create_order', 'mihanwp_set_customer_email', 10, 2 );
+		add_filter( 'woocommerce_checkout_posted_data', 'mihanwp_remove_register_alert', 10 );
+		$adapter = new \Pinova\Integrations\Woocommerce\LegacyCheckoutCompatibility();
+		$adapter->remove_legacy_callbacks();
+		self::assertFalse( has_action( 'woocommerce_checkout_create_order', 'mihanwp_set_customer_email' ) );
+		self::assertFalse( has_filter( 'woocommerce_checkout_posted_data', 'mihanwp_remove_register_alert' ) );
+		$data = [ 'createaccount' => false, 'billing_email' => '' ];
+		self::assertSame( $data, apply_filters( 'woocommerce_checkout_posted_data', $data ) );
+		remove_filter( 'woocommerce_billing_fields', [ $adapter, 'optional_email' ] );
+		remove_action( 'after_setup_theme', [ $adapter, 'remove_legacy_callbacks' ], PHP_INT_MAX );
+		remove_action( 'woocommerce_checkout_create_order', [ $adapter, 'check_owner' ], PHP_INT_MAX );
+	}
+
+	public function test_checkout_guard_accepts_owner_and_guest_without_email(): void {
+		$adapter = new \Pinova\Integrations\Woocommerce\LegacyCheckoutCompatibility();
+		$id = self::factory()->user->create( [ 'role' => 'customer' ] );
+		wp_set_current_user( $id );
+		$order = new \WC_Order();
+		$order->set_customer_id( $id );
+		$order->set_billing_email( 'different@example.test' );
+		$adapter->check_owner( $order );
+		wp_set_current_user( 0 );
+		$order->set_customer_id( 0 );
+		$order->set_billing_email( '' );
+		$adapter->check_owner( $order );
+		self::assertSame( '', $order->get_billing_email() );
+		remove_filter( 'woocommerce_billing_fields', [ $adapter, 'optional_email' ] );
+		remove_action( 'after_setup_theme', [ $adapter, 'remove_legacy_callbacks' ], PHP_INT_MAX );
+		remove_action( 'woocommerce_checkout_create_order', [ $adapter, 'check_owner' ], PHP_INT_MAX );
+	}
+
+	public function test_checkout_guard_rejects_order_reassigned_by_contact_email(): void {
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'customer' ] ) );
+		$order = new \WC_Order();
+		$order->set_customer_id( self::factory()->user->create() );
+		$adapter = new \Pinova\Integrations\Woocommerce\LegacyCheckoutCompatibility();
+		try {
+			$this->expectException( \Exception::class );
+			$adapter->check_owner( $order );
+		} finally {
+			wp_set_current_user( 0 );
+			remove_filter( 'woocommerce_billing_fields', [ $adapter, 'optional_email' ] );
+		remove_action( 'after_setup_theme', [ $adapter, 'remove_legacy_callbacks' ], PHP_INT_MAX );
+			remove_action( 'woocommerce_checkout_create_order', [ $adapter, 'check_owner' ], PHP_INT_MAX );
+		}
+	}
 }

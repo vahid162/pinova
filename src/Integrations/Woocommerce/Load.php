@@ -25,6 +25,7 @@ class Load {
 	public function __construct() {
 
 		new Checkout();
+		new LegacyCheckoutCompatibility();
 		new VirtualCheckout();
 		new Customer();
 		new Account();

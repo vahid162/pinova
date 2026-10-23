@@ -13,6 +13,7 @@ final class EventThrottle {
 	private const SOURCE_SLOTS   = 1024;
 
 	private const EVENTS = [
+		'identity.account_link_failed' => [ 'scope' => 'log_account_link_failed', 'level' => 'warning' ],
 		'integration.operation_failed'  => [
 			'scope' => 'log_integration_failed',
 			'level' => 'error',
@@ -78,7 +79,7 @@ final class EventThrottle {
 
 			$ip     = IP::get();
 			$source = '' === $ip ? 'unknown' : inet_pton( $ip );
-			if ( in_array( $event, [ 'otp.verify_failed', 'auth.request_failed', 'auth.session_failed', 'integration.operation_failed' ], true ) ) {
+			if ( in_array( $event, [ 'otp.verify_failed', 'auth.request_failed', 'auth.session_failed', 'integration.operation_failed', 'identity.account_link_failed' ], true ) ) {
 				$source .= '|' . (string) ( $context['reason'] ?? 'unknown' );
 				if ( 'integration.operation_failed' === $event ) {
 					$source .= '|' . (string) ( $context['operation'] ?? 'unknown' );

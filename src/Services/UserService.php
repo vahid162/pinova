@@ -131,6 +131,13 @@ class UserService {
 		$candidate_ids = array_values( array_unique( array_filter( array_merge( $login_user_ids, $meta_user_ids ) ) ) );
 		$matching_ids  = [];
 		foreach ( $candidate_ids as $candidate_id ) {
+			$retired = AccountLinkService::retired_state( $candidate_id );
+			if ( null === $retired ) {
+				return null;
+			}
+			if ( $retired ) {
+				continue;
+			}
 			$explicit_mobile = self::get_persisted_mobile_result( $candidate_id );
 			if ( ! $explicit_mobile['success'] ) {
 				return null;
@@ -189,6 +196,9 @@ class UserService {
 	 * @return string|null
 	 */
 	public static function get_mobile( int $user_id ): ?string {
+		if ( false !== AccountLinkService::retired_state( $user_id ) ) {
+			return null;
+		}
 
 		$user = get_userdata( $user_id );
 
@@ -456,7 +466,7 @@ class UserService {
 
 		$mobile_possible_meta_keys = apply_filters( 'pinova/mobile_possible_meta_keys', $mobile_possible_meta_keys );
 
-		return array_values( array_unique( array_filter( $mobile_possible_meta_keys ) ) );
+		return array_values( array_unique( array_filter( array_diff( $mobile_possible_meta_keys, [ 'billing_phone', 'shipping_phone' ] ) ) ) );
 	}
 
 	public static function allowed_registration_roles(): array {

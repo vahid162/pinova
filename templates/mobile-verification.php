@@ -11,6 +11,7 @@ $return_url    = \Pinova\Integrations\Continuation::validate( $return_target, fu
 		<div class="pinova-mobile-proof-content">
 			<h2 tabindex="-1"><?php esc_html_e( 'تأیید تلفن همراه حساب', 'pinova' ); ?></h2>
 			<p><?php esc_html_e( 'شمارهٔ فعلی یا شمارهٔ جدید را با کد یک‌بارمصرف تأیید کنید. حساب و نام کاربری شما حفظ می‌شود.', 'pinova' ); ?></p>
+			<p><?php esc_html_e( 'اگر خریدهای قبلی را نمی‌بینید، ابتدا وارد همان حساب خرید شوید. اگر شماره قبلاً به حساب دیگری متصل شده است، برای بررسی مالکیت هر دو حساب با پشتیبانی تماس بگیرید؛ سفارش‌ها خودکار منتقل نمی‌شوند.', 'pinova' ); ?></p>
 			<label><?php esc_html_e( 'تلفن همراه', 'pinova' ); ?><input name="mobile" type="tel" inputmode="tel" autocomplete="tel" dir="auto" required></label>
 			<div class="pinova-mobile-code" hidden>
 				<label><?php esc_html_e( 'کد تأیید', 'pinova' ); ?><input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" dir="ltr" maxlength="<?php echo esc_attr( (string) \Pinova\Services\OTPService::code_length() ); ?>" disabled></label>

@@ -353,7 +353,7 @@ jobs:
         env:
           EXPECTED_PHP: ${{ matrix.php }}
         run: |
-          npx wp-env run tests-cli php -r 'printf("PHP %s\n", PHP_VERSION); exit(PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION === $argv[1] ? 0 : 1);' "$EXPECTED_PHP"
+          npx wp-env run tests-cli env EXPECTED_PHP="$EXPECTED_PHP" php -r 'printf("PHP %s\n", PHP_VERSION); exit(PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION === getenv("EXPECTED_PHP") ? 0 : 1);'
       - name: Install PDO MySQL in the disposable test container
         run: npx wp-env run tests-cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
       - run: npm run test:integration

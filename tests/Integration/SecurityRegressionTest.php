@@ -809,7 +809,7 @@ final class SecurityRegressionTest extends WP_UnitTestCase {
 
 		self::factory()->user->create( [ 'user_login' => '989121111112' ] );
 		$break_override_read = static function ( string $query ): string {
-			return str_contains( $query, 'pinova_mobile' ) && str_contains( $query, 'SELECT `meta_value`' )
+			return str_contains( $query, 'pinova_mobile' ) && str_contains( $query, 'SELECT DISTINCT BINARY `meta_value`' )
 				? 'SELECT FROM pinova_missing_table'
 				: $query;
 		};

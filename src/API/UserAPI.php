@@ -41,6 +41,7 @@ class UserAPI extends RestAPI {
 				'callback'            => [ $this, 'authenticate' ],
 				'permission_callback' => [ $this, 'permission_callback' ],
 				'args'                => [
+					'back_url'   => [ 'validate_callback' => [ ValidationService::class, 'scalar' ] ],
 					'identifier' => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'identifier' ],
@@ -57,6 +58,7 @@ class UserAPI extends RestAPI {
 				'callback'            => [ $this, 'login_password' ],
 				'permission_callback' => [ $this, 'permission_callback' ],
 				'args'                => [
+					'back_url'   => [ 'validate_callback' => [ ValidationService::class, 'scalar' ] ],
 					'identifier' => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'identifier' ],
@@ -77,10 +79,12 @@ class UserAPI extends RestAPI {
 				'callback'            => [ $this, 'login_otp' ],
 				'permission_callback' => [ $this, 'permission_callback' ],
 				'args'                => [
-					'jwt'  => [
-						'required' => true,
+					'back_url' => [ 'validate_callback' => [ ValidationService::class, 'scalar' ] ],
+					'jwt'      => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'state' ],
 					],
-					'code' => [
+					'code'     => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'code' ],
 					],
@@ -96,10 +100,12 @@ class UserAPI extends RestAPI {
 				'callback'            => [ $this, 'forgot_verify' ],
 				'permission_callback' => [ $this, 'permission_callback' ],
 				'args'                => [
-					'jwt'  => [
-						'required' => true,
+					'back_url' => [ 'validate_callback' => [ ValidationService::class, 'scalar' ] ],
+					'jwt'      => [
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'state' ],
 					],
-					'code' => [
+					'code'     => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'code' ],
 					],
@@ -115,13 +121,16 @@ class UserAPI extends RestAPI {
 				'callback'            => [ $this, 'forgot_change' ],
 				'permission_callback' => [ $this, 'permission_callback' ],
 				'args'                => [
+					'back_url'   => [ 'validate_callback' => [ ValidationService::class, 'scalar' ] ],
 					'jwt'        => [
-						'required' => true,
+						'required'          => true,
+						'validate_callback' => [ ValidationService::class, 'state' ],
 					],
 					'reset_key'  => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'reset_key' ],
 					],
+					'password_2' => [ 'validate_callback' => [ ValidationService::class, 'scalar' ] ],
 					'password_1' => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'new_password' ],
@@ -562,6 +571,9 @@ class UserAPI extends RestAPI {
 	 * @return bool|WP_Error
 	 */
 	public function permission_callback( WP_REST_Request $request ) {
+		if ( ! self::request_origin_is_allowed( $request ) ) {
+			return new WP_Error( 'pinova_invalid_origin', __( 'درخواست معتبر نمی‌باشد.', 'pinova' ), [ 'status' => 403 ] );
+		}
 
 		if ( is_user_logged_in() ) {
 			return new WP_Error( 'pinova_already_logged_in', __( 'شما وارد شده‌اید.', 'pinova' ), [ 'status' => 403 ] );
@@ -572,6 +584,37 @@ class UserAPI extends RestAPI {
 		}
 
 		return true;
+	}
+
+	/** Public guest nonces do not bind a login request to one browser session. */
+	private static function request_origin_is_allowed( WP_REST_Request $request ): bool {
+		$allowed = array_filter( array_map( [ self::class, 'url_origin' ], [ home_url(), site_url(), rest_url() ] ) );
+		$origin  = trim( (string) $request->get_header( 'origin' ) );
+		if ( '' !== $origin ) {
+			$parts = wp_parse_url( $origin );
+			if ( ! is_array( $parts ) || isset( $parts['query'] ) || isset( $parts['fragment'] )
+				|| ! in_array( $parts['path'] ?? '', [ '', '/' ], true ) ) {
+				return false;
+			}
+			return in_array( self::url_origin( $origin ), $allowed, true );
+		}
+		if ( 'cross-site' === strtolower( trim( (string) $request->get_header( 'sec-fetch-site' ) ) ) ) {
+			return false;
+		}
+		$referer = trim( (string) $request->get_header( 'referer' ) );
+		// Existing nonbrowser clients may omit browser headers entirely.
+		return '' === $referer || in_array( self::url_origin( $referer ), $allowed, true );
+	}
+
+	private static function url_origin( string $url ): ?string {
+		$parts  = wp_parse_url( $url );
+		$scheme = strtolower( (string) ( $parts['scheme'] ?? '' ) );
+		$host   = strtolower( (string) ( $parts['host'] ?? '' ) );
+		if ( ! in_array( $scheme, [ 'http', 'https' ], true ) || '' === $host || isset( $parts['user'] ) || isset( $parts['pass'] ) ) {
+			return null;
+		}
+		$port = (int) ( $parts['port'] ?? ( 'https' === $scheme ? 443 : 80 ) );
+		return $scheme . '://' . $host . ':' . $port;
 	}
 
 	/**

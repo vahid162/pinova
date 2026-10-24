@@ -80,7 +80,8 @@ class Helper {
 		if ( ! filter_var( $back_url, FILTER_VALIDATE_URL ) ) {
 			// A redirect target is read-only input; no state change occurs here.
 			// phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.NonceVerification.Recommended
-			$back_url = sanitize_url( wp_unslash( $_POST['back_url'] ?? $_GET['back_url'] ?? '' ) );
+			$input    = $_POST['back_url'] ?? $_GET['back_url'] ?? '';
+			$back_url = is_scalar( $input ) ? sanitize_url( wp_unslash( (string) $input ) ) : '';
 		}
 
 		$fallback = current_user_can( 'manage_options' ) ? admin_url() : site_url();
@@ -97,7 +98,8 @@ class Helper {
 		if ( ! filter_var( $back_url, FILTER_VALIDATE_URL ) ) {
 			// A redirect target is read-only input; no state change occurs here.
 			// phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.NonceVerification.Recommended
-			$back_url = sanitize_url( wp_unslash( $_POST['back_url'] ?? $_GET['back_url'] ?? '' ) );
+			$input    = $_POST['back_url'] ?? $_GET['back_url'] ?? '';
+			$back_url = is_scalar( $input ) ? sanitize_url( wp_unslash( (string) $input ) ) : '';
 		}
 
 		$fallback = site_url();

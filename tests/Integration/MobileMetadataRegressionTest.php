@@ -6,12 +6,16 @@ namespace Pinova\Tests\Integration;
 
 use Pinova\API\UserAPI;
 use Pinova\Install;
+use Pinova\Integrations\Wordpress\Privacy;
 use Pinova\Logging\EventEvidence;
 use Pinova\Logging\IssueMonitor;
 use Pinova\Logging\LogRepository;
 use Pinova\Models\OTP;
+use Pinova\Objects\Identifier;
+use Pinova\Services\AuthenticationPolicy;
 use Pinova\Services\MobileVerificationService as Proof;
 use Pinova\Services\OTPService;
+use Pinova\Services\UserService;
 use WP_REST_Request;
 use WP_UnitTestCase;
 
@@ -209,6 +213,116 @@ final class MobileMetadataRegressionTest extends WP_UnitTestCase {
 
 	public function ambiguous_mobile_values(): array {
 		return [ [ '+989121234766' ], [ '+989121234765 ' ], [ '09121234765' ] ];
+	}
+
+	/** @dataProvider ambiguous_mobile_values */
+	public function test_conflicting_mobile_rows_cannot_resolve_or_fall_back_to_an_alias( string $other ): void {
+		$id = $this->account();
+		add_user_meta( $id, 'pinova_mobile', $other );
+		add_user_meta( $id, 'pinova_mobile', '+989121234765' );
+		$before = $this->rows( $id );
+		self::assertSame( [ 'value' => null, 'success' => false ], UserService::get_persisted_mobile_result( $id ) );
+		self::assertNull( UserService::get_persisted_mobile( $id ) );
+		self::assertNull( UserService::get_mobile( $id ), 'An ambiguous physical value must not fall back to the username.' );
+		foreach ( [ '+989121234765', $other ] as $value ) {
+			$identifier = new Identifier( $value );
+			self::assertSame( [ null, false ], UserService::match_with_registration_policy( $identifier ) );
+			self::assertFalse( UserService::mobile_is_available_for_user( $value, 0 ) );
+			self::assertFalse( UserService::mobile_candidate_ids_result( $value )['success'] );
+		}
+		self::assertWPError( AuthenticationPolicy::session( $id, 'password' ) );
+		self::assertSame( $before, $this->rows( $id ) );
+		self::assertSame( '989121234765', get_userdata( $id )->user_login );
+	}
+
+	public function test_conflicting_mobile_rows_deny_native_password_authentication_before_cookie_creation(): void {
+		$id = $this->account();
+		wp_set_password( 'Fixture-password-874!', $id );
+		add_user_meta( $id, 'pinova_mobile', '+989121234766' );
+		add_user_meta( $id, 'pinova_mobile', '+989121234765' );
+		$cookies = 0;
+		$cookie = static function () use ( &$cookies ): void { ++$cookies; };
+		add_action( 'set_auth_cookie', $cookie );
+		try {
+			self::assertWPError( UserService::authenticate_password( $id, 'Fixture-password-874!' ) );
+		} finally {
+			remove_action( 'set_auth_cookie', $cookie );
+		}
+		self::assertSame( 0, $cookies );
+		self::assertSame( 0, get_current_user_id() );
+	}
+
+	/** @dataProvider ambiguous_mobile_values */
+	public function test_conflicting_mobile_rows_reject_correct_login_and_recovery_codes_before_consumption( string $other ): void {
+		$id = $this->account();
+		add_user_meta( $id, 'pinova_mobile', $other );
+		add_user_meta( $id, 'pinova_mobile', '+989121234765' );
+		$api = new UserAPI();
+		foreach ( [ OTP::TYPE_LOGIN, OTP::TYPE_FORGET ] as $purpose ) {
+			$otp = $this->otp( $id, $purpose );
+			$before = $otp->fresh();
+			$response = OTP::TYPE_FORGET === $purpose ? $api->forgot_verify( $this->request( $otp ) ) : $api->login_otp( $this->request( $otp ) );
+			self::assertSame( 401, $response->get_status() );
+			self::assertNull( $otp->fresh()->verified_at );
+			self::assertSame( $before->attempts, $otp->fresh()->attempts );
+			self::assertSame( 0, get_current_user_id() );
+			self::assertArrayNotHasKey( 'jwt', $response->get_data()['data'] ?? [] );
+		}
+		self::assertFalse( Proof::is_verified( $id ) );
+	}
+
+	public function test_an_older_conflicting_mobile_cannot_be_treated_as_unclaimed_for_registration(): void {
+		global $wpdb;
+		$id = $this->account();
+		add_user_meta( $id, 'pinova_mobile', '+989121234766' );
+		add_user_meta( $id, 'pinova_mobile', '+989121234765' );
+		update_option( 'pinova_general', [ 'wordpress_users_can_register' => true ] );
+		$users_before = $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->users}" );
+		$otp = OTP::query()->create( [ 'user_id' => null, 'identifier' => '+989121234766', 'type' => OTP::TYPE_REGISTER, 'flow_id' => bin2hex( random_bytes( 16 ) ), 'code' => '5832', 'channels' => [ 'sms' => true ] ] );
+		self::assertSame( 401, ( new UserAPI() )->login_otp( $this->request( $otp ) )->get_status() );
+		self::assertNull( $otp->fresh()->verified_at );
+		self::assertSame( $users_before, $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->users}" ) );
+		self::assertSame( 0, get_current_user_id() );
+		self::assertSame( '989121234765', get_userdata( $id )->user_login );
+	}
+
+	public function test_privacy_conflicts_report_incomplete_before_dependent_writes(): void {
+		$id = $this->account();
+		$email = 'conflicting-mobile@example.test';
+		wp_update_user( [ 'ID' => $id, 'user_email' => $email ] );
+		add_user_meta( $id, 'pinova_mobile', '+989121234766' );
+		add_user_meta( $id, 'pinova_mobile', '+989121234765' );
+		$before = $this->rows( $id );
+		$otp = $this->otp( $id );
+		$epoch = Proof::epoch( $id );
+		$export = Privacy::export_personal_data( $email );
+		self::assertWPError( $export );
+		self::assertSame( 'pinova_privacy_export_failed', $export->get_error_code() );
+		$result = Privacy::erase_personal_data( $email );
+		self::assertFalse( $result['done'] );
+		self::assertFalse( $result['items_removed'] );
+		self::assertTrue( $result['items_retained'] );
+		self::assertNotEmpty( $result['messages'] );
+		self::assertSame( $before, $this->rows( $id ) );
+		self::assertNotNull( $otp->fresh() );
+		self::assertSame( $epoch, Proof::epoch( $id ) );
+	}
+
+	public function test_mobile_read_failure_cannot_fall_back_to_an_immutable_username(): void {
+		global $wpdb;
+		$id = $this->account();
+		$break_read = static function ( string $query ): string {
+			return str_contains( $query, 'SELECT DISTINCT BINARY' ) && str_contains( $query, 'pinova_mobile' )
+				? 'SELECT FROM pinova_missing_table' : $query;
+		};
+		$previous = $wpdb->suppress_errors( true );
+		add_filter( 'query', $break_read );
+		try {
+			self::assertNull( UserService::get_mobile( $id ) );
+		} finally {
+			remove_filter( 'query', $break_read );
+			$wpdb->suppress_errors( $previous );
+		}
 	}
 
 	public function test_duplicate_security_generations_are_not_collapsed(): void {

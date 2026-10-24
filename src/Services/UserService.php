@@ -206,10 +206,13 @@ class UserService {
 			return null;
 		}
 
-		$persisted_mobile = self::get_persisted_mobile( $user_id );
+		$persisted_mobile = self::get_persisted_mobile_result( $user_id );
+		if ( ! $persisted_mobile['success'] ) {
+			return null;
+		}
 
-		if ( null !== $persisted_mobile ) {
-			return $persisted_mobile;
+		if ( null !== $persisted_mobile['value'] ) {
+			return $persisted_mobile['value'];
 		}
 
 		$mobile = new Mobile( $user->user_login );
@@ -571,16 +574,35 @@ class UserService {
 	}
 
 	/**
-	 * Read the physical Pinova mobile while preserving database failure state.
+	 * Normalize the unique physical value without hiding read failures or conflicts.
 	 *
 	 * @return array{value:?string,success:bool}
 	 */
 	public static function get_persisted_mobile_result( int $user_id ): array {
+		$result = self::get_persisted_mobile_row_result( $user_id );
+		if ( ! $result['success'] ) {
+			return $result;
+		}
+		$mobile = new Mobile( $result['value'] ?? '' );
+
+		return [
+			'value'   => $mobile->is_valid() ? $mobile->get_formatted() : null,
+			'success' => true,
+		];
+	}
+
+	/**
+	 * Share one physical read across identity, privacy, and possession evidence.
+	 * Only byte-identical duplicates represent one value; failures never mean no row.
+	 *
+	 * @return array{value:?string,success:bool}
+	 */
+	public static function get_persisted_mobile_row_result( int $user_id ): array {
 		global $wpdb;
 
-		$raw_value  = $wpdb->get_var(
+		$rows       = $wpdb->get_col(
 			$wpdb->prepare(
-				'SELECT `meta_value` FROM %i WHERE `user_id` = %d AND `meta_key` = %s ORDER BY `umeta_id` DESC LIMIT 1',
+				'SELECT DISTINCT BINARY `meta_value` FROM %i WHERE `user_id` = %d AND `meta_key` = %s LIMIT 2',
 				$wpdb->usermeta,
 				$user_id,
 				'pinova_mobile'
@@ -588,17 +610,15 @@ class UserService {
 		);
 		$properties = get_object_vars( $wpdb );
 		$error      = $properties['last_error'] ?? '';
-		if ( is_string( $error ) && '' !== $error ) {
+		if ( ( is_string( $error ) && '' !== $error ) || ! is_array( $rows ) || count( $rows ) > 1 ) {
 			return [
 				'value'   => null,
 				'success' => false,
 			];
 		}
 
-		$mobile = new Mobile( is_scalar( $raw_value ) ? (string) $raw_value : '' );
-
 		return [
-			'value'   => $mobile->is_valid() ? $mobile->get_formatted() : null,
+			'value'   => [] === $rows ? null : (string) $rows[0],
 			'success' => true,
 		];
 	}

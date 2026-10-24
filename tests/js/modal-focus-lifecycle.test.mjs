@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
+const authStateScript = (await readFile(new URL('../../assets/js/pages/auth-state.js', import.meta.url), 'utf8'))
+    .replace('export function createAuthState', 'function createAuthState');
+
 const source = (await readFile(new URL('../../assets/js/pages/login-modal.js', import.meta.url), 'utf8'))
-    .replace(/^import pinovaAlpine[^\n]*\r?\n/m, '')
+    .replace(/^import (?:pinovaAlpine|\{ createAuthState \})[^\n]*\r?\n/gm, '')
     .replace('export function pinovaOpenModal', 'function pinovaOpenModal');
 
 // Deferred callbacks stay queued, so the test can exercise adverse task ordering
@@ -38,7 +41,7 @@ function harness() {
             return selector === '.showlogin' ? replacementOpener : null;
         },
     };
-    vm.runInNewContext(source, {
+    vm.runInNewContext(authStateScript + source, {
         AbortController,
         document,
         window: {},

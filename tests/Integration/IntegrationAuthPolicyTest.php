@@ -184,6 +184,64 @@ final class IntegrationAuthPolicyTest extends WP_UnitTestCase {
 		self::assertSame( 0, $this->cookies );
 	}
 
+	public static function mobile_otp_purposes(): array {
+		return [
+			'login' => [ OTP::TYPE_LOGIN ],
+			'registration' => [ OTP::TYPE_REGISTER ],
+			'recovery' => [ OTP::TYPE_FORGET ],
+		];
+	}
+
+	/** @dataProvider mobile_otp_purposes */
+	public function test_late_mobile_claim_blocks_every_public_otp_purpose( string $purpose ): void {
+		update_option( 'pinova_general', [ 'wordpress_users_can_register' => '1' ] );
+		$mobile = '+989351234980';
+		$id = OTP::TYPE_REGISTER === $purpose ? null : self::factory()->user->create( [ 'role' => 'subscriber' ] );
+		if ( null !== $id ) {
+			update_user_meta( $id, 'pinova_mobile', $mobile );
+		}
+		$otp = $this->otp( $id, $mobile, $purpose );
+		self::assertSame( [ $id, null === $id ], UserService::match_with_registration_policy( new Identifier( $mobile ) ) );
+		$other = self::factory()->user->create( [ 'role' => 'subscriber' ] );
+		update_user_meta( $other, 'digits_phone', $mobile );
+		$before = count_users()['total_users'];
+		if ( OTP::TYPE_FORGET === $purpose ) {
+			$request = new WP_REST_Request( 'POST', '/pinova/auth/forgot/verify' );
+			$request->set_param( 'jwt', OTPService::signed_state( $otp ) );
+			$request->set_param( 'code', '1234' );
+			$response = ( new UserAPI() )->forgot_verify( $request );
+		} else {
+			$response = $this->login_otp( $otp );
+		}
+		self::assertSame( 401, $response->get_status() );
+		self::assertFalse( $response->get_data()['success'] );
+		self::assertArrayNotHasKey( 'reset_key', (array) $response->get_data()['data'] );
+		self::assertNull( $otp->fresh()->verified_at );
+		self::assertSame( $before, count_users()['total_users'] );
+		self::assertSame( 0, get_current_user_id() );
+		self::assertSame( 0, $this->cookies );
+	}
+
+	public function test_native_password_hook_cannot_bypass_a_new_mobile_conflict(): void {
+		$mobile = '+989351234979';
+		$id = self::factory()->user->create( [ 'role' => 'subscriber', 'user_pass' => 'policy-test-password' ] );
+		$other = self::factory()->user->create( [ 'role' => 'subscriber' ] );
+		update_user_meta( $id, 'pinova_mobile', $mobile );
+		self::assertSame( $id, UserService::match( new Identifier( $mobile ) ) );
+		$claim = static function ( $user ) use ( $other, $mobile ) {
+			update_user_meta( $other, 'digits_phone', $mobile );
+			return $user;
+		};
+		add_filter( 'authenticate', $claim, 100 );
+		try {
+			self::assertWPError( UserService::authenticate_password( $id, 'policy-test-password', true, new Identifier( $mobile ) ) );
+			self::assertSame( $mobile, get_user_meta( $id, 'pinova_mobile', true ) );
+			self::assertSame( 0, $this->cookies );
+		} finally {
+			remove_filter( 'authenticate', $claim, 100 );
+		}
+	}
+
 	public function test_password_reset_rechecks_policy_before_automatic_login(): void {
 		$id = self::factory()->user->create( [ 'role' => 'subscriber' ] );
 		$user = get_userdata( $id );

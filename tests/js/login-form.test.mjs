@@ -3,9 +3,12 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
+const authStateScript = (await readFile(new URL('../../assets/js/pages/auth-state.js', import.meta.url), 'utf8'))
+    .replace('export function createAuthState', 'function createAuthState');
+
 const loginScript = (
     await readFile(new URL('../../assets/js/pages/login-form.js', import.meta.url), 'utf8')
-).replace(/^import pinovaAlpine[^\n]*\r?\n/m, '');
+).replace(/^import (?:pinovaAlpine|\{ createAuthState \})[^\n]*\r?\n/gm, '');
 
 function harness(
     apiResponse = { success: false, message: 'این شناسه مسدود شده است.', data: {} },
@@ -114,10 +117,11 @@ function harness(
         window: windowObject,
     });
 
-    vm.runInContext(loginScript, context, { filename: 'assets/js/pages/login-form.js' });
+    vm.runInContext(authStateScript + loginScript, context, { filename: 'assets/js/pages/login-form.js' });
     assert.equal(typeof factory, 'function');
 
     return {
+        createState: factory,
         apiCalls,
         clearedIntervals,
         focused,
@@ -363,4 +367,51 @@ test('separates the safe explanation from the support reference and clears stale
     assert.equal(state.status.reference, reference);
     state.clearStatus();
     assert.equal(state.status.reference, '');
+});
+
+
+test('authentication instances never share mutable forms, status, OTP history, or timers', () => {
+    const { createState, state } = harness();
+    const second = createState();
+    state.forms.authenticate.inputs.identifier.value = 'first@example.test';
+    state.forms.loginByOtp.inputs.jwt.value = 'first.signed.state';
+    state.forms.loginByOtp.inputs.code.value = '1234';
+    state.otpSubmittedCodes.loginByOtp = '1234';
+    state.status.message = 'first status';
+    state.time.timerInterval = 501;
+    state.allowedSteps.push('private-step');
+
+    assert.equal(second.forms.authenticate.inputs.identifier.value, '');
+    assert.equal(second.forms.loginByOtp.inputs.jwt.value, '');
+    assert.equal(second.forms.loginByOtp.inputs.code.value, '');
+    assert.equal(second.otpSubmittedCodes.loginByOtp, '');
+    assert.equal(second.status.message, '');
+    assert.equal(second.time.timerInterval, null);
+    assert.equal(second.allowedSteps.includes('private-step'), false);
+});
+
+test('OTP and recovery signed state stays byte-identical between response and request', async () => {
+    const signedState = 'opaque.payload-with_underscores.signature+unchanged/=';
+    for (const recovery of [false, true]) {
+        const { apiCalls, state } = harness(() => ({
+            success: true,
+            message: 'کد ارسال شد.',
+            data: { login_method: 'otp', jwt: signedState, ttl: 61 },
+        }));
+        if ('modalIsOpen' in state) state.modalIsOpen = true;
+        state.forms.authenticate.inputs.identifier.value = 'buyer@example.test';
+        await state.authenticate(recovery ? { forget: '1' } : {}, recovery ? 'forgotPassword' : null);
+        const formName = recovery ? 'forgotPassword' : 'loginByOtp';
+        assert.equal(state.forms[formName].inputs.jwt.value, signedState);
+        assert.equal(state.time.duration, 61000);
+        state.forms[formName].inputs.code.value = '1234';
+        if (recovery) {
+            await state.forgotPassword();
+        } else {
+            await state.loginByOtp();
+        }
+        assert.equal(apiCalls[1][1].data.jwt, signedState);
+        assert.equal(apiCalls[1][1].data.code, '1234');
+        assert.equal(apiCalls[1][0], recovery ? 'pinova/auth/forgot/verify' : 'pinova/user/login/otp');
+    }
 });

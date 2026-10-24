@@ -672,7 +672,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		Logger::instance()->audit( 'warning', 'privacy.export_read_failure', [ 'user_id' => $user_id ] );
 
 		$fail_mobile_read = static function ( string $query ) use ( $wpdb ): string {
-			if ( str_contains( $query, 'SELECT `meta_value`' ) && str_contains( $query, 'pinova_mobile' ) ) {
+			if ( str_contains( $query, 'SELECT DISTINCT BINARY `meta_value`' ) && str_contains( $query, 'pinova_mobile' ) ) {
 				return "SELECT `pinova_missing_column` FROM {$wpdb->usermeta} LIMIT 1";
 			}
 
@@ -784,7 +784,7 @@ final class PrivacyIntegrationTest extends WP_UnitTestCase {
 		);
 
 		$fail_mobile_read = static function ( string $query ) use ( $wpdb ): string {
-			if ( str_contains( $query, 'SELECT `meta_value`' ) && str_contains( $query, 'pinova_mobile' ) ) {
+			if ( str_contains( $query, 'SELECT DISTINCT BINARY `meta_value`' ) && str_contains( $query, 'pinova_mobile' ) ) {
 				return "SELECT `pinova_missing_column` FROM {$wpdb->usermeta} LIMIT 1";
 			}
 

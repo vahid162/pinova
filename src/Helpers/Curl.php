@@ -47,7 +47,7 @@ class Curl {
 		try {
 			$decoded = json_decode( $body, true, 512, JSON_THROW_ON_ERROR );
 
-			return self::redact_credentials( $decoded, self::credential_values( $data, $request_headers ) );
+			return $decoded;
 		} catch ( JsonException $exception ) {
 			unset( $exception );
 			throw new Exception( sprintf( 'کد %d: پاسخ دریافت‌شده معتبر نیست.', $http_code ) );
@@ -78,30 +78,31 @@ class Curl {
 	}
 
 	/**
-	 * @param mixed                $data
-	 * @param array<string,string> $headers
-	 * @return string[]
+	 * Redact diagnostic text only, after the adapter has interpreted protocol fields.
+	 *
+	 * @param mixed $message
+	 * @param array $credentials
+	 * @param mixed $code
 	 */
-	private static function credential_values( $data, array $headers ): array {
-		$credentials = [];
-
-		foreach ( $headers as $name => $value ) {
-			$name = strtolower( $name );
-			if ( ! str_contains( $name, 'authorization' ) && ! str_contains( $name, 'token' ) && ! str_contains( $name, 'key' ) ) {
-				continue;
-			}
-
-			$credentials[] = trim( $value );
-			$credentials[] = preg_replace( '/^(?:bearer|basic)\s+/i', '', trim( $value ) ) ?? '';
+	public static function provider_error( $message, array $credentials, $code = 0 ): Exception {
+		if ( ! is_string( $message ) && ! is_numeric( $message ) ) {
+			$message = 'پاسخ دریافت‌شده از سرویس‌دهنده معتبر نیست.';
 		}
 
-		$payload = is_string( $data ) ? json_decode( $data, true ) : $data;
-		self::collect_payload_credentials( $payload, $credentials );
+		$values = [];
+		foreach ( $credentials as $credential ) {
+			if ( ! is_scalar( $credential ) ) {
+				continue;
+			}
+			$value    = trim( (string) $credential );
+			$values[] = $value;
+			$values[] = preg_replace( '/^(?:bearer|basic)\s+/i', '', $value ) ?? '';
+		}
 
 		$credentials = array_values(
 			array_unique(
 				array_filter(
-					array_map( 'strval', $credentials ),
+					$values,
 					static fn( string $value ): bool => '' !== $value
 				)
 			)
@@ -115,45 +116,9 @@ class Curl {
 			}
 		);
 
-		return $credentials;
-	}
-
-	/**
-	 * @param mixed    $value
-	 * @param string[] $credentials
-	 */
-	private static function collect_payload_credentials( $value, array &$credentials, string $key = '' ): void {
-		if ( is_array( $value ) ) {
-			foreach ( $value as $child_key => $child_value ) {
-				self::collect_payload_credentials( $child_value, $credentials, (string) $child_key );
-			}
-			return;
-		}
-
-		if ( ! is_scalar( $value ) || ! preg_match( '/(?:password|username|secret|api[_-]?key|token|authorization)/i', $key ) ) {
-			return;
-		}
-
-		$credentials[] = (string) $value;
-	}
-
-	/**
-	 * @param mixed    $value
-	 * @param string[] $credentials
-	 * @return mixed
-	 */
-	private static function redact_credentials( $value, array $credentials ) {
-		if ( is_array( $value ) ) {
-			foreach ( $value as $key => $child ) {
-				$value[ $key ] = self::redact_credentials( $child, $credentials );
-			}
-			return $value;
-		}
-
-		if ( ! is_string( $value ) ) {
-			return $value;
-		}
-
-		return str_replace( $credentials, '[redacted]', $value );
+		return new Exception(
+			str_replace( $credentials, '[redacted]', (string) $message ),
+			is_numeric( $code ) ? (int) $code : 0
+		);
 	}
 }

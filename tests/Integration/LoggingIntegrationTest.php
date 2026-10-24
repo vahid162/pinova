@@ -10,6 +10,7 @@ use Pinova\API\RestAPI;
 use Pinova\Exceptions\RateLimitException;
 use Pinova\Gateways\BaseGateway;
 use Pinova\Install;
+use Pinova\Logging\HealthState;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
 use Pinova\Objects\Identifier;
@@ -70,6 +71,7 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
+		wp_clear_scheduled_hook( 'pinova_logging_cleanup_continue' );
 		LoggingTestGateway::$fail_with_error = false;
 		LoggingTestGateway::$fail_with_exception = false;
 		LoggingTestGateway::$return_false = false;
@@ -262,6 +264,108 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 
 		self::assertSame( 1, LogRepository::cleanup() );
 		self::assertSame( 1, (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $table ) ) );
+	}
+
+	public function test_retention_backlog_drains_in_bounded_scheduled_batches(): void {
+		global $wpdb;
+
+		$this->seed_expired_logs( 5001 );
+		Logger::instance()->warning( 'auth.request_failed' );
+		self::assertSame( 5000, LogRepository::cleanup() );
+		self::assertSame( 2, (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $wpdb->prefix . 'pinova_logs' ) ) );
+		self::assertSame( 'pending', HealthState::cleanup()['backlog'] );
+		self::assertSame( 'scheduled', HealthState::cleanup()['continuation'] );
+		$next = wp_next_scheduled( 'pinova_logging_cleanup_continue' );
+		self::assertIsInt( $next );
+		self::assertGreaterThanOrEqual( time() + 4 * MINUTE_IN_SECONDS, $next );
+		self::assertTrue( wp_unschedule_event( $next, 'pinova_logging_cleanup_continue' ) );
+		do_action( 'pinova_logging_cleanup_continue' );
+		self::assertSame( 1, (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $wpdb->prefix . 'pinova_logs' ) ) );
+		self::assertSame( 'clear', HealthState::cleanup()['backlog'] );
+		self::assertFalse( wp_next_scheduled( 'pinova_logging_cleanup_continue' ) );
+	}
+
+	public function test_retention_continuation_is_deduplicated(): void {
+		$this->seed_expired_logs( 5001 );
+		$next = time() + 5 * MINUTE_IN_SECONDS;
+		self::assertTrue( wp_schedule_single_event( $next, 'pinova_logging_cleanup_continue' ) );
+		self::assertSame( 5000, LogRepository::cleanup() );
+		self::assertSame( $next, wp_next_scheduled( 'pinova_logging_cleanup_continue' ) );
+		$events = [];
+		foreach ( _get_cron_array() as $hooks ) {
+			$events = array_merge( $events, array_values( $hooks['pinova_logging_cleanup_continue'] ?? [] ) );
+		}
+		self::assertCount( 1, $events );
+	}
+
+	public function test_retention_schedule_failure_preserves_deleted_and_backlog_facts(): void {
+		$this->seed_expired_logs( 5001 );
+		$fail = static fn( $pre, $event ) => 'pinova_logging_cleanup_continue' === $event->hook ? false : $pre;
+		add_filter( 'pre_schedule_event', $fail, 10, 2 );
+		try {
+			self::assertFalse( LogRepository::cleanup() );
+		} finally {
+			remove_filter( 'pre_schedule_event', $fail );
+		}
+		self::assertSame( 'failed', HealthState::cleanup()['status'] );
+		self::assertSame( 5000, HealthState::cleanup()['deleted'] );
+		self::assertSame( 'pending', HealthState::cleanup()['backlog'] );
+		self::assertSame( 'failed', HealthState::cleanup()['continuation'] );
+		self::assertSame( 'degraded', LogRepository::health()['state'] );
+		self::assertFalse( wp_next_scheduled( 'pinova_logging_cleanup_continue' ) );
+		self::assertSame( 1, LogRepository::cleanup() );
+		self::assertSame( 'success', HealthState::cleanup()['status'] );
+	}
+
+	public function test_retention_probe_failure_stops_continuation_without_claiming_clear_backlog(): void {
+		global $wpdb;
+
+		$this->seed_expired_logs( 5001 );
+		$table = $wpdb->prefix . 'pinova_logs';
+		$fail = static fn( string $query ): string => str_starts_with( $query, 'SELECT `id` FROM ' ) && str_contains( $query, $table )
+			? 'SELECT `pinova_missing_column` FROM `' . $table . '` LIMIT 1'
+			: $query;
+		$previous = $wpdb->suppress_errors( true );
+		add_filter( 'query', $fail );
+		try {
+			self::assertFalse( LogRepository::cleanup() );
+		} finally {
+			remove_filter( 'query', $fail );
+			$wpdb->suppress_errors( $previous );
+		}
+		self::assertSame( 'unknown', HealthState::cleanup()['backlog'] );
+		self::assertSame( 5000, HealthState::cleanup()['deleted'] );
+		self::assertFalse( wp_next_scheduled( 'pinova_logging_cleanup_continue' ) );
+	}
+
+	public function test_health_detects_lost_backlog_continuation_without_writing(): void {
+		$this->seed_expired_logs( 5001 );
+		self::assertSame( 5000, LogRepository::cleanup() );
+		$stored = get_option( 'pinova_logging_cleanup_health' );
+		wp_clear_scheduled_hook( 'pinova_logging_cleanup_continue' );
+		$health = LogRepository::health();
+		self::assertSame( 'degraded', $health['state'] );
+		self::assertSame( 'pending', $health['cleanup']['backlog'] );
+		self::assertSame( 'failed', $health['cleanup']['continuation'] );
+		self::assertSame( $stored, get_option( 'pinova_logging_cleanup_health' ) );
+	}
+
+	public function test_cleanup_health_redacts_unknown_backlog_and_continuation_codes(): void {
+		update_option( 'pinova_logging_cleanup_health', [ 'backlog' => 'private-token', 'continuation' => 'private-token' ], false );
+		self::assertSame( 'unknown', HealthState::cleanup()['backlog'] );
+		self::assertSame( 'unknown', HealthState::cleanup()['continuation'] );
+		self::assertStringNotContainsString( 'private-token', wp_json_encode( HealthState::cleanup() ) );
+	}
+
+	private function seed_expired_logs( int $count ): void {
+		global $wpdb;
+
+		while ( 0 < $count ) {
+			$batch = min( 1000, $count );
+			$rows = implode( ', ', array_fill( 0, $batch, "(UTC_TIMESTAMP() - INTERVAL 20 DAY, 'warning', 'retention.test', 'retention-test', '{}')" ) );
+			self::assertSame( $batch, $wpdb->query( $wpdb->prepare( "INSERT INTO %i (`created_at`, `level`, `event`, `correlation_id`, `context`) VALUES {$rows}", $wpdb->prefix . 'pinova_logs' ) ) );
+			$count -= $batch;
+		}
 	}
 
 	public function test_rest_responses_expose_only_the_correlation_id(): void {

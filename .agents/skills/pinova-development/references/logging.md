@@ -34,7 +34,13 @@ An OTP flow ID is 16 cryptographically random bytes represented as 32 lowercase 
 - Never enable permanent debug logging through a hidden option or filter.
 - Events controlled by an attacker must be bounded. Log rate-limit transition only when `hits === limit + 1`; do not log every rejected request. Do not add per-request firewall-denial logs without persistent deduplication.
 
-Retention defaults to 14 days, is clamped to 1–90 days, and is deleted in bounded batches by `pinova_logging_cleanup`. Manual deletion requires `manage_options` plus the `pinova_clear_logs` nonce and writes a fresh `logging.cleared` audit event only after a successful DELETE, including a successful zero-row DELETE. A missing table or database error must return a generic failure rather than a success notice or success audit. That bounded administrator action uses `Logger::audit()` so it is not suppressed when the configured minimum is `error`; do not use this threshold bypass for request-driven events.
+Retention defaults to 14 days, is clamped to 1–90 days, and is deleted in batches of at most 5,000 by daily `pinova_logging_cleanup`. If expired rows remain, schedule one `pinova_logging_cleanup_continue` five minutes later; database failure stops the chain for the next daily retry. Health reports distinguish pending backlog, failed scheduling, and a missing or overdue continuation. Read-only health checks never delete or reschedule. General WordPress cron is required; the delivery-only `pinova otp run` command does not perform retention maintenance.
+
+OTP records have separate fixed retention: daily `pinova_otp_cleanup` deletes rows whose UTC expiry was more than seven days ago, including verified and legacy rows. Preserve null expiry, live codes, and recent channel-selection history. Its 5,000-row batches continue through `pinova_otp_cleanup_continue` at five-minute intervals while expired rows remain. Uninstall/deactivation must clear both maintenance chains.
+
+The additive `expiry_cleanup (expires_at, id)` index supports the cleanup range and ordering; do not substitute an identifier-leading index or order by ID alone. Advance schema metadata only after verifying this index exists, and preserve all OTP rows if an upgrade is interrupted. Integration coverage checks idempotent schema retry and the real database's expiry-range query plan.
+
+Manual log deletion requires `manage_options` plus the `pinova_clear_logs` nonce and writes a fresh `logging.cleared` audit event only after a successful DELETE, including a successful zero-row DELETE. A missing table or database error must return a generic failure rather than a success notice or success audit. That bounded administrator action uses `Logger::audit()` so it is not suppressed when the configured minimum is `error`; do not use this threshold bypass for request-driven events.
 
 ## Privacy and context allowlist
 

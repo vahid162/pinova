@@ -99,6 +99,40 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_expiry_index_upgrade_preserves_records_and_retries_after_interruption(): void {
+		global $wpdb;
+		$table = $wpdb->prefix . 'pinova_otp';
+		$id = 0;
+		try {
+			self::assertSame( 1, $wpdb->insert( $table, [ 'identifier' => 'retention-upgrade@example.test', 'code' => 'synthetic-hash', 'ip_address' => '192.0.2.1', 'type' => 'login', 'channels' => '{}', 'expires_at' => gmdate( 'Y-m-d H:i:s', time() + 180 ) ] ) );
+			$id = (int) $wpdb->insert_id;
+			self::assertNotFalse( $wpdb->query( $wpdb->prepare( 'ALTER TABLE %i DROP INDEX expiry_cleanup', $table ) ) );
+			update_option( Install::SCHEMA_OPTION, 3, false );
+			$interrupt = static function (): void {
+				throw new \RuntimeException( 'Deliberate interruption after additive index creation.' );
+			};
+			add_action( 'pinova_after_db_schema_migration', $interrupt );
+			try {
+				self::assertFalse( Install::migrate() );
+				self::assertSame( 3, (int) get_option( Install::SCHEMA_OPTION ) );
+			} finally {
+				remove_action( 'pinova_after_db_schema_migration', $interrupt );
+			}
+			self::assertTrue( Install::migrate() );
+			self::assertTrue( Install::migrate() );
+			self::assertSame( Install::SCHEMA_VERSION, (int) get_option( Install::SCHEMA_OPTION ) );
+			$columns = $wpdb->get_col( $wpdb->prepare( 'SHOW INDEX FROM %i WHERE Key_name = %s', $table, 'expiry_cleanup' ), 4 );
+			self::assertSame( [ 'expires_at', 'id' ], $columns );
+			self::assertSame( 'retention-upgrade@example.test', $wpdb->get_var( $wpdb->prepare( 'SELECT identifier FROM %i WHERE id = %d', $table, $id ) ) );
+		} finally {
+			Install::create_tables();
+			update_option( Install::SCHEMA_OPTION, Install::SCHEMA_VERSION, false );
+			if ( $id > 0 ) {
+				$wpdb->delete( $table, [ 'id' => $id ] );
+			}
+		}
+	}
+
 	public function test_activation_does_not_write_to_plugin_directory(): void {
 		$sentinel = PINOVA_DIR . '/.activated';
 		self::assertFileDoesNotExist( $sentinel );
@@ -134,6 +168,8 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 			self::assertIsInt( wp_next_scheduled( $hook ) );
 		}
 		wp_schedule_single_event( time() + ( 2 * HOUR_IN_SECONDS ), 'pinova_logging_cleanup', [ 'partition' => 'expired' ] );
+		wp_schedule_single_event( time() + ( 2 * HOUR_IN_SECONDS ), 'pinova_logging_cleanup_continue', [ 'partition' => 'expired' ] );
+		wp_schedule_single_event( time() + ( 2 * HOUR_IN_SECONDS ), 'pinova_otp_cleanup_continue', [ 'partition' => 'expired' ] );
 
 		Install::deactivate( false );
 
@@ -141,6 +177,8 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 			self::assertFalse( wp_next_scheduled( $hook ) );
 		}
 		self::assertFalse( wp_next_scheduled( 'pinova_logging_cleanup', [ 'partition' => 'expired' ] ) );
+		self::assertFalse( wp_next_scheduled( 'pinova_logging_cleanup_continue', [ 'partition' => 'expired' ] ) );
+		self::assertFalse( wp_next_scheduled( 'pinova_otp_cleanup_continue', [ 'partition' => 'expired' ] ) );
 	}
 
 	public function test_uninstall_preserves_data_without_opt_in(): void {
@@ -159,7 +197,9 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 		update_user_meta( $user_id, 'pinova_mobile', '09120000000' );
 		update_option( 'pinova_test_owned_option', 'delete-me', false );
 		update_option( Install::PURGE_OPTION, 1, false );
-		wp_schedule_single_event( time() + HOUR_IN_SECONDS, 'pinova_logging_cleanup' );
+		foreach ( Install::scheduled_hooks() as $hook ) {
+			wp_schedule_single_event( time() + HOUR_IN_SECONDS, $hook );
+		}
 		self::assertTrue( (bool) get_option( Install::PURGE_OPTION, false ) );
 
 		/*
@@ -178,7 +218,9 @@ final class LifecycleIntegrationTest extends WP_UnitTestCase {
 			}
 			self::assertFalse( get_option( 'pinova_test_owned_option', false ) );
 			self::assertFalse( get_option( Install::SCHEMA_OPTION, false ) );
-			self::assertFalse( wp_next_scheduled( 'pinova_logging_cleanup' ) );
+			foreach ( Install::scheduled_hooks() as $hook ) {
+				self::assertFalse( wp_next_scheduled( $hook ) );
+			}
 			self::assertSame(
 				'09120000000',
 				$wpdb->get_var(

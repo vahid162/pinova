@@ -31,7 +31,7 @@ class Call implements ChannelInterface {
 			return true;
 		}
 
-		throw new Exception( $response['response_body']['message'], $result );
+		throw Curl::provider_error( $response['response_body']['message'] ?? null, [ Pinova::get_option( 'zohal.api_key' ) ], $result );
 	}
 
 	public static function send_message( string $identifier, string $message ): bool {

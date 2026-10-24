@@ -53,11 +53,11 @@ class PanelChi extends BaseGateway {
 		}
 
 		if ( isset( $response['detail'] ) ) {
-			throw new Exception( $response['detail'], $response['code'] ?? 0 );
+			throw Curl::provider_error( $response['detail'], [ $this->get_option( 'api_key' ) ], $response['code'] ?? 0 );
 		}
 
 		if ( isset( $response['title'] ) ) {
-			throw new Exception( $response['title'], $response['code'] ?? 0 );
+			throw Curl::provider_error( $response['title'], [ $this->get_option( 'api_key' ) ], $response['code'] ?? 0 );
 		}
 
 		throw new Exception( 'خطای ناشناخته در ارسال به پنل‌چی رخ داده است.' );

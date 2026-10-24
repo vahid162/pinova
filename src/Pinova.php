@@ -67,6 +67,17 @@ class Pinova {
 		// phpcs:ignore WordPress.WP.CronInterval.CronSchedulesInterval -- Bounded OTP recovery must run before the three-minute signed expiry.
 		add_filter( 'cron_schedules', [ $this, 'otp_cron_schedules' ] );
 		add_action( 'pinova_logging_cleanup', [ $this, 'cleanup_logs' ] );
+		add_action(
+			'pinova_logging_cleanup_continue',
+			static function (): void {
+				LogRepository::cleanup();
+			}
+		);
+		$otp_cleanup = static function (): void {
+			OTPService::cleanup();
+		};
+		add_action( 'pinova_otp_cleanup', $otp_cleanup );
+		add_action( 'pinova_otp_cleanup_continue', $otp_cleanup );
 		add_action( 'updated_option', [ SettingsAudit::class, 'updated' ], 10, 3 );
 		add_action( 'added_option', [ SettingsAudit::class, 'added' ], 10, 2 );
 		add_action( 'template_redirect', [ $this, 'handle_urls' ] );
@@ -86,6 +97,9 @@ class Pinova {
 
 		if ( ! wp_next_scheduled( 'pinova_logging_cleanup' ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'pinova_logging_cleanup' );
+		}
+		if ( ! wp_next_scheduled( 'pinova_otp_cleanup' ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'pinova_otp_cleanup' );
 		}
 	}
 

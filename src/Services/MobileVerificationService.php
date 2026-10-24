@@ -40,11 +40,15 @@ final class MobileVerificationService {
 
 	/** Identical mobile rows represent one value; proof/epoch duplicates still fail closed. */
 	private static function meta( int $user_id, string $key ): ?string {
+		if ( 'pinova_mobile' === $key ) {
+			$result = UserService::get_persisted_mobile_row_result( $user_id );
+			if ( ! $result['success'] ) {
+				throw new Exception( 'Mobile evidence is unavailable.' );
+			}
+			return $result['value'];
+		}
 		global $wpdb;
-		$sql  = 'pinova_mobile' === $key
-			? 'SELECT DISTINCT BINARY meta_value FROM %i WHERE user_id = %d AND meta_key = %s LIMIT 2'
-			: 'SELECT meta_value FROM %i WHERE user_id = %d AND meta_key = %s LIMIT 2';
-		$rows = $wpdb->get_col( $wpdb->prepare( $sql, $wpdb->usermeta, $user_id, $key ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Both query templates are fixed literals.
+		$rows = $wpdb->get_col( $wpdb->prepare( 'SELECT meta_value FROM %i WHERE user_id = %d AND meta_key = %s LIMIT 2', $wpdb->usermeta, $user_id, $key ) );
 		if ( $wpdb->last_error || ! is_array( $rows ) || count( $rows ) > 1 ) {
 			throw new Exception( 'Mobile evidence is unavailable.' );
 		}

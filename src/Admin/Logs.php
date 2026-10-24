@@ -120,6 +120,12 @@ final class Logs {
 				if ( $health['cleanup']['at'] > 0 ) {
 					echo ' — ' . esc_html( gmdate( 'Y-m-d H:i:s', $health['cleanup']['at'] ) ) . ' UTC';
 				}
+				if ( 'pending' === $health['cleanup']['backlog'] ) {
+					echo ' — ' . esc_html__( 'رکورد منقضی باقی مانده است؛ پاک‌سازی ادامه دارد.', 'pinova' );
+				}
+				if ( 'failed' === $health['cleanup']['continuation'] ) {
+					echo ' — ' . esc_html__( 'زمان‌بندی ادامهٔ پاک‌سازی ناموفق بود؛ cron را بررسی کنید.', 'pinova' );
+				}
 				?>
 			</p>
 			<?php if ( $health['fallback']['at'] > 0 ) : ?>

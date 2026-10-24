@@ -10,6 +10,7 @@ final class LogRepository {
 	private const DIAGNOSTIC_SELECT = 'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `flow_id`, `user_id`, CASE WHEN OCTET_LENGTH(`context`) <= %d THEN `context` ELSE \'{}\' END AS `context`, OCTET_LENGTH(`context`) > %d AS `context_truncated` FROM %i';
 
 	public const DEFAULT_RETENTION_DAYS = 14;
+	private const CLEANUP_BATCH_SIZE    = 5000;
 	private const CONTEXT_MAX_BYTES     = 8192;
 	private const LEVELS                = [ 'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency' ];
 	private const EXPORT_EVENTS         = [
@@ -75,23 +76,51 @@ final class LogRepository {
 	public static function cleanup(): int|false {
 		global $wpdb;
 
-		$deleted = false;
+		$deleted      = 0;
+		$success      = false;
+		$backlog      = 'unknown';
+		$continuation = 'unknown';
 		try {
 			if ( self::table_exists() ) {
 				$query = $wpdb->prepare(
-					'DELETE FROM %i WHERE `created_at` < (UTC_TIMESTAMP() - INTERVAL %d DAY) LIMIT 5000',
+					'DELETE FROM %i WHERE `created_at` < (UTC_TIMESTAMP() - INTERVAL %d DAY) ORDER BY `created_at` LIMIT %d',
 					self::table_name(),
-					self::retention_days()
+					self::retention_days(),
+					self::CLEANUP_BATCH_SIZE
 				);
 				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is prepared immediately above.
-				$result  = $wpdb->query( $query );
-				$deleted = false === $result ? false : max( 0, (int) $result );
+				$result = $wpdb->query( $query );
+				if ( false !== $result ) {
+					$deleted = max( 0, (int) $result );
+					$pending = $wpdb->get_var(
+						$wpdb->prepare(
+							'SELECT `id` FROM %i WHERE `created_at` < (UTC_TIMESTAMP() - INTERVAL %d DAY) LIMIT 1',
+							self::table_name(),
+							self::retention_days()
+						)
+					);
+					if ( ! self::database_error_present() ) {
+						$backlog      = null === $pending ? 'clear' : 'pending';
+						$success      = true;
+						$continuation = 'not_needed';
+						if ( 'pending' === $backlog ) {
+							// One bounded pass per callback; a failed pass waits for daily maintenance.
+							$success      = false !== wp_next_scheduled( 'pinova_logging_cleanup_continue' )
+								|| true === wp_schedule_single_event( time() + 5 * MINUTE_IN_SECONDS, 'pinova_logging_cleanup_continue' );
+							$continuation = $success ? 'scheduled' : 'failed';
+						}
+					}
+				}
 			}
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
+			$success = false;
+			if ( 'pending' === $backlog ) {
+				$continuation = 'failed';
+			}
 		}
-		HealthState::record_cleanup( false !== $deleted, false === $deleted ? 0 : $deleted );
-		return $deleted;
+		HealthState::record_cleanup( $success, $deleted, $backlog, $continuation );
+		return $success ? $deleted : false;
 	}
 
 	public static function delete_all(): int|false {
@@ -420,7 +449,7 @@ final class LogRepository {
 	 * Reads cannot establish future write success. Persisted failure observations
 	 * are best effort and may be unavailable during an options/database outage.
 	 *
-	 * @return array{state:string,table_exists:bool,readable:bool,cleanup_scheduled:bool,cleanup_due_at:int,cleanup_overdue:bool,last_event_id:int,last_event_at:string,cleanup:array{status:string,at:int,deleted:int},fallback:array{at:int,woocommerce:string,php:string}}
+	 * @return array{state:string,table_exists:bool,readable:bool,cleanup_scheduled:bool,cleanup_due_at:int,cleanup_overdue:bool,last_event_id:int,last_event_at:string,cleanup:array{status:string,at:int,deleted:int,backlog:string,continuation:string},fallback:array{at:int,woocommerce:string,php:string}}
 	 */
 	public static function health(): array {
 		global $wpdb;
@@ -444,6 +473,12 @@ final class LogRepository {
 		try {
 			$health['cleanup_due_at']    = (int) wp_next_scheduled( 'pinova_logging_cleanup' );
 			$health['cleanup_scheduled'] = 0 < $health['cleanup_due_at'];
+			if ( 'pending' === $health['cleanup']['backlog'] ) {
+				$continuation_due = wp_next_scheduled( 'pinova_logging_cleanup_continue' );
+				if ( false === $continuation_due || $continuation_due < time() - HOUR_IN_SECONDS ) {
+					$health['cleanup']['continuation'] = 'failed';
+				}
+			}
 			// Daily maintenance tolerates the normal delay of a traffic-driven cron.
 			$health['cleanup_overdue'] = $health['cleanup_scheduled'] && $health['cleanup_due_at'] < time() - HOUR_IN_SECONDS;
 			$health['table_exists']    = self::table_exists();
@@ -458,7 +493,8 @@ final class LogRepository {
 					$health['state'] = 'degraded';
 				} else {
 					$health['readable'] = true;
-					$health['state']    = $health['cleanup_scheduled'] && ! $health['cleanup_overdue'] && 'failed' !== $health['cleanup']['status'] ? 'database-backed' : 'degraded';
+					$health['state']    = $health['cleanup_scheduled'] && ! $health['cleanup_overdue']
+						&& 'failed' !== $health['cleanup']['status'] && 'failed' !== $health['cleanup']['continuation'] ? 'database-backed' : 'degraded';
 					if ( is_array( $latest ) ) {
 						$health['last_event_id'] = (int) $latest['id'];
 						$health['last_event_at'] = (string) $latest['created_at'];

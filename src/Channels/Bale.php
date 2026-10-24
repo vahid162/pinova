@@ -43,11 +43,11 @@ class Bale implements ChannelInterface {
 		}
 
 		if ( is_string( $response ) ) {
-			throw new Exception( $response );
+			throw Curl::provider_error( $response, [ self::get_api_token() ] );
 		}
 
 		if ( isset( $response['error_data'] [0]['description'] ) ) {
-			throw new Exception( $response['error_data'] [0]['description'] );
+			throw Curl::provider_error( $response['error_data'] [0]['description'], [ self::get_api_token() ] );
 		}
 
 		throw new Exception( 'خطای ناشناخته در ارسال پیام به بله رخ داده است.' );
@@ -82,11 +82,11 @@ class Bale implements ChannelInterface {
 		}
 
 		if ( is_string( $response ) ) {
-			throw new Exception( $response );
+			throw Curl::provider_error( $response, [ self::get_api_token() ] );
 		}
 
 		if ( isset( $response['error_data'] [0]['description'] ) ) {
-			throw new Exception( $response['error_data'] [0]['description'] );
+			throw Curl::provider_error( $response['error_data'] [0]['description'], [ self::get_api_token() ] );
 		}
 
 		throw new Exception( 'خطای ناشناخته در ارسال کد تایید به بله ۳ رخ داده است.' );

@@ -54,7 +54,7 @@ class MaxSMS extends BaseGateway {
 		}
 
 		if ( isset( $response['meta']['message'] ) ) {
-			throw new Exception( $response['meta']['message'] );
+			throw Curl::provider_error( $response['meta']['message'], [ $this->get_option( 'api_key' ) ] );
 		}
 
 		throw new Exception( 'خطای ناشناخته در ارسال به مکس اس ام اس رخ داده است.' );

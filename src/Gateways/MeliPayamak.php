@@ -63,18 +63,25 @@ class MeliPayamak extends BaseGateway {
 			]
 		);
 
-		$value = $response['Value'] ?? '';
+		$value       = $response['Value'] ?? '';
+		$credentials = [ $this->get_option( 'username' ), $this->get_option( 'password' ) ];
+
+		if ( ! is_scalar( $value ) ) {
+			throw Curl::provider_error( null, $credentials );
+		}
+		$value = (string) $value;
 
 		if ( strlen( $value ) > 15 ) {
 			return true;
 		}
 
 		if ( $value ) {
-			throw new Exception( sprintf( 'خطای %s در ارسال پیامک رخ داده است.', $value ) );
+			throw Curl::provider_error( sprintf( 'خطای %s در ارسال پیامک رخ داده است.', $value ), $credentials );
 		}
 
 		if ( isset( $response['StrRetStatus'] ) ) {
-			throw new Exception( sprintf( 'خطای %s در ارسال پیامک رخ داده است.', $response['StrRetStatus'] ) );
+			$status = $response['StrRetStatus'];
+			throw Curl::provider_error( is_scalar( $status ) ? sprintf( 'خطای %s در ارسال پیامک رخ داده است.', $status ) : null, $credentials );
 		}
 
 		throw new Exception( 'خطای ناشناخته در ارسال به ملی پیامک رخ داده است.' );

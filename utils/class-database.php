@@ -27,14 +27,13 @@ if ( ! class_exists( 'Nabik_Net_Database' ) ) {
 
 			$settings = [
 				'driver'   => 'mysql',
-				'host'     => DB_HOST,
 				'database' => DB_NAME,
 				'username' => DB_USER,
 				'password' => DB_PASSWORD,
 				'charset'  => DB_CHARSET,
 				'prefix'   => $wpdb->prefix,
 				'strict'   => false,
-			];
+			] + self::host_settings( DB_HOST );
 
 			if ( DB_COLLATE ) {
 				$settings['collation'] = DB_COLLATE;
@@ -49,6 +48,28 @@ if ( ! class_exists( 'Nabik_Net_Database' ) ) {
 			Model::setConnectionResolver( $resolver );
 
 			self::Schema()::defaultStringLength( 191 );
+		}
+
+		/** @return array<string, string|int> */
+		private static function host_settings( string $db_host ): array {
+			global $wpdb;
+
+			$parsed = $wpdb->parse_db_host( $db_host );
+			if ( false === $parsed ) {
+				throw new \RuntimeException( 'Unsupported database host configuration.' );
+			}
+
+			[ $host, $port, $socket, $is_ipv6 ] = $parsed;
+			// Match WordPress: mysqlnd requires brackets around an IPv6 host.
+			$settings = [ 'host' => $is_ipv6 && extension_loaded( 'mysqlnd' ) ? '[' . $host . ']' : $host ];
+			if ( null !== $port ) {
+				$settings['port'] = $port;
+			}
+			if ( null !== $socket ) {
+				$settings['unix_socket'] = $socket;
+			}
+
+			return $settings;
 		}
 
 		public static function DB(): Connection {

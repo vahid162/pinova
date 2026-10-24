@@ -29,9 +29,13 @@ Identity-table resolver, migration, merge, rollback, and WP-CLI code live only o
 
 A valid physical `pinova_mobile` value is an explicit login-mobile override. It is checked before legacy values when displaying a user's mobile. If an account later stores a different explicit override, the old value remains unchanged in a mobile-shaped WordPress username or legacy metadata but no longer authenticates as that user's Pinova mobile alias.
 
+The shared physical reader selects at most two distinct binary values. Byte-identical duplicates are accepted without deletion; conflicting rows and database failures stop resolution before OTP consumption, proof changes, or privacy erasure. Do not reintroduce a first-row reader in security-sensitive consumers.
+
 Resolution returns a User ID only when the candidate is unambiguous. Multiple legacy accounts matching one mobile return no user and fire `pinova/identity_conflict_detected`. Resolving that conflict and merging ownership is deferred to the reviewed 1.3 workflow.
 
 ## Data tables and queued delivery
+
+The Illuminate initializer parses `DB_HOST` through WordPress's `wpdb::parse_db_host()`, passing host, port, and Unix socket separately and preserving WordPress's IPv6/mysqlnd convention. Keep eager request initialization and resolver reuse; never log connection credentials or configuration on parse failure.
 
 Public OTP initiation stores an AES-256-GCM-authenticated, short-lived delivery payload in the rate-limit reservation row as reserved ciphertext. Only after signed response preparation and successful scheduling is it durably acknowledged as ready ciphertext. It schedules `pinova_otp_delivery` for eligible and decoy identifiers alike. The REST handler never resolves the account or calls a provider. The cron callback atomically claims the flow while retaining authenticated ciphertext behind a claim token and a database-connection lock, then resolves account policy and sends only when eligible and before the signed deadline. A crashed worker releases its lock; a later claim can retry after the bounded lease. An existing OTP with unknown provider outcome is kept valid and is not resent; the reservation is retired so a later initiation can open a fresh flow. Verification retires a completed reservation, or cancels an in-flight claim until its worker exits. Repeated initiation otherwise reuses the same flow without resending an already-created OTP. A functioning WordPress cron runner and OpenSSL are required; a queue or scheduling failure returns a generic error before account lookup. Approved privacy erasure cancels matching claimed work and remains incomplete until its worker exits or a lock-free stale claim is retired.
 

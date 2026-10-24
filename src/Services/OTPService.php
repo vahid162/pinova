@@ -22,6 +22,47 @@ use Throwable;
 
 class OTPService {
 
+	public const RETENTION_DAYS      = 7;
+	private const CLEANUP_BATCH_SIZE = 5000;
+
+	/** Keep seven days after expiry, including verified and legacy flow records. */
+	public static function cleanup(): int|false {
+		global $wpdb;
+
+		try {
+			$table   = $wpdb->prefix . 'pinova_otp';
+			$deleted = $wpdb->query(
+				$wpdb->prepare(
+					'DELETE FROM %i WHERE `expires_at` < (UTC_TIMESTAMP() - INTERVAL %d DAY) ORDER BY `expires_at`, `id` LIMIT %d',
+					$table,
+					self::RETENTION_DAYS,
+					self::CLEANUP_BATCH_SIZE
+				)
+			);
+			if ( false === $deleted ) {
+				return false;
+			}
+			$pending = $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT `id` FROM %i WHERE `expires_at` < (UTC_TIMESTAMP() - INTERVAL %d DAY) LIMIT 1',
+					$table,
+					self::RETENTION_DAYS
+				)
+			);
+			if ( '' !== (string) $wpdb->last_error ) {
+				return false;
+			}
+			if ( null !== $pending && false === wp_next_scheduled( 'pinova_otp_cleanup_continue' )
+				&& true !== wp_schedule_single_event( time() + 5 * MINUTE_IN_SECONDS, 'pinova_otp_cleanup_continue' ) ) {
+				return false;
+			}
+			return max( 0, (int) $deleted );
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+			return false;
+		}
+	}
+
 	/** Run only a small due OTP batch; the host runner must hold its site cron lock. */
 	public static function run_due_delivery(): int {
 		if ( is_multisite() ) {

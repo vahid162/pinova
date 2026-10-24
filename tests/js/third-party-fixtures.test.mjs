@@ -17,7 +17,7 @@ function fixture(action) {
     writeFileSync(configPath, JSON.stringify({ config: { WP_DEBUG: true }, plugins: ['.'] }));
     const execute = (script, overrides = {}) => spawnSync(process.execPath, [script], {
         cwd: directory,
-        env: { ...process.env, PINOVA_TEST_PROFILE: '', PINOVA_TEST_PLUGIN_SET: '', WP_VERSION: '', WC_VERSION: '', ...overrides },
+        env: { ...process.env, PINOVA_TEST_PROFILE: '', PINOVA_TEST_PLUGIN_SET: '', PINOVA_TEST_PHP: '', WP_VERSION: '', WC_VERSION: '', ...overrides },
         encoding: 'utf8', timeout: 10_000,
     });
     const installFixtures = (manifest = baseline) => {
@@ -49,6 +49,18 @@ test('unknown profile fails without rewriting environment configuration', () => 
         const before = readFileSync(configPath, 'utf8');
         assert.notEqual(execute(configure, { PINOVA_TEST_PROFILE: 'thirdparty' }).status, 0);
         assert.equal(readFileSync(configPath, 'utf8'), before);
+    });
+});
+
+test('integration PHP selection reaches wp-env and rejects malformed versions without rewriting config', () => {
+    fixture(({ execute, configPath, config }) => {
+        assert.equal(execute(configure, { PINOVA_TEST_PHP: '8.5' }).status, 0);
+        assert.equal(config().phpVersion, '8.5');
+        const before = readFileSync(configPath, 'utf8');
+        assert.notEqual(execute(configure, { PINOVA_TEST_PHP: '8.5-extra' }).status, 0);
+        assert.equal(readFileSync(configPath, 'utf8'), before);
+        assert.equal(execute(configure, { PINOVA_TEST_PHP: '8.1' }).status, 0);
+        assert.equal(config().phpVersion, '8.1');
     });
 });
 

@@ -11,13 +11,15 @@ final class HealthState {
 
 	private static bool $accessing = false;
 
-	/** @return array{status:string,at:int,deleted:int} */
+	/** @return array{status:string,at:int,deleted:int,backlog:string,continuation:string} */
 	public static function cleanup(): array {
 		$value = self::read( 'pinova_logging_cleanup_health' );
 		return [
-			'status'  => in_array( $value['status'] ?? '', [ 'success', 'failed' ], true ) ? $value['status'] : 'unknown',
-			'at'      => self::timestamp( $value['at'] ?? null ),
-			'deleted' => isset( $value['deleted'] ) && is_int( $value['deleted'] ) ? max( 0, min( 5000, $value['deleted'] ) ) : 0,
+			'status'       => in_array( $value['status'] ?? '', [ 'success', 'failed' ], true ) ? $value['status'] : 'unknown',
+			'at'           => self::timestamp( $value['at'] ?? null ),
+			'deleted'      => isset( $value['deleted'] ) && is_int( $value['deleted'] ) ? max( 0, min( 5000, $value['deleted'] ) ) : 0,
+			'backlog'      => in_array( $value['backlog'] ?? '', [ 'clear', 'pending' ], true ) ? $value['backlog'] : 'unknown',
+			'continuation' => in_array( $value['continuation'] ?? '', [ 'not_needed', 'scheduled', 'failed' ], true ) ? $value['continuation'] : 'unknown',
 		];
 	}
 
@@ -31,13 +33,15 @@ final class HealthState {
 		];
 	}
 
-	public static function record_cleanup( bool $success, int $deleted = 0 ): void {
+	public static function record_cleanup( bool $success, int $deleted = 0, string $backlog = 'unknown', string $continuation = 'unknown' ): void {
 		self::write(
 			'pinova_logging_cleanup_health',
 			[
-				'status'  => $success ? 'success' : 'failed',
-				'at'      => time(),
-				'deleted' => $success ? max( 0, min( 5000, $deleted ) ) : 0,
+				'status'       => $success ? 'success' : 'failed',
+				'at'           => time(),
+				'deleted'      => max( 0, min( 5000, $deleted ) ),
+				'backlog'      => in_array( $backlog, [ 'clear', 'pending' ], true ) ? $backlog : 'unknown',
+				'continuation' => in_array( $continuation, [ 'not_needed', 'scheduled', 'failed' ], true ) ? $continuation : 'unknown',
 			]
 		);
 	}

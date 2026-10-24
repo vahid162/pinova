@@ -8,7 +8,7 @@ use Throwable;
 class Install extends \Nabik\Utils\V1\Install {
 
 	public const SCHEMA_OPTION  = 'pinova_db_schema_version';
-	public const SCHEMA_VERSION = 3;
+	public const SCHEMA_VERSION = 4;
 	public const PURGE_OPTION   = 'pinova_delete_data_on_uninstall';
 
 	/**
@@ -196,6 +196,9 @@ class Install extends \Nabik\Utils\V1\Install {
 		$hooks = [
 			'pinova_rate_limit_cleanup',
 			'pinova_logging_cleanup',
+			'pinova_logging_cleanup_continue',
+			'pinova_otp_cleanup',
+			'pinova_otp_cleanup_continue',
 			'pinova_otp_delivery',
 			'pinova_otp_reconcile',
 		];
@@ -273,6 +276,7 @@ class Install extends \Nabik\Utils\V1\Install {
 				PRIMARY KEY  (id),
 				KEY flow_id (flow_id),
 				KEY ip_address (ip_address),
+				KEY expiry_cleanup (expires_at, id),
 				KEY identifier_expires (identifier(191), expires_at)
 			) {$charset_collate};"
 		);
@@ -336,6 +340,9 @@ class Install extends \Nabik\Utils\V1\Install {
 		}
 		if ( ! self::database_column_exists( $rate_limits, 'payload' ) ) {
 			throw new RuntimeException( 'Pinova queued-delivery schema is incomplete.' );
+		}
+		if ( ! self::database_index_exists( $otp, 'expiry_cleanup' ) ) {
+			throw new RuntimeException( 'Pinova OTP retention schema is incomplete.' );
 		}
 	}
 

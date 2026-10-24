@@ -26,6 +26,13 @@ if (baseline && pluginSet === 'deployed') {
 }
 const wordpress = process.env.WP_VERSION || baseline?.wordpress || '6.8';
 const woocommerce = process.env.WC_VERSION || baseline?.woocommerce || '10.9.4';
+const php = process.env.PINOVA_TEST_PHP;
+if (php) {
+    if (!/^\d+\.\d+$/.test(php)) {
+        throw new Error('PINOVA_TEST_PHP must be a PHP major.minor version.');
+    }
+    config.phpVersion = php;
+}
 
 if (baseline) {
     if (wordpress !== baseline.wordpress || woocommerce !== baseline.woocommerce) {

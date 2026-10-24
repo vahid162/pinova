@@ -273,45 +273,68 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      COMPOSE_PROJECT_NAME: pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
+      WP_ENV_HOME: /tmp/pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
+      WP_ENV_PORT: '8890'
+      WP_ENV_TESTS_PORT: '8891'
     strategy:
       fail-fast: false
       matrix:
         include:
           - wp: '6.8'
             wc: '10.7.0'
+            php: '8.1'
             hpos: 'yes'
           - wp: '6.8'
             wc: '10.7.0'
+            php: '8.1'
             hpos: 'no'
           - wp: 'latest'
             wc: '10.9.4'
+            php: '8.1'
             hpos: 'yes'
           - wp: 'latest'
             wc: '10.9.4'
+            php: '8.1'
             hpos: 'no'
           - wp: 'latest'
             wc: 'latest'
+            php: '8.1'
             hpos: 'yes'
           - wp: 'latest'
             wc: 'latest'
+            php: '8.1'
+            hpos: 'no'
+          - wp: 'latest'
+            wc: 'latest'
+            php: '8.5'
+            hpos: 'yes'
+          - wp: 'latest'
+            wc: 'latest'
+            php: '8.5'
             hpos: 'no'
           - wp: '7.1'
             wc: '11.1.0'
+            php: '8.1'
             hpos: 'yes'
           - wp: '7.1'
             wc: '11.1.0'
+            php: '8.1'
             hpos: 'no'
           - wp: '7.1'
             wc: '11.2.1'
+            php: '8.1'
             hpos: 'yes'
           - wp: '7.1'
             wc: '11.2.1'
+            php: '8.1'
             hpos: 'no'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
-          php-version: '8.1'
+          php-version: ${{ matrix.php }}
           coverage: none
           extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
           tools: composer:2.10.3
@@ -324,12 +347,21 @@ jobs:
         env:
           WP_VERSION: ${{ matrix.wp }}
           WC_VERSION: ${{ matrix.wc }}
+          PINOVA_TEST_PHP: ${{ matrix.php }}
       - run: npm run env:start -- --update
+      - name: Verify the integration container PHP version
+        env:
+          EXPECTED_PHP: ${{ matrix.php }}
+        run: |
+          npx wp-env run tests-cli php -r 'printf("PHP %s\n", PHP_VERSION); exit(PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION === $argv[1] ? 0 : 1);' "$EXPECTED_PHP"
       - name: Install PDO MySQL in the disposable test container
         run: npx wp-env run tests-cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
       - run: npm run test:integration
         env:
           PINOVA_TEST_HPOS: ${{ matrix.hpos }}
+      - name: Remove only this job's disposable integration environment
+        if: always()
+        run: bash tools/cleanup-browser-env.sh
 
   third-party-baseline:
     name: Real wpForo and Dokan / ${{ matrix.plugins }} / HPOS ${{ matrix.hpos }}

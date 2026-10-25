@@ -14,7 +14,7 @@ Work from a repository checkout or disposable worktree, never from an installed 
 1. Read the root [`AGENTS.md`](../../../AGENTS.md) and complete its live GitHub reconciliation step before continuing. Keep any resulting repository-maintenance mutation within the task's existing write authorization. Inspect `git status --short --branch`, the current branch, recent commits, tags, and GitHub release state. Verify snapshots against Git.
 2. Read the references needed for the task:
    - [`references/project-map.md`](references/project-map.md) for architecture, legacy identifier behavior, persistence, and source routing.
-   - [`references/quality-and-release.md`](references/quality-and-release.md) for CI, tests, packaging, staging, and releases.
+   - [`references/quality-and-release.md`](references/quality-and-release.md) for CI, tests, packaging, staging, and releases, including real PHP-FPM characterization before changing post-response delivery.
    - [`references/logging.md`](references/logging.md) for structured events, privacy, retention, diagnostics, correlation IDs, and operational review.
    - If identity migration documentation exists on the active 1.3 development branch, read it completely before migration, merge, resume, or rollback work.
 3. Classify the request as read-only review, diagnosis, implementation, migration, release, or production deployment. Permission for one class does not authorize another.

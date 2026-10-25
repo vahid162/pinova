@@ -85,6 +85,8 @@ php_admin_value[disable_functions] = ${disabled}
 EOF
 done
 
+# PHP variables must remain literal until the PHP process evaluates them.
+# shellcheck disable=SC2016
 listen_port="$(php -r '$s = stream_socket_server("tcp://127.0.0.1:0"); if (false === $s) { exit(1); } echo parse_url("tcp://" . stream_socket_get_name($s, false), PHP_URL_PORT);')"
 cat > "${work_dir}/nginx.conf" <<EOF
 daemon off;

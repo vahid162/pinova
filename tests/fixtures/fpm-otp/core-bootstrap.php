@@ -25,7 +25,7 @@ define( 'WP_INSTALLING', false );
 
 foreach ( [
 	'version.php', 'compat.php', 'plugin.php', 'load.php',
-	'class-wp-object-cache.php', 'cache.php', 'functions.php', 'formatting.php',
+	'class-wp-object-cache.php', 'class-wp-list-util.php', 'cache.php', 'functions.php', 'formatting.php',
 	'class-wp-error.php', 'pomo/translations.php', 'l10n.php', 'kses.php', 'link-template.php',
 	'class-wp-http-response.php', 'rest-api/class-wp-rest-response.php',
 	'rest-api/class-wp-rest-request.php', 'rest-api/class-wp-rest-server.php', 'rest-api.php',

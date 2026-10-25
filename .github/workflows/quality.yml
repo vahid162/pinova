@@ -451,6 +451,7 @@ jobs:
         env:
           FPM_PHP_VERSION: ${{ matrix.php }}
         run: |
+          sudo add-apt-repository --yes ppa:ondrej/php
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends "php${FPM_PHP_VERSION}-fpm" nginx
           mkdir -p "$(dirname "${PINOVA_FPM_WORDPRESS_DIR}")"

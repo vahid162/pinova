@@ -408,8 +408,52 @@ try {
         receipt.profile.php_fpm = warm[0].headers['x-pinova-fixture-php'];
     }
     await quiescent();
+
+    // Ordinary-page warmup does not load the authentication, purpose-denial,
+    // native-session and plugin login-hook paths. Warm the same completed OFF
+    // paths on the entire request pool before freezing even the idle baseline;
+    // otherwise later OFF verification alone can exceed that cold RSS limit.
+    phase = 'auth_prewarm';
+    ensure(readFileSync(path.join(root, 'mode'), 'utf8').trim() === 'off',
+        'Authentication prewarm must retain ordinary queued delivery.');
+    const beforeAuthRss = processSample().reduce((sum, worker) => sum + worker.rss, 0);
+    const warmFlows = [];
+    for (let index = 0; index < 10; index++) {
+        warmFlows.push(await issue(40 + index, `prewarm-auth-${index + 1}`));
+    }
+    await drainDue('prewarm-auth-worker');
+    await quiescent();
+    const poolPids = new Set(processSample().map(worker => worker.pid));
+    for (const flow of warmFlows) {
+        const delivered = await inspect(flow);
+        const attempts = records.filter(record => record.case === flow.label);
+        ensure(delivered.rows === 1 && delivered.purpose === 'login' && delivered.otp_expiry === delivered.expiry &&
+            delivered.accepted_channels.length === 1 && delivered.accepted_channels[0] === 'sms' &&
+            attempts.length === 1 && attempts[0].accepted !== null && !poolPids.has(attempts[0].pid),
+        'Authentication prewarm did not complete once through the real existing CLI.');
+    }
+    await Promise.all(warmFlows.map(flow => verifyFlow(flow)));
+    await quiescent();
+    const verificationWorkers = new Set(events().filter(event => event.event === 'request_start' &&
+        /^prewarm-auth-[0-9]+-verify$/.test(event.case) && poolPids.has(event.pid)).map(event => event.pid));
+    ensure(verificationWorkers.size === receipt.limits.fpm_children,
+        'Authentication prewarm did not exercise successful native proof verification across the full request pool.');
+    const stabilizationRss = [processSample().reduce((sum, worker) => sum + worker.rss, 0)];
+    for (let round = 0; round < 2; round++) {
+        const settled = await Promise.all(Array.from({ length: 10 }, (_, index) => ordinary(index, 'prewarm-settle')));
+        ensure(settled.every(response => response.status === 200), 'Post-authentication ordinary-page stabilization failed.');
+        await quiescent();
+        stabilizationRss.push(processSample().reduce((sum, worker) => sum + worker.rss, 0));
+    }
     const cooldownMs = await headroom();
-    receipt.preflight = { admission_guard_satisfied: true, cooldown_ms: cooldownMs, warmed_workers: processSample().length };
+    receipt.preflight = { admission_guard_satisfied: true, cooldown_ms: cooldownMs, warmed_workers: processSample().length,
+        authentication_prewarm: { mode: 'off', completed_nonbillable_flows: warmFlows.length,
+            existing_cli_deliveries: warmFlows.length, purpose_mismatch_denials: warmFlows.length,
+            successful_native_proof_verifications: warmFlows.length, verification_request_workers: verificationWorkers.size,
+            retained_rss_before_auth_kib: beforeAuthRss, retained_rss_after_auth_and_ordinary_sweeps_kib: stabilizationRss,
+            ordinary_stabilization_sweeps: 2, ordinary_requests_per_sweep: 10,
+            measurement_boundary: 'completed_before_all_off_baselines_and_all_on_candidates' } };
+    tests.push('completed_off_authentication_and_purpose_paths_prewarmed_across_full_request_pool');
 
     function fastTiming(flow) {
         const providerRecord = records.find(record => record.case === flow.label);

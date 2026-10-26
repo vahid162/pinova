@@ -187,7 +187,14 @@ async function site(input) {
     return JSON.parse(lines[0].slice('PINOVA_FULL_STACK_RESULT='.length));
 }
 async function runWorker(label = 'fallback') {
+    const startedInWindow = measuring;
+    const started = now();
     await cli(['pinova', 'otp', 'run'], { label });
+    if (startedInWindow) {
+        ensure(measuring, 'A controlled CLI opportunity outlived its measured resource window.');
+        measuredRunnerInvocations++;
+        measuredRunnerIntervals.push({ label, started, completed: now() });
+    }
 }
 async function drainDue(label) {
     for (let attempt = 0; attempt < 20; attempt++) {
@@ -236,6 +243,8 @@ function processSample() {
 let measuring = false;
 let samples = [];
 let measuredCli = [];
+let measuredRunnerInvocations = 0;
+let measuredRunnerIntervals = [];
 let monitor;
 let statusMonitor;
 let statusBusy = false;
@@ -244,6 +253,8 @@ let statusError = false;
 function beginMeasure(initialStatus) {
     samples = [{ at: now(), workers: processSample() }];
     measuredCli = [];
+    measuredRunnerInvocations = 0;
+    measuredRunnerIntervals = [];
     statusSamples = [{ at: now(), active: initialStatus['active processes'], queue: initialStatus['listen queue'], reached: initialStatus['max children reached'] }];
     statusError = false;
     measuring = true;
@@ -286,6 +297,8 @@ async function endMeasure() {
         fpm_cpu_seconds: fpmCpu, measured_cli_cpu_seconds: cliCpu, total_php_cpu_seconds: fpmCpu + cliCpu,
         sampled_fpm_active_worker_seconds: fpmWorkerSeconds, measured_cli_wall_seconds: cliWall,
         total_sampled_active_worker_seconds: fpmWorkerSeconds + cliWall,
+        measured_cli_invocations: measuredCli.length, measured_runner_invocations: measuredRunnerInvocations,
+        measured_observation_cli_invocations: measuredCli.length - measuredRunnerInvocations,
         measured_cli_max_rss_kib: Math.max(0, ...measuredCli.map(timing => timing.max_rss_kib)),
         peak_sampled_worker_rss_kib: peakWorkerRss, peak_sampled_worker_pss_kib: peakWorkerPss,
         retained_worker_rss_kib: retained, retained_worker_pss_kib: retainedPss,
@@ -378,6 +391,7 @@ let receipt = {
     isolation: 'fresh_loopback_only_network_namespace_and_run_owned_unix_socket_database',
     limits: { fpm_children: 10, fast_tails: 2, provider_budget_seconds: 8, normal_provider_delay_ms: 200,
         slow_provider_delay_ms: 6000, normal_flows_per_resource_variant: 10,
+        controlled_existing_cli_opportunities: { idle: 1, normal: 10, slow: 1, concurrent: 1 },
         fixed_resource_windows_ms: { idle: 20000, slow: 24000, concurrent: 32000 }, process_sample_interval_ms: 40, status_interval_ms: 125 },
     tests,
 };
@@ -494,6 +508,13 @@ try {
                 if (mode === 'off') await runWorker(label);
                 await until(() => records.some(record => record.case === label && record.accepted !== null), 'Expected provider acceptance missing.');
                 await quiescent();
+                if (mode === 'on') {
+                    const attempts = records.filter(record => record.case === label).length;
+                    await runWorker(label);
+                    await quiescent();
+                    ensure(attempts === 1 && records.filter(record => record.case === label).length === attempts,
+                        'The retained CLI opportunity resent a completed fast flow.');
+                }
             }
         } else {
             const count = kind === 'idle' ? 0 : kind === 'slow' ? 1 : 3;
@@ -511,16 +532,13 @@ try {
                 ensure(queued.rows === 0 && queued.queue_ready && queued.queue_encrypted && queued.scheduled,
                     'Capacity overflow did not preserve untouched acknowledged durable work.');
             }
-            if (count > 0) {
-                // The baseline completes the same work through the real existing
-                // runner. The candidate runner races both live fast claims and
-                // processes overflow. All CLI PHP cost in this window is counted.
-                if (mode === 'off' || kind === 'concurrent') {
-                    // Attach rejection immediately while ordinary traffic is in
-                    // progress, preserving the sanitized failure receipt.
-                    worker = runWorker(`${mode}-${kind}-worker`).then(() => null, error => error);
-                }
-            }
+            // The existing runner remains unconditional in production. Mirror
+            // one controlled opportunity in both fixed-window variants: empty
+            // for idle, racing the live fast claim for ON slow, and handling
+            // overflow alongside both live fast claims for ON concurrent.
+            // Attach rejection while ordinary traffic is in progress so failure
+            // still produces its sanitized receipt. This is not cron cadence.
+            worker = runWorker(`${mode}-${kind}-worker`).then(() => null, error => error);
             const duration = receipt.limits.fixed_resource_windows_ms[kind];
             // Equal sample count and fixed deadlines per variant include mixed
             // ordinary traffic while slow/over-capacity delivery is still live.
@@ -544,6 +562,9 @@ try {
             await sleep(Math.max(0, windowStart + duration - performance.now()));
         }
         const resources = await endMeasure();
+        const expectedRunnerOpportunities = receipt.limits.controlled_existing_cli_opportunities[kind];
+        ensure(resources.measured_runner_invocations === expectedRunnerOpportunities,
+            'Measured workload did not complete its predetermined existing CLI opportunities.');
         const after = await site({ action: 'stats' });
         for (const flow of flows) {
             const result = await inspect(flow);
@@ -554,6 +575,12 @@ try {
             await verifyFlow(flow);
         }
         const timings = mode === 'on' ? flows.slice(0, kind === 'concurrent' ? 2 : flows.length).map(fastTiming) : [];
+        if (mode === 'on' && kind === 'slow') {
+            const providerRecord = records.find(record => record.case === flows[0].label);
+            const opportunity = measuredRunnerIntervals.find(interval => interval.label === `${mode}-${kind}-worker`);
+            ensure(opportunity && opportunity.started >= providerRecord.entered && opportunity.completed < providerRecord.accepted,
+            'The controlled CLI opportunity did not complete while the slow originating fast claim was live.');
+        }
         let maximumOriginatingFastTails;
         if (mode === 'on' && kind === 'concurrent') {
             const pids = new Set(timings.map((_, index) => records.find(record => record.case === flows[index].label).pid));
@@ -578,6 +605,10 @@ try {
             ensure(maximumOriginatingFastTails === 2, 'Observed originating FPM provider concurrency differs from its two-slot limit.');
         }
         return { resources, ordinary_p95_ms: percentile(pageTimes, 0.95), ordinary_samples_ms: pageTimes, fast_timings: timings,
+            controlled_cli_opportunities: { predetermined: expectedRunnerOpportunities, completed: resources.measured_runner_invocations,
+                placement: kind === 'normal' ? mode === 'off' ? 'after_each_issue_and_page_to_deliver_queued_flow' :
+                    'after_each_fast_flow_quiescence_with_no_resend' : 'inside_fixed_window_before_mixed_ordinary_samples',
+                timing_model: 'controlled_opportunities_not_actual_cron_cadence' },
             maximum_originating_fast_provider_tails: maximumOriginatingFastTails,
             db_statement_and_row_deltas: dbDelta(before, after), rows_created: after.otp_rows - before.otp_rows, flows };
     }
@@ -611,6 +642,9 @@ try {
         candidate[kind] = result;
         receipt.candidate[kind] = { ...result, flows: undefined };
         const gate = thresholds[kind];
+        ensure(result.resources.measured_runner_invocations === baseline[kind].resources.measured_runner_invocations &&
+            result.resources.measured_observation_cli_invocations === baseline[kind].resources.measured_observation_cli_invocations,
+        'Comparable resource windows used different runner or observation CLI opportunity counts.');
         ensure(result.resources.total_php_cpu_seconds <= gate.total_php_cpu_seconds, 'Candidate exceeded frozen per-workload total PHP CPU gate.');
         ensure(result.resources.total_sampled_active_worker_seconds <= gate.total_sampled_active_worker_seconds,
             'Candidate occupied PHP workers beyond frozen per-workload headroom.');
@@ -627,7 +661,8 @@ try {
         overflow_recovered_once: true, independent_cli_live_race: true };
     tests.push('ten_baseline_real_cli_deliveries', 'ten_candidate_real_same_process_deliveries', 'signed_state_original_deadline_and_purpose',
         'purpose_mismatch_denials_and_valid_verifications', 'frozen_idle_normal_slow_and_concurrent_resource_limits',
-        'six_second_provider_http_nonblocking', 'two_fast_slots_overflow_ready_and_durable', 'independent_cli_live_claim_race_at_most_once');
+        'six_second_provider_http_nonblocking', 'two_fast_slots_overflow_ready_and_durable', 'independent_cli_live_claim_race_at_most_once',
+        'mirrored_measured_existing_cli_opportunities_and_completed_fast_flow_no_resend');
     phase = 'functional';
 
     // Equivalent eligible/missing/native-only public responses. Validate signed
@@ -740,7 +775,8 @@ try {
     receipt.provider = { attempts: records.length, peak_all_workers_including_cli: peakProvider,
         measured_workload_accepted: records.filter(record => /^(off|on)-/.test(record.case) && record.accepted !== null).length };
     receipt.measurement_limits = [
-        'Resource comparison excludes the minute scheduler wait: OFF uses an immediate independent existing CLI worker and includes its CPU/RSS.',
+        'OFF and ON have equal predetermined existing CLI opportunities: ten for normal, one each for idle, slow and concurrent; their PHP cost and all in-window observation CLI cost are included.',
+        'Controlled CLI opportunities exclude the real minute scheduler phase and cadence; the unchanged live runner cadence remains a staging and canary gate.',
         'RSS/PSS and FPM status are sampled; they are not allocator-accurate peaks. Occupancy integrates native FPM status through full quiescence plus measured CLI wall time.',
         'Early PHP shutdown markers are not request-end or post-response-tail duration evidence and are excluded from worker occupancy.',
         'DB counters include equal harness observation activity and are scoped to the disposable job database server; Redis is absent.',

@@ -248,11 +248,11 @@ class OTPService {
 
 	/** Deliver only after the public initiation response has been prepared. */
 	public static function deliver_queued( string $flow_id ): void {
-		$queued = null;
+		$queued   = null;
 		$deferred = false;
 		try {
 			$admission = OTPImmediateDelivery::admission( $flow_id );
-			$queued = null === $admission ? RateLimitService::claim_queued_otp( $flow_id ) : OTPQueueStore::claim_queued_otp( $flow_id, $admission );
+			$queued    = null === $admission ? RateLimitService::claim_queued_otp( $flow_id ) : OTPQueueStore::claim_queued_otp( $flow_id, $admission );
 			if ( null === $queued || $queued['deadline'] <= time() ) {
 				RateLimitService::observe_expired_queued_otp( $flow_id );
 				if ( null === $queued ) {

@@ -17,16 +17,16 @@ use WP_REST_Response;
 /** Optional request-local delivery after verified, successful native FPM completion. */
 final class OTPImmediateDelivery {
 	private const PROVIDER_BUDGET_SECONDS = 8;
-	private static bool $armed = false;
-	private static ?array $context = null;
-	private bool $valid = true;
-	private bool $post_dispatch = false;
-	private bool $pre_serve = false;
-	private bool $pre_echo = false;
-	private bool $body_closed = false;
-	private bool $late_closed = false;
-	private string $body = '';
-	private int $late_level = 0;
+	private static bool $armed            = false;
+	private static ?array $context        = null;
+	private bool $valid                   = true;
+	private bool $post_dispatch           = false;
+	private bool $pre_serve               = false;
+	private bool $pre_echo                = false;
+	private bool $body_closed             = false;
+	private bool $late_closed             = false;
+	private string $body                  = '';
+	private int $late_level               = 0;
 	private array $expected;
 
 	private function __construct( private string $flow_id, private WP_REST_Response $response, private WP_REST_Request $request ) {
@@ -115,13 +115,13 @@ final class OTPImmediateDelivery {
 
 	public function finish(): void {
 		try {
-			$error = error_get_last();
-			$fatal = null !== $error && in_array( $error['type'], [ E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR ], true );
-			$status = ob_get_status();
-			$observer = ( $status['name'] ?? '' ) === self::class . '::observe_late';
+			$error    = error_get_last();
+			$fatal    = null !== $error && in_array( $error['type'], [ E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR ], true );
+			$status   = ob_get_status();
+			$observer = self::class . '::observe_late' === ( $status['name'] ?? '' );
 			if ( ! $this->valid || ! $this->post_dispatch || ! $this->pre_serve || ! $this->pre_echo || ! $this->body_closed
-				|| $this->late_closed || ! $observer || $this->late_level !== ob_get_level() || '' !== ob_get_contents()
-				|| $fatal || 200 !== http_response_code() || ! $this->headers_are_healthy() || $this->expected !== json_decode( $this->body, true ) ) {
+				|| $this->late_closed || ! $observer || ob_get_level() !== $this->late_level || '' !== ob_get_contents()
+				|| $fatal || 200 !== http_response_code() || ! $this->headers_are_healthy() || json_decode( $this->body, true ) !== $this->expected ) {
 				return;
 			}
 			ob_end_flush();
@@ -140,7 +140,7 @@ final class OTPImmediateDelivery {
 				$json = 1 === preg_match( '/\AContent-Type:\s*application\/json(?:\s*;|\s*\z)/i', $header );
 			} elseif ( 0 === stripos( $header, 'Content-Length:' ) ) {
 				$value = trim( substr( $header, 15 ) );
-				if ( ! ctype_digit( $value ) || (int) $value !== strlen( $this->body ) ) {
+				if ( ! ctype_digit( $value ) || strlen( $this->body ) !== (int) $value ) {
 					return false;
 				}
 			} elseif ( 0 === stripos( $header, 'Content-Encoding:' ) && 'identity' !== strtolower( trim( substr( $header, 17 ) ) ) ) {
@@ -159,7 +159,12 @@ final class OTPImmediateDelivery {
 		if ( null === $lease ) {
 			return;
 		}
-		self::$context = [ 'flow' => $flow_id, 'lease' => $lease, 'deadline' => microtime( true ) + self::PROVIDER_BUDGET_SECONDS, 'attempted' => false ];
+		self::$context = [
+			'flow'      => $flow_id,
+			'lease'     => $lease,
+			'deadline'  => microtime( true ) + self::PROVIDER_BUDGET_SECONDS,
+			'attempted' => false,
+		];
 		try {
 			OTPService::deliver_queued( $flow_id );
 		} finally {
@@ -173,7 +178,8 @@ final class OTPImmediateDelivery {
 		if ( 'Linux' !== PHP_OS_FAMILY || ! function_exists( 'sys_getloadavg' ) ) {
 			return false;
 		}
-		$load = sys_getloadavg();
+		$load   = sys_getloadavg();
+		// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Bounded local procfs observation; unavailable pressure data silently retains cron.
 		$memory = @file_get_contents( '/proc/meminfo', false, null, 0, 8192 );
 		return self::headroom_is_sufficient( $memory, $load );
 	}
@@ -230,7 +236,7 @@ final class OTPImmediateDelivery {
 		}
 		$configured = ltrim( $configured, '\\' );
 		foreach ( [ MeliPayamak::class, MaxSMS::class, PanelChi::class ] as $class ) {
-			if ( $configured === $class || $configured === substr( $class, strrpos( $class, '\\' ) + 1 ) ) {
+			if ( $configured === $class || substr( $class, strrpos( $class, '\\' ) + 1 ) === $configured ) {
 				return new $class();
 			}
 		}

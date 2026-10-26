@@ -37,6 +37,7 @@ final class OTPImmediateDeliveryIntegrationTest extends WP_UnitTestCase {
 		$this->delay = 0;
 		$this->expire_after_provider = false;
 		$this->timeout = false;
+		UnboundedImmediateGateway::$constructions = 0;
 		OTP::query()->delete();
 		update_option( 'pinova_sms', [ 'gateway' => 'MeliPayamak' ] );
 		update_option( 'pinova_gateway_melipayamak', [ 'username' => 'synthetic', 'password' => 'synthetic' ] );
@@ -91,9 +92,8 @@ final class OTPImmediateDeliveryIntegrationTest extends WP_UnitTestCase {
 		$this->dispatch( $email );
 		self::assertSame( $before, $this->row( $email ) );
 		$flow = $this->reserve( '+989120000113' );
-		update_option( 'pinova_sms', [ 'gateway' => UnboundedImmediateGateway::class ] );
 		$before = $this->row( $flow );
-		$this->dispatch( $flow );
+		$this->with_gateway( UnboundedImmediateGateway::class, fn() => $this->dispatch( $flow ) );
 		self::assertSame( $before, $this->row( $flow ) );
 		self::assertSame( 0, UnboundedImmediateGateway::$constructions, 'Unsupported constructors must not execute during fast admission.' );
 		self::assertSame( 0, $this->calls );
@@ -101,12 +101,10 @@ final class OTPImmediateDeliveryIntegrationTest extends WP_UnitTestCase {
 
 	public function test_only_exact_native_gateway_names_admit_http_transports(): void {
 		foreach ( [ 'MeliPayamak', '\\Pinova\\Gateways\\MaxSMS', 'Pinova\\Gateways\\PanelChi' ] as $name ) {
-			update_option( 'pinova_sms', [ 'gateway' => $name ] );
-			self::assertInstanceOf( \Pinova\Gateways\BaseGateway::class, OTPImmediateDelivery::bounded_gateway() );
+			$this->with_gateway( $name, static fn() => self::assertInstanceOf( \Pinova\Gateways\BaseGateway::class, OTPImmediateDelivery::bounded_gateway() ) );
 		}
 		foreach ( [ 'PWSMS', UnboundedImmediateGateway::class, 'missing', null, [] ] as $name ) {
-			update_option( 'pinova_sms', [ 'gateway' => $name ] );
-			self::assertNull( OTPImmediateDelivery::bounded_gateway() );
+			$this->with_gateway( $name, static fn() => self::assertNull( OTPImmediateDelivery::bounded_gateway() ) );
 		}
 		self::assertSame( 0, UnboundedImmediateGateway::$constructions );
 	}
@@ -336,6 +334,17 @@ final class OTPImmediateDeliveryIntegrationTest extends WP_UnitTestCase {
 		self::assertGreaterThan( 0, $this->timeouts[1] );
 		self::assertLessThan( $this->timeouts[0], $this->timeouts[1] );
 		self::assertLessThanOrEqual( 8, $this->timeouts[0] );
+	}
+
+	/** Simulate option reads without invoking the unrelated settings-save hook. */
+	private function with_gateway( $gateway, callable $operation ): mixed {
+		$option = static fn(): array => [ 'gateway' => $gateway ];
+		add_filter( 'pre_option_pinova_sms', $option );
+		try {
+			return $operation();
+		} finally {
+			remove_filter( 'pre_option_pinova_sms', $option );
+		}
 	}
 
 	private function reserve( string $identifier ): string {

@@ -374,7 +374,7 @@ final class OTPQueueStore {
 		} elseif ( 'processing' === $stored || str_starts_with( $stored, 'reserved:' ) || str_starts_with( $stored, 'cancelled:' ) || 'delivered' === $stored ) {
 			return null;
 		}
-		$cipher = str_starts_with( $payload, 'ready:' ) ? substr( $payload, 6 ) : $payload;
+		$cipher  = str_starts_with( $payload, 'ready:' ) ? substr( $payload, 6 ) : $payload;
 		$decoded = null;
 		if ( null !== $admission ) {
 			$decoded = self::decode_queued_payload( $cipher, $flow_id, $row['reset_at'] );
@@ -394,8 +394,12 @@ final class OTPQueueStore {
 		if ( 1 !== $claimed ) {
 			return null;
 		}
-		self::$claim_snapshots[ $flow_id ] = [ 'payload' => $stored, 'updated_at' => $row['updated_at'], 'connection' => $connection ];
-		$decoded = $decoded ?? self::decode_queued_payload( $cipher, $flow_id, $row['reset_at'] );
+		self::$claim_snapshots[ $flow_id ] = [
+			'payload'    => $stored,
+			'updated_at' => $row['updated_at'],
+			'connection' => $connection,
+		];
+		$decoded                           = $decoded ?? self::decode_queued_payload( $cipher, $flow_id, $row['reset_at'] );
 		if ( null === $decoded ) {
 			self::finish_queued_otp( $flow_id, $claim_token );
 			unset( self::$claim_snapshots[ $flow_id ] );
@@ -424,11 +428,11 @@ final class OTPQueueStore {
 		}
 
 		return [
-			'user_id'     => $data[3] ?? null,
-			'identifier'  => $data[0],
-			'purpose'     => $data[1],
-			'ip'          => $data[2],
-			'deadline'    => (int) strtotime( $reset_at . ' UTC' ),
+			'user_id'    => $data[3] ?? null,
+			'identifier' => $data[0],
+			'purpose'    => $data[1],
+			'ip'         => $data[2],
+			'deadline'   => (int) strtotime( $reset_at . ' UTC' ),
 		];
 	}
 
@@ -440,10 +444,16 @@ final class OTPQueueStore {
 			if ( null === $snapshot || ! str_starts_with( $snapshot['payload'], 'ready:' ) || ! self::owns_queued_claim( $flow_id, $claim_token ) ) {
 				return false;
 			}
-			$written = $wpdb->query( $wpdb->prepare(
-				'UPDATE %i SET `payload` = %s, `updated_at` = %s WHERE `scope` = %s AND `payload` = %s',
-				$wpdb->prefix . 'pinova_rate_limits', $snapshot['payload'], $snapshot['updated_at'], $flow_id, 'processing:' . $claim_token . ':' . $snapshot['payload']
-			) );
+			$written = $wpdb->query(
+				$wpdb->prepare(
+					'UPDATE %i SET `payload` = %s, `updated_at` = %s WHERE `scope` = %s AND `payload` = %s',
+					$wpdb->prefix . 'pinova_rate_limits',
+					$snapshot['payload'],
+					$snapshot['updated_at'],
+					$flow_id,
+					'processing:' . $claim_token . ':' . $snapshot['payload']
+				)
+			);
 			return 1 === $written;
 		} finally {
 			self::unlock_claim( $flow_id, $claim_token );
@@ -465,13 +475,16 @@ final class OTPQueueStore {
 	public static function immediate_claim_is_active( string $flow_id, string $claim_token, array $lease ): bool {
 		global $wpdb;
 		$connection = self::$claim_snapshots[ $flow_id ]['connection'] ?? '';
-		if ( '' === $connection || $connection !== ( $lease['connection'] ?? null ) || ( self::$held_claims[ $flow_id ] ?? null ) !== $claim_token ) {
+		if ( '' === $connection || ( $lease['connection'] ?? null ) !== $connection || ( self::$held_claims[ $flow_id ] ?? null ) !== $claim_token ) {
 			return false;
 		}
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
 				'SELECT CONNECTION_ID() AS connection_id, IS_USED_LOCK(%s) AS immediate_slot_holder, IS_USED_LOCK(%s) AS flow_holder, `payload` FROM %i WHERE `scope` = %s AND `reset_at` > UTC_TIMESTAMP() LIMIT 2',
-				$lease['name'], 'pinova_otp_' . $flow_id, $wpdb->prefix . 'pinova_rate_limits', $flow_id
+				$lease['name'],
+				'pinova_otp_' . $flow_id,
+				$wpdb->prefix . 'pinova_rate_limits',
+				$flow_id
 			),
 			ARRAY_A
 		);
@@ -491,7 +504,7 @@ final class OTPQueueStore {
 			return null;
 		}
 		$prefix = 'pinova_otp_fast_' . substr( hash( 'sha256', DB_NAME . ':' . $wpdb->prefix ), 0, 24 );
-		$names = [ $prefix . '_0', $prefix . '_1' ];
+		$names  = [ $prefix . '_0', $prefix . '_1' ];
 		foreach ( $names as $name ) {
 			$holder = $wpdb->get_var( $wpdb->prepare( 'SELECT IS_USED_LOCK(%s)', $name ) );
 			if ( $wpdb->last_error || $connection === (string) $holder ) {
@@ -504,7 +517,10 @@ final class OTPQueueStore {
 				return null;
 			}
 			if ( '1' === (string) $acquired ) {
-				$lease = [ 'name' => $name, 'connection' => $connection ];
+				$lease = [
+					'name'       => $name,
+					'connection' => $connection,
+				];
 				if ( self::owns_immediate_slot( $lease ) ) {
 					return $lease;
 				}

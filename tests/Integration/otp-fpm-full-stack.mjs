@@ -1,7 +1,7 @@
 /** Actual WordPress/plugin/FPM acceptance. Only run through the guarded shell entrypoint. */
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer, request } from 'node:http';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -58,12 +58,24 @@ const mobileCases = new Map();
 const delays = new Map();
 const codes = new Map();
 const tests = [];
+const httpDiagnostics = [];
+let phase = 'bootstrap';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const now = () => Date.now() / 1000;
 const mobile = index => `0910000${String(index).padStart(4, '0')}`;
 const providerMobile = index => mobile(index).replace(/^0/, '+98');
 
-function http(url, { body, label = 'ordinary', source = 120, headers = {}, method = body ? 'POST' : 'GET' } = {}) {
+function sanitizedReceipt(name, value) {
+    ensure(['frozen-resource-gates.json', 'full-stack-result.json'].includes(name), 'Unexpected sanitized receipt target.');
+    const target = path.join(receiptRoot, name);
+    writeFileSync(target, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
+    // The shell's private umask also applies to Node's requested creation mode.
+    // Widen only these allowlisted, sanitized receipts, never logs or WP config.
+    chmodSync(target, 0o644);
+}
+
+function http(url, { body, label = 'ordinary', source = 120, headers = {}, method = body ? 'POST' : 'GET',
+    category = new URL(url).pathname === '/fpm-status' ? 'fpm_status' : body ? 'authentication' : 'ordinary', redirects = 0 } = {}) {
     const started = performance.now();
     return new Promise((resolve, reject) => {
         const serialized = body === undefined ? undefined : JSON.stringify(body);
@@ -79,12 +91,33 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                 text += chunk;
                 if (text.length > 2 * 1024 * 1024) outgoing.destroy(new Error('Fixture response exceeds its bound.'));
             });
-            incoming.on('end', () => resolve({ status: incoming.statusCode, headers: incoming.headers, text,
-                ms: performance.now() - started, completed: now() }));
+            incoming.on('end', async () => {
+                httpDiagnostics.push({ phase, category, status: incoming.statusCode,
+                    selected_php: /^8\.3\.[0-9]+$/.test(incoming.headers['x-pinova-fixture-php'] || '') });
+                if (httpDiagnostics.length > 24) httpDiagnostics.shift();
+                if (redirects > 0 && [301, 302, 303, 307, 308].includes(incoming.statusCode)) {
+                    try {
+                        ensure(typeof incoming.headers.location === 'string', 'Ordinary-page redirect omitted its location.');
+                        const target = new URL(incoming.headers.location, url);
+                        ensure(method === 'GET' && body === undefined && target.origin === base && !target.username && !target.password,
+                            'Ordinary-page redirect escaped the exact fixture origin.');
+                        const next = await http(target.href, { label, source, headers, category, redirects: redirects - 1 });
+                        resolve({ ...next, ms: performance.now() - started });
+                    } catch (error) { reject(error); }
+                    return;
+                }
+                resolve({ status: incoming.statusCode, headers: incoming.headers, text,
+                    ms: performance.now() - started, completed: now() });
+            });
             incoming.on('error', reject);
         });
         outgoing.on('timeout', () => outgoing.destroy(new Error('Fixture HTTP deadline exceeded.')));
-        outgoing.on('error', reject);
+        outgoing.on('error', error => {
+            const codes = { ECONNREFUSED: 'connection_refused', ECONNRESET: 'connection_reset', ETIMEDOUT: 'timeout' };
+            httpDiagnostics.push({ phase, category, status: null, failure: codes[error.code] || 'transport_failure' });
+            if (httpDiagnostics.length > 24) httpDiagnostics.shift();
+            reject(error);
+        });
         outgoing.end(serialized);
     });
 }
@@ -118,7 +151,7 @@ const provider = createServer((incoming, outgoing) => {
 });
 
 let cliCounter = 0;
-async function cli(args, { input, label = 'observation', measured = false, sensitive = false } = {}) {
+async function cli(args, { input, label = 'observation', sensitive = false } = {}) {
     const id = ++cliCounter;
     const timeFile = path.join(privateRoot, `time-${id}.json`);
     const wpArgs = [process.env.PINOVA_FPM_WP_CLI, '--allow-root', `--path=${path.join(root, 'wordpress')}`, ...args];
@@ -138,7 +171,7 @@ async function cli(args, { input, label = 'observation', measured = false, sensi
             if (code !== 0) { reject(new Error(`Fixture CLI invocation ${id} failed; inspect private runner diagnostics.`)); return; }
             let timing;
             try { timing = JSON.parse(readFileSync(timeFile, 'utf8')); } catch { reject(new Error('Missing CLI resource receipt.')); return; }
-            if (measured && measuring) measuredCli.push(timing);
+            if (measuring) measuredCli.push(timing);
             resolve({ output, timing });
         });
         child.stdin.end(input === undefined ? '' : JSON.stringify(input));
@@ -153,8 +186,8 @@ async function site(input) {
     ensure(lines.length === 1, 'Missing finite full-stack observation receipt.');
     return JSON.parse(lines[0].slice('PINOVA_FULL_STACK_RESULT='.length));
 }
-async function runWorker(label = 'fallback', measured = false) {
-    await cli(['pinova', 'otp', 'run'], { label, measured });
+async function runWorker(label = 'fallback') {
+    await cli(['pinova', 'otp', 'run'], { label });
 }
 async function drainDue(label) {
     for (let attempt = 0; attempt < 20; attempt++) {
@@ -171,7 +204,7 @@ function events() {
 async function until(predicate, message, limit = 15000) {
     const end = performance.now() + limit;
     do { if (await predicate()) return; await sleep(40); } while (performance.now() < end);
-    throw new Error(message);
+    ensure(false, message);
 }
 async function quiescent() {
     await until(async () => {
@@ -250,10 +283,10 @@ async function endMeasure() {
     const retained = samples.at(-1).workers.reduce((sum, worker) => sum + worker.rss, 0);
     const retainedPss = samples.at(-1).workers.reduce((sum, worker) => sum + worker.pss, 0);
     return {
-        fpm_cpu_seconds: fpmCpu, delivery_cli_cpu_seconds: cliCpu, total_php_cpu_seconds: fpmCpu + cliCpu,
-        sampled_fpm_active_worker_seconds: fpmWorkerSeconds, delivery_cli_wall_seconds: cliWall,
+        fpm_cpu_seconds: fpmCpu, measured_cli_cpu_seconds: cliCpu, total_php_cpu_seconds: fpmCpu + cliCpu,
+        sampled_fpm_active_worker_seconds: fpmWorkerSeconds, measured_cli_wall_seconds: cliWall,
         total_sampled_active_worker_seconds: fpmWorkerSeconds + cliWall,
-        delivery_cli_max_rss_kib: Math.max(0, ...measuredCli.map(timing => timing.max_rss_kib)),
+        measured_cli_max_rss_kib: Math.max(0, ...measuredCli.map(timing => timing.max_rss_kib)),
         peak_sampled_worker_rss_kib: peakWorkerRss, peak_sampled_worker_pss_kib: peakWorkerPss,
         retained_worker_rss_kib: retained, retained_worker_pss_kib: retainedPss,
         max_active_workers: Math.max(...statusSamples.map(status => status.active)),
@@ -266,6 +299,29 @@ async function endMeasure() {
 function percentile(values, ratio) { return [...values].sort((a, b) => a - b)[Math.ceil(values.length * ratio) - 1]; }
 function dbDelta(before, after) {
     return Object.fromEntries(Object.entries(after.db).map(([key, value]) => [key, Number(value) - Number(before.db[key] || 0)]));
+}
+function finiteFailureSources() {
+    const sources = [];
+    const patterns = {
+        php_fatal: /(?:PHP Fatal error|Uncaught (?:Error|Exception|TypeError))/, php_memory_limit: /Allowed memory size .* exhausted/,
+        database_connection: /(?:Error establishing a database connection|Access denied for user|SQLSTATE\[HY000\].*\[2002\])/,
+        permission_denied: /Permission denied/, upstream_unavailable: /connect\(\).*failed|No such file or directory/,
+        upstream_timeout: /upstream timed out/, worker_terminated: /child .* exited on signal/,
+    };
+    for (const name of ['php.log', 'nginx.log', 'fpm.log', 'fpm-start.log', 'nginx-start.log']) {
+        const target = path.join(privateRoot, name);
+        if (!existsSync(target)) continue;
+        const descriptor = openSync(target, 'r');
+        let text;
+        try {
+            const size = fstatSync(descriptor).size;
+            const buffer = Buffer.alloc(Math.min(size, 65536));
+            const count = readSync(descriptor, buffer, 0, buffer.length, Math.max(0, size - buffer.length));
+            text = buffer.subarray(0, count).toString('utf8');
+        } finally { closeSync(descriptor); }
+        for (const [tag, pattern] of Object.entries(patterns)) if (pattern.test(text) && !sources.includes(tag)) sources.push(tag);
+    }
+    return sources;
 }
 function normalized(response) {
     ensure(response.status === 200, 'Public issuance status was unhealthy.');
@@ -285,14 +341,16 @@ async function issue(index, label, extra = {}, delay = 200) {
     delays.set(label, delay);
     const start = now();
     const response = await http(`${base}/?rest_route=/pinova/user/authenticate`, {
-        label, source: ++sequence, body: { identifier: mobile(index), ...extra }, headers: { Origin: base },
+        label, category: 'issuance', source: ++sequence, body: { identifier: mobile(index), ...extra }, headers: { Origin: base },
     });
     const value = normalized(response);
     return { ...value, label, start, ms: response.ms, completed: response.completed };
 }
 async function inspect(flow) {
     const result = await site({ action: 'inspect', jwt: flow.token });
-    ensure(result.signature_valid && result.expiry > now() && result.expiry <= flow.start + 181,
+    // WordPress boot precedes signed-state creation. Client request start is
+    // not the beginning of the unchanged server-side 180-second deadline.
+    ensure(result.signature_valid && result.expiry > now() && result.expiry <= (flow.completed ?? flow.start) + 181,
         'Real-plugin signed-state validation failed.');
     return result;
 }
@@ -317,10 +375,12 @@ let receipt = {
         php_cli: execFileSync('php', ['-r', 'echo PHP_VERSION;'], { encoding: 'utf8' }), redis: 'not_applicable_not_installed' },
     isolation: 'fresh_loopback_only_network_namespace_and_run_owned_unix_socket_database',
     limits: { fpm_children: 10, fast_tails: 2, provider_budget_seconds: 8, normal_provider_delay_ms: 200,
-        slow_provider_delay_ms: 6000, synthetic_flows_per_resource_variant: 10, process_sample_interval_ms: 40, status_interval_ms: 125 },
+        slow_provider_delay_ms: 6000, normal_flows_per_resource_variant: 10,
+        fixed_resource_windows_ms: { idle: 20000, slow: 24000, concurrent: 32000 }, process_sample_interval_ms: 40, status_interval_ms: 125 },
     tests,
 };
 try {
+    phase = 'readiness';
     await new Promise(resolve => provider.listen(providerPort, '127.0.0.1', resolve));
     await until(async () => {
         try { return (await http(`${base}/fpm-status?json`)).status === 200; } catch { return false; }
@@ -329,9 +389,17 @@ try {
     ensure(setupLine, 'Missing representative-profile setup receipt.');
     const pages = JSON.parse(setupLine.slice('PINOVA_FULL_STACK_RESULT='.length));
     receipt.profile.hpos_enabled = pages.hpos_enabled;
-    const pagePaths = [pages.ordinary, pages.shop, pages.cart];
+    const pagePaths = [pages.ordinary, pages.shop, pages.cart].map(value => {
+        const target = new URL(value, base);
+        ensure(target.origin === base && !target.username && !target.password, 'Setup page escaped the exact fixture origin.');
+        return target.href;
+    });
+    const ordinary = (index, label) => http(pagePaths[index % 3], {
+        label, category: ['ordinary', 'shop', 'cart'][index % 3], redirects: 3,
+    });
+    phase = 'warmup';
     for (let round = 0; round < 5; round++) {
-        const warm = await Promise.all(Array.from({ length: 8 }, (_, index) => http(base + pagePaths[index % 3], { label: 'warm' })));
+        const warm = await Promise.all(Array.from({ length: 8 }, (_, index) => ordinary(index, 'warm')));
         ensure(warm.every(response => response.status === 200), 'Representative-profile warm-up page failed.');
         ensure(warm.every(response => /^8\.3\.[0-9]+$/.test(response.headers['x-pinova-fixture-php'] || '')),
             'Actual full-stack FPM request is not running the selected PHP 8.3 runtime.');
@@ -341,24 +409,93 @@ try {
     const cooldownMs = await headroom();
     receipt.preflight = { admission_guard_satisfied: true, cooldown_ms: cooldownMs, warmed_workers: processSample().length };
 
-    async function workload(mode, firstIndex) {
+    function fastTiming(flow) {
+        const providerRecord = records.find(record => record.case === flow.label);
+        const marker = events().find(event => event.case === flow.label && event.event === 'finished');
+        const entry = events().find(event => event.case === flow.label && event.event === 'provider_enter');
+        const lookup = events().find(event => event.case === flow.label && event.event === 'account_lookup');
+        ensure(providerRecord && marker && entry && marker.pid === entry.pid && marker.pid === providerRecord.pid && marker.at <= entry.at,
+            'Actual same-process provider entry preceded native successful response completion.');
+        ensure(lookup && lookup.pid === marker.pid && lookup.at >= marker.at,
+            'Actual delivery-time account resolution preceded native successful response completion.');
+        ensure(entry.at - marker.at <= 1 && providerRecord.accepted - flow.start <= 15,
+            'Uncontended admitted flow missed the approved latency target.');
+        return { after_finish_ms: (entry.at - marker.at) * 1000, request_to_accept_ms: (providerRecord.accepted - flow.start) * 1000,
+            public_http_ms: flow.ms, same_pid: true };
+    }
+
+    async function workload(mode, kind, firstIndex) {
+        phase = `${mode}_${kind}`;
         writeFileSync(path.join(root, 'mode'), `${mode}\n`);
         await quiescent();
+        await drainDue(`${mode}-${kind}-pre-drain`);
+        await headroom();
         const before = await site({ action: 'stats' });
         const pageTimes = [];
+        const pageIntervals = [];
         const flows = [];
         const initialStatus = JSON.parse((await http(`${base}/fpm-status?json&full`)).text);
         beginMeasure(initialStatus);
-        for (let index = 0; index < 10; index++) {
-            const label = `${mode}-${index + 1}`;
-            const flow = await issue(firstIndex + index, label);
-            flows.push(flow);
-            const ordinary = await http(base + pagePaths[index % 3], { label: `${label}-page` });
-            ensure(ordinary.status === 200, 'Ordinary/WooCommerce page failed during delivery.');
-            pageTimes.push(ordinary.ms);
-            if (mode === 'off') await runWorker(label, true);
-            await until(() => records.some(record => record.case === label && record.accepted !== null), 'Expected provider acceptance missing.');
+        const windowStart = performance.now();
+        let worker;
+        if (kind === 'normal') {
+            for (let index = 0; index < 10; index++) {
+                const label = `${mode}-${kind}-${index + 1}`;
+                flows.push(await issue(firstIndex + index, label));
+                const page = await ordinary(index, `${label}-page`);
+                ensure(page.status === 200, 'Ordinary/WooCommerce page failed during delivery.');
+                pageTimes.push(page.ms);
+                if (mode === 'off') await runWorker(label);
+                await until(() => records.some(record => record.case === label && record.accepted !== null), 'Expected provider acceptance missing.');
+                await quiescent();
+            }
+        } else {
+            const count = kind === 'idle' ? 0 : kind === 'slow' ? 1 : 3;
+            for (let index = 0; index < count; index++) {
+                const label = `${mode}-${kind}-${index + 1}`;
+                const flow = await issue(firstIndex + index, label, {}, index < 2 ? 6000 : 200);
+                flows.push(flow);
+                if (mode === 'on' && index < 2) {
+                    ensure(flow.ms < 3000, 'Real public response waited for the slow provider.');
+                    await until(() => records.some(record => record.case === label), 'Intended FPM fast flow did not enter its provider.');
+                }
+            }
+            if (kind === 'concurrent') {
+                const queued = await inspect(flows[2]);
+                ensure(queued.rows === 0 && queued.queue_ready && queued.queue_encrypted && queued.scheduled,
+                    'Capacity overflow did not preserve untouched acknowledged durable work.');
+            }
+            if (count > 0) {
+                // The baseline completes the same work through the real existing
+                // runner. The candidate runner races both live fast claims and
+                // processes overflow. All CLI PHP cost in this window is counted.
+                if (mode === 'off' || kind === 'concurrent') {
+                    // Attach rejection immediately while ordinary traffic is in
+                    // progress, preserving the sanitized failure receipt.
+                    worker = runWorker(`${mode}-${kind}-worker`).then(() => null, error => error);
+                }
+            }
+            const duration = receipt.limits.fixed_resource_windows_ms[kind];
+            // Equal sample count and fixed deadlines per variant include mixed
+            // ordinary traffic while slow/over-capacity delivery is still live.
+            for (let index = 0; index < 12; index++) {
+                await sleep(Math.max(0, windowStart + 500 + index * 1000 - performance.now()));
+                const page = await ordinary(index, `${mode}-${kind}-page`);
+                ensure(page.status === 200, 'Ordinary/WooCommerce page failed in a fixed resource window.');
+                pageTimes.push(page.ms);
+                pageIntervals.push({ start: page.completed - page.ms / 1000, end: page.completed });
+            }
+            if (worker) { const failure = await worker; if (failure) throw failure; }
+            for (const flow of flows) await until(() => records.some(record => record.case === flow.label && record.accepted !== null),
+                'Comparable resource workload did not complete its provider work.');
+            if (count > 0) {
+                const completed = flows.map(flow => records.find(record => record.case === flow.label));
+                ensure(pageIntervals.some(page => completed.some(record => page.start < record.accepted && page.end > record.entered)),
+                    'Fixed resource window did not include ordinary traffic during live provider work.');
+            }
             await quiescent();
+            ensure(performance.now() - windowStart <= duration, 'Comparable resource workload exceeded its declared observation window.');
+            await sleep(Math.max(0, windowStart + duration - performance.now()));
         }
         const resources = await endMeasure();
         const after = await site({ action: 'stats' });
@@ -370,50 +507,77 @@ try {
             ensure(records.filter(record => record.case === flow.label).length === 1, 'A flow caused duplicate provider attempts.');
             await verifyFlow(flow);
         }
-        return { resources, ordinary_p95_ms: percentile(pageTimes, 0.95), ordinary_samples_ms: pageTimes,
+        const timings = mode === 'on' ? flows.slice(0, kind === 'concurrent' ? 2 : flows.length).map(fastTiming) : [];
+        let maximumOriginatingFastTails;
+        if (mode === 'on' && kind === 'concurrent') {
+            const pids = new Set(timings.map((_, index) => records.find(record => record.case === flows[index].label).pid));
+            ensure(pids.size === 2, 'Concurrent fast flows did not occupy independent FPM workers.');
+            const intervals = flows.slice(0, 2).map(flow => records.find(record => record.case === flow.label));
+            ensure(Math.max(...intervals.map(record => record.entered)) < Math.min(...intervals.map(record => record.accepted)),
+                'The resource window did not actually overlap two slow FPM provider tails.');
+            const overflow = records.find(record => record.case === flows[2].label);
+            ensure(!pids.has(overflow.pid) && overflow.entered < Math.min(...intervals.map(record => record.accepted)),
+                'The independent CLI did not actually race both live originating FPM claims.');
+            const marked = events();
+            const timeline = records.filter(record => flows.some(flow => flow.label === record.case) &&
+                marked.some(event => event.case === record.case && event.pid === record.pid && event.event === 'finished'))
+                .flatMap(record => [{ at: record.entered, delta: 1 }, { at: record.accepted, delta: -1 }])
+                .sort((left, right) => left.at - right.at || left.delta - right.delta);
+            let active = 0;
+            maximumOriginatingFastTails = 0;
+            for (const event of timeline) {
+                active += event.delta;
+                maximumOriginatingFastTails = Math.max(maximumOriginatingFastTails, active);
+            }
+            ensure(maximumOriginatingFastTails === 2, 'Observed originating FPM provider concurrency differs from its two-slot limit.');
+        }
+        return { resources, ordinary_p95_ms: percentile(pageTimes, 0.95), ordinary_samples_ms: pageTimes, fast_timings: timings,
+            maximum_originating_fast_provider_tails: maximumOriginatingFastTails,
             db_statement_and_row_deltas: dbDelta(before, after), rows_created: after.otp_rows - before.otp_rows, flows };
     }
 
-    const baseline = await workload('off', 1);
-    const thresholds = {
-        total_php_cpu_seconds: baseline.resources.total_php_cpu_seconds * 1.25,
-        ordinary_p95_ms: baseline.ordinary_p95_ms * 1.25 + 50,
-        peak_sampled_worker_rss_kib: baseline.resources.peak_sampled_worker_rss_kib + Math.max(32768, baseline.resources.peak_sampled_worker_rss_kib * 0.25),
-        retained_worker_rss_kib: baseline.resources.retained_worker_rss_kib + Math.max(65536, baseline.resources.retained_worker_rss_kib * 0.1),
-        active_workers: 8, listen_queue: 0, new_max_children_reached: 0,
-    };
+    const baseline = {};
+    const candidate = {};
+    const thresholds = {};
+    receipt.baseline = {};
+    for (const [kind, firstIndex] of [['idle', 1], ['normal', 1], ['slow', 31], ['concurrent', 33]]) {
+        const result = await workload('off', kind, firstIndex);
+        baseline[kind] = result;
+        receipt.baseline[kind] = { ...result, flows: undefined };
+        thresholds[kind] = {
+            total_php_cpu_seconds: result.resources.total_php_cpu_seconds * 1.25,
+            ordinary_p95_ms: result.ordinary_p95_ms * 1.25 + 50,
+            peak_sampled_worker_rss_kib: result.resources.peak_sampled_worker_rss_kib + Math.max(32768, result.resources.peak_sampled_worker_rss_kib * 0.25),
+            retained_worker_rss_kib: result.resources.retained_worker_rss_kib + Math.max(65536, result.resources.retained_worker_rss_kib * 0.1),
+            active_workers: 8, listen_queue: 0, new_max_children_reached: 0,
+        };
+    }
     // Freeze numeric limits before running candidate, never tune after observing it.
-    writeFileSync(path.join(receiptRoot, 'frozen-resource-gates.json'), JSON.stringify(thresholds, null, 2) + '\n', { mode: 0o644 });
-    receipt.baseline = { ...baseline, flows: undefined };
+    sanitizedReceipt('frozen-resource-gates.json', thresholds);
     receipt.resource_gates = thresholds;
     await headroom();
-    const candidate = await workload('on', 11);
-    receipt.candidate = { ...candidate, flows: undefined };
-    ensure(candidate.resources.total_php_cpu_seconds <= thresholds.total_php_cpu_seconds, 'Candidate exceeded frozen total PHP CPU gate.');
-    ensure(candidate.ordinary_p95_ms <= thresholds.ordinary_p95_ms, 'Candidate ordinary page latency regressed beyond frozen gate.');
-    ensure(candidate.resources.peak_sampled_worker_rss_kib <= thresholds.peak_sampled_worker_rss_kib, 'Candidate per-worker sampled RSS exceeded frozen gate.');
-    ensure(candidate.resources.retained_worker_rss_kib <= thresholds.retained_worker_rss_kib, 'Candidate retained PHP RSS exceeded frozen gate.');
-    for (const result of [baseline, candidate]) {
-        ensure(result.resources.max_active_workers <= thresholds.active_workers && result.resources.max_listen_queue === 0 &&
-            result.resources.max_children_reached_delta === 0, 'Representative workload saturated FPM.');
+    receipt.candidate = {};
+    for (const [kind, firstIndex] of [['idle', 11], ['normal', 11], ['slow', 32], ['concurrent', 36]]) {
+        const result = await workload('on', kind, firstIndex);
+        candidate[kind] = result;
+        receipt.candidate[kind] = { ...result, flows: undefined };
+        const gate = thresholds[kind];
+        ensure(result.resources.total_php_cpu_seconds <= gate.total_php_cpu_seconds, 'Candidate exceeded frozen per-workload total PHP CPU gate.');
+        ensure(result.ordinary_p95_ms <= gate.ordinary_p95_ms, 'Candidate ordinary page latency regressed beyond frozen per-workload gate.');
+        ensure(result.resources.peak_sampled_worker_rss_kib <= gate.peak_sampled_worker_rss_kib, 'Candidate per-worker sampled RSS exceeded frozen per-workload gate.');
+        ensure(result.resources.retained_worker_rss_kib <= gate.retained_worker_rss_kib, 'Candidate retained PHP RSS exceeded frozen per-workload gate.');
+        for (const measured of [baseline[kind], result]) {
+            ensure(measured.resources.max_active_workers <= gate.active_workers && measured.resources.max_listen_queue === 0 &&
+                measured.resources.max_children_reached_delta === 0, 'Representative workload saturated FPM.');
+        }
     }
-    const fastTiming = candidate.flows.map(flow => {
-        const providerRecord = records.find(record => record.case === flow.label);
-        const marker = events().find(event => event.case === flow.label && event.event === 'finished');
-        const entry = events().find(event => event.case === flow.label && event.event === 'provider_enter');
-        const lookup = events().find(event => event.case === flow.label && event.event === 'account_lookup');
-        ensure(marker && entry && marker.pid === entry.pid && marker.pid === providerRecord.pid && marker.at <= entry.at,
-            'Actual same-process provider entry preceded native successful response completion.');
-        ensure(lookup && lookup.pid === marker.pid && lookup.at >= marker.at,
-            'Actual delivery-time account resolution preceded native successful response completion.');
-        ensure(entry.at - marker.at <= 1 && providerRecord.accepted - flow.start <= 15,
-            'Normal uncontended flow missed the approved latency target.');
-        return { after_finish_ms: (entry.at - marker.at) * 1000, request_to_accept_ms: (providerRecord.accepted - flow.start) * 1000,
-            public_http_ms: flow.ms, same_pid: true };
-    });
-    receipt.normal_fast_timings = fastTiming;
+    receipt.normal_fast_timings = candidate.normal.fast_timings;
+    receipt.concurrency = { maximum_originating_fast_provider_tails: candidate.concurrent.maximum_originating_fast_provider_tails,
+        overflow_recovered_once: true, independent_cli_live_race: true };
     tests.push('ten_baseline_real_cli_deliveries', 'ten_candidate_real_same_process_deliveries', 'signed_state_original_deadline_and_purpose',
-        'twenty_purpose_mismatch_denials_and_valid_verifications', 'frozen_resource_limits');
+        'purpose_mismatch_denials_and_valid_verifications', 'frozen_idle_normal_slow_and_concurrent_resource_limits',
+        'six_second_provider_http_nonblocking', 'two_fast_slots_overflow_ready_and_durable', 'independent_cli_live_claim_race_at_most_once');
+    phase = 'functional';
 
     // Equivalent eligible/missing/native-only public responses. Validate signed
     // state and countdown before normalizing only legitimately fresh fields.
@@ -467,7 +631,7 @@ try {
     const mobileBody = JSON.parse(mobileResponse.text);
     ensure(mobileResponse.status === 200 && mobileBody.success === true && typeof mobileBody.data.jwt === 'string',
         'Authenticated mobile proof initiation failed.');
-    const mobileFlow = { token: mobileBody.data.jwt, start: mobileStart, label: 'mobile-proof' };
+    const mobileFlow = { token: mobileBody.data.jwt, start: mobileStart, completed: mobileResponse.completed, label: 'mobile-proof' };
     await quiescent();
     const mobileState = await inspect(mobileFlow);
     ensure(mobileState.rows === 1 && mobileState.purpose === 'verify_mobile' && mobileState.otp_expiry === mobileState.expiry,
@@ -479,46 +643,6 @@ try {
     ensure(mobileVerification.status === 200 && JSON.parse(mobileVerification.text).success === true,
         'Authenticated purpose-correct mobile proof verification failed.');
     tests.push('forgot_purpose_real_http', 'authenticated_mobile_request_and_verification_real_http');
-
-    const slow = await issue(23, 'slow', {}, 6000);
-    ensure(slow.ms < 3000, 'Real HTTP response waited for the slow provider.');
-    const duringSlow = await http(base + pages.shop, { label: 'slow-shop' });
-    ensure(duringSlow.status === 200, 'WooCommerce page failed during a slow FPM tail.');
-    await until(() => records.some(record => record.case === 'slow' && record.accepted !== null), 'Slow provider did not finish.');
-    await quiescent();
-    tests.push('six_second_provider_http_nonblocking');
-
-    // Remove already-completed one-shot callbacks via the existing runner, so
-    // the next independent CLI invocation actually encounters the live claims.
-    await drainDue('completed-flow-drain');
-
-    // Fill both fast slots, then prove overflow is still acknowledged, encrypted,
-    // scheduled and unclaimed. An independent real CLI races live HTTP delivery.
-    const first = await issue(24, 'concurrent-a', {}, 6000);
-    await until(() => records.some(record => record.case === first.label), 'First fast slot did not enter provider.');
-    const second = await issue(25, 'concurrent-b', {}, 6000);
-    await until(() => records.some(record => record.case === second.label), 'Second fast slot did not enter provider.');
-    const overflow = await issue(26, 'overflow');
-    const queued = await inspect(overflow);
-    ensure(queued.rows === 0 && queued.queue_ready && queued.queue_encrypted && queued.scheduled,
-        'Capacity overflow did not preserve an untouched acknowledged durable queue.');
-    const race = runWorker('live-race');
-    await race;
-    await quiescent();
-    await drainDue('overflow-recovery');
-    for (const flow of [first, second, overflow]) {
-        const observed = await inspect(flow);
-        ensure(records.filter(record => record.case === flow.label).length === 1 && observed.rows === 1 &&
-            observed.accepted_channels.includes('sms'), 'CLI/fast-path race duplicated or lost a flow.');
-    }
-    const concurrencyEvents = events().filter(event => ['concurrent-a', 'concurrent-b', 'overflow'].includes(event.case));
-    const ordered = concurrencyEvents.filter(event => ['provider_enter', 'provider_return'].includes(event.event)).sort((a, b) => a.at - b.at);
-    let activeFast = 0;
-    let peakFast = 0;
-    for (const event of ordered) { activeFast += event.event === 'provider_enter' ? 1 : -1; peakFast = Math.max(peakFast, activeFast); }
-    ensure(peakFast <= 2, 'More than two originating FPM fast tails reached the provider.');
-    receipt.concurrency = { maximum_originating_fast_provider_tails: peakFast, overflow_recovered_once: true, independent_cli_live_race: true };
-    tests.push('two_fast_slots_overflow_ready_and_durable', 'independent_cli_live_claim_race_at_most_once');
 
     // Time out after the real transport deadline, while the provider may still
     // accept. Recovery must retain the existing proof and must never resend.
@@ -550,20 +674,14 @@ try {
         'Fixture did not finish with quiescent workers and an empty FPM listen queue.');
     receipt.state = 'passed';
     receipt.provider = { attempts: records.length, peak_all_workers_including_cli: peakProvider,
-        normal_accepted: records.filter(record => /^(off|on)-/.test(record.case) && record.accepted !== null).length };
+        measured_workload_accepted: records.filter(record => /^(off|on)-/.test(record.case) && record.accepted !== null).length };
     receipt.measurement_limits = [
         'Resource comparison excludes the minute scheduler wait: OFF uses an immediate independent existing CLI worker and includes its CPU/RSS.',
-        'RSS/PSS and FPM status are sampled; they are not allocator-accurate peaks. Worker-seconds below use server markers.',
+        'RSS/PSS and FPM status are sampled; they are not allocator-accurate peaks. Occupancy integrates native FPM status through full quiescence plus measured CLI wall time.',
+        'Early PHP shutdown markers are not request-end or post-response-tail duration evidence and are excluded from worker occupancy.',
         'DB counters include equal harness observation activity and are scoped to the disposable job database server; Redis is absent.',
         'Native server response completion is established; remote browser packet ordering and physical SMS receipt are outside this fixture.',
     ];
-    receipt.worker_seconds = Object.fromEntries(['off', 'on'].map(mode => [mode,
-        records.filter(record => record.case.startsWith(`${mode}-`)).reduce((sum, record) => {
-            const matched = events().filter(event => event.case === record.case && event.pid === record.pid);
-            const start = matched.find(event => event.event === 'request_start');
-            const end = matched.find(event => event.event === 'request_end');
-            return sum + (start && end ? end.at - start.at : 0);
-        }, 0)]));
     process.stdout.write(`Full-stack FPM acceptance passed: ${tests.length} assertions/groups; receipt contains no OTPs or identifiers.\n`);
 } catch (error) {
     receipt.state = 'failed';
@@ -571,10 +689,13 @@ try {
     // only our finite assertions; no raw error, response or provider payload.
     receipt.failure = error?.fixtureAssertion === true ? error.message :
         'Full-stack fixture failed before a finite assertion; inspect private runner diagnostics.';
+    receipt.failure_phase = phase;
+    receipt.failure_sources = finiteFailureSources();
+    receipt.http_diagnostics = httpDiagnostics;
     process.stderr.write(`Full-stack FPM acceptance failed: ${receipt.failure}\n`);
     process.exitCode = 1;
 } finally {
-    writeFileSync(path.join(receiptRoot, 'full-stack-result.json'), JSON.stringify(receipt, null, 2) + '\n', { mode: 0o644 });
+    sanitizedReceipt('full-stack-result.json', receipt);
     for (const timer of pendingTimers) clearTimeout(timer);
     clearInterval(monitor);
     clearInterval(statusMonitor);

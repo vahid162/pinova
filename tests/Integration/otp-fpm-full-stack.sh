@@ -41,12 +41,14 @@ if [[ "${1:-}" != --isolated ]]; then
 		[[ -f "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}" && ! -L "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}" ]]
 		mysql_args=(--defaults-extra-file="${PINOVA_FPM_MYSQL_DEFAULTS_FILE}" "${mysql_args[@]}")
 	fi
-	if mysql "${mysql_args[@]}" -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='${database}'; SELECT User FROM mysql.user WHERE User='${database}'" | rg -q .; then
+	if mysql "${mysql_args[@]}" -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='${database}'; SELECT User FROM mysql.user WHERE User='${database}'" | grep -q .; then
 		printf 'Refusing to reuse an existing fixture database.\n' >&2
 		exit 1
 	fi
 	password="$(openssl rand -hex 24)"
 	# Both identifiers and password are constrained above; never print SQL/config.
+	# ShellCheck cannot follow this function's EXIT trap across the branch.
+	# shellcheck disable=SC2317
 	cleanup_database() {
 		local status=$?
 		trap - EXIT
@@ -81,7 +83,7 @@ fi
 
 [[ "$(cat "${run_root}/fixture-owned")" == "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" ]]
 ip link set lo up
-if ip -o link show | rg -v '^[0-9]+: lo:' | rg -q . || ip route show | rg -q .; then
+if ip -o link show | grep -Ev '^[0-9]+: lo:' | grep -q . || ip route show | grep -q .; then
 	printf 'Full-stack fixture requires a loopback-only network namespace.\n' >&2
 	exit 1
 fi

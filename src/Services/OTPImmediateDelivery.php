@@ -178,7 +178,7 @@ final class OTPImmediateDelivery {
 		if ( 'Linux' !== PHP_OS_FAMILY || ! function_exists( 'sys_getloadavg' ) ) {
 			return false;
 		}
-		$load   = sys_getloadavg();
+		$load = sys_getloadavg();
 		// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Bounded local procfs observation; unavailable pressure data silently retains cron.
 		$memory = @file_get_contents( '/proc/meminfo', false, null, 0, 8192 );
 		return self::headroom_is_sufficient( $memory, $load );

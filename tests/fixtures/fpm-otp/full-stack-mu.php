@@ -33,7 +33,7 @@ namespace {
 		if ( ! preg_match( '/\A[a-z][a-z0-9_-]{0,47}\z/D', $case ) ) {
 			$case = 'invalid';
 		}
-		$allowed = [ 'request_start', 'request_end', 'finished', 'account_lookup', 'provider_enter', 'provider_return', 'blocked_http', 'blocked_mail' ];
+		$allowed = [ 'request_start', 'early_shutdown', 'finished', 'account_lookup', 'provider_enter', 'provider_return', 'blocked_http', 'blocked_mail' ];
 		if ( ! in_array( $event, $allowed, true ) ) {
 			return;
 		}
@@ -42,7 +42,9 @@ namespace {
 	}
 
 	pinova_full_stack_marker( 'request_start' );
-	register_shutdown_function( static function (): void { pinova_full_stack_marker( 'request_end' ); } );
+	// Registered at MU bootstrap, before the production finalizer; this is not
+	// the end of a request or its post-response provider tail.
+	register_shutdown_function( static function (): void { pinova_full_stack_marker( 'early_shutdown' ); } );
 	add_filter( 'query', static function ( string $sql ): string {
 		global $wpdb;
 		// Observe the existing synthetic-mobile account-resolution query without

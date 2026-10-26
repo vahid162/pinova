@@ -25,6 +25,9 @@ switch ( $action ) {
 			throw new RuntimeException( 'The pinned representative plugins did not load.' );
 		}
 		update_option( 'users_can_register', 0 );
+		// Fresh WooCommerce installs may otherwise replace guest shop/cart pages.
+		update_option( 'woocommerce_coming_soon', 'no' );
+		update_option( 'woocommerce_store_pages_only', 'no' );
 		update_option( 'pinova_sms', [ 'gateway' => 'MeliPayamak', 'message_code' => '' ] );
 		update_option( 'pinova_gateway_melipayamak', [ 'username' => 'fixture-user', 'password' => 'fixture-secret', 'sender' => 'fixture-sender' ] );
 		update_option( 'pinova_logging', [ 'minimum_level' => 'info', 'retention_days' => 14 ] );
@@ -41,7 +44,7 @@ switch ( $action ) {
 		$product->set_regular_price( '10' );
 		$product->set_status( 'publish' );
 		$product->save();
-		$result = [ 'ordinary' => '/?page_id=' . $page, 'shop' => '/?post_type=product', 'cart' => '/?page_id=' . wc_get_page_id( 'cart' ), 'wordpress' => get_bloginfo( 'version' ), 'woocommerce' => WC_VERSION,
+		$result = [ 'ordinary' => get_permalink( $page ), 'shop' => get_permalink( wc_get_page_id( 'shop' ) ), 'cart' => get_permalink( wc_get_page_id( 'cart' ) ), 'wordpress' => get_bloginfo( 'version' ), 'woocommerce' => WC_VERSION,
 			'hpos_enabled' => \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled(),
 		];
 		break;

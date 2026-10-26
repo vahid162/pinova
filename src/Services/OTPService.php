@@ -8,6 +8,7 @@ use Pinova\Exceptions\AuthenticationPolicyException;
 use Pinova\Exceptions\ExpiredTokenException;
 use Pinova\Exceptions\BlockedException;
 use Pinova\Exceptions\OTPCompletionException;
+use Pinova\Exceptions\OTPImmediateDeliveryDeferredException;
 use Pinova\Exceptions\ProviderOutcomeUnknownException;
 use Pinova\Exceptions\RateLimitUnavailableException;
 use Pinova\Exceptions\SendOTPException;
@@ -191,6 +192,12 @@ class OTPService {
 		try {
 			$successful_channels = ChannelService::send( $otp, $code, $queue_claim_token );
 		} catch ( Throwable $e ) {
+			if ( $e instanceof OTPImmediateDeliveryDeferredException && OTPImmediateDelivery::is_active( $flow_id ) && ! OTPImmediateDelivery::provider_was_attempted() ) {
+				// Only this newly created, never-attempted record can be removed
+				// while restoring the exact encrypted reservation for cron.
+				$otp->delete();
+				throw $e;
+			}
 			$uncertain = null !== $queue_claim_token && ( ! $e instanceof SendOTPException || $e instanceof ProviderOutcomeUnknownException );
 			if ( $uncertain ) {
 				self::observe_delivery_skipped( (string) $otp->flow_id, 'provider_outcome_unknown' );
@@ -241,9 +248,11 @@ class OTPService {
 
 	/** Deliver only after the public initiation response has been prepared. */
 	public static function deliver_queued( string $flow_id ): void {
-		$queued = null;
+		$queued   = null;
+		$deferred = false;
 		try {
-			$queued = RateLimitService::claim_queued_otp( $flow_id );
+			$admission = OTPImmediateDelivery::admission( $flow_id );
+			$queued    = null === $admission ? RateLimitService::claim_queued_otp( $flow_id ) : OTPQueueStore::claim_queued_otp( $flow_id, $admission );
 			if ( null === $queued || $queued['deadline'] <= time() ) {
 				RateLimitService::observe_expired_queued_otp( $flow_id );
 				if ( null === $queued ) {
@@ -254,6 +263,7 @@ class OTPService {
 				}
 				return;
 			}
+			OTPImmediateDelivery::guard( $flow_id, $queued['claim_token'] );
 
 			// A repeated public request retains this flow; a successful delivery
 			// must never send a second OTP for it.
@@ -319,7 +329,20 @@ class OTPService {
 				self::observe_delivery_skipped( $flow_id, 'claim_unavailable' );
 				return;
 			}
-			self::create( $identifier, ChannelService::get_channels( $identifier ), $type, $user_id, true, $queued['deadline'], $flow_id, $queued['ip'], $queued['claim_token'] );
+			$channels = ChannelService::get_channels( $identifier );
+			OTPImmediateDelivery::guard( $flow_id, $queued['claim_token'], $channels );
+			self::create( $identifier, $channels, $type, $user_id, true, $queued['deadline'], $flow_id, $queued['ip'], $queued['claim_token'] );
+		} catch ( OTPImmediateDeliveryDeferredException $exception ) {
+			if ( null !== $queued && ! OTPImmediateDelivery::provider_was_attempted() ) {
+				// Never run finish() after an unattempted deferral: it consumes the
+				// durable fallback. A lost connection cannot restore another claim.
+				$deferred = true;
+				OTPQueueStore::defer_queued_otp( $flow_id, $queued['claim_token'] );
+			} elseif ( null !== $queued ) {
+				RateLimitService::retire_queued_otp( $flow_id );
+				self::observe_delivery_skipped( $flow_id, 'provider_outcome_unknown' );
+			}
+			unset( $exception );
 		} catch ( ProviderOutcomeUnknownException $exception ) {
 			RateLimitService::retire_queued_otp( $flow_id );
 			self::observe_delivery_skipped( $flow_id, 'provider_outcome_unknown' );
@@ -343,7 +366,7 @@ class OTPService {
 			// A queued delivery cannot change the response already sent to the caller.
 			unset( $throwable );
 		} finally {
-			if ( null !== $queued ) {
+			if ( null !== $queued && ! $deferred ) {
 				RateLimitService::finish_queued_otp( $flow_id, $queued['claim_token'] );
 			}
 		}

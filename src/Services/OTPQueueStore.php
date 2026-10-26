@@ -11,6 +11,8 @@ final class OTPQueueStore {
 	private const OTP_CLAIM_LEASE = 60;
 	/** @var array<string,string> */
 	private static array $held_claims = [];
+	/** @var array<string,array{payload:string,updated_at:string,connection:string}> */
+	private static array $claim_snapshots = [];
 
 	/**
 	 * Reserve a durable, opaque decoy flow for the same lifetime as a real OTP.
@@ -319,14 +321,17 @@ final class OTPQueueStore {
 		}
 	}
 
-	/** @return array{identifier:string,purpose:string,ip:string,deadline:int,claim_token:string,user_id:?int}|null */
-	public static function claim_queued_otp( string $flow_id ): ?array {
+	/**
+	 * @return array{identifier:string,purpose:string,ip:string,deadline:int,claim_token:string,user_id:?int}|null
+	 * @throws \Pinova\Exceptions\OTPImmediateDeliveryDeferredException Admission callbacks may defer before the claim is returned.
+	 */
+	public static function claim_queued_otp( string $flow_id, ?callable $admission = null ): ?array {
 		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) || ! self::lock_queued_otp( $flow_id ) ) {
 			return null;
 		}
 		$keep_lock = false;
 		try {
-			$result = self::claim_queued_otp_locked( $flow_id );
+			$result = self::claim_queued_otp_locked( $flow_id, $admission );
 			if ( null !== $result ) {
 				self::$held_claims[ $flow_id ] = $result['claim_token'];
 
@@ -341,7 +346,7 @@ final class OTPQueueStore {
 	}
 
 	/** @return array{identifier:string,purpose:string,ip:string,deadline:int,claim_token:string,user_id:?int}|null */
-	private static function claim_queued_otp_locked( string $flow_id ): ?array {
+	private static function claim_queued_otp_locked( string $flow_id, ?callable $admission ): ?array {
 		global $wpdb;
 
 		$table = $wpdb->prefix . 'pinova_rate_limits';
@@ -355,6 +360,11 @@ final class OTPQueueStore {
 		$row     = $rows[0];
 		$stored  = (string) $row['payload'];
 		$payload = $stored;
+		// Immediate admission only accepts durable acknowledgement. Inspect under
+		// the existing flow lock, without changing bytes or timestamps on denial.
+		if ( null !== $admission && ! str_starts_with( $stored, 'ready:' ) ) {
+			return null;
+		}
 		if ( str_starts_with( $stored, 'processing:' ) ) {
 			if ( strtotime( $row['updated_at'] . ' UTC' ) > time() - self::OTP_CLAIM_LEASE ) {
 				return null;
@@ -367,7 +377,18 @@ final class OTPQueueStore {
 		} elseif ( 'processing' === $stored || str_starts_with( $stored, 'reserved:' ) || str_starts_with( $stored, 'cancelled:' ) || 'delivered' === $stored ) {
 			return null;
 		}
-		$cipher = str_starts_with( $payload, 'ready:' ) ? substr( $payload, 6 ) : $payload;
+		$cipher  = str_starts_with( $payload, 'ready:' ) ? substr( $payload, 6 ) : $payload;
+		$decoded = null;
+		if ( null !== $admission ) {
+			$decoded = self::decode_queued_payload( $cipher, $flow_id, $row['reset_at'] );
+			if ( null === $decoded || true !== $admission( $decoded ) ) {
+				return null;
+			}
+		}
+		$connection = (string) $wpdb->get_var( 'SELECT CONNECTION_ID()' );
+		if ( self::database_read_failed() || '' === $connection ) {
+			return null;
+		}
 
 		$claim_token = bin2hex( random_bytes( 8 ) );
 		$claimed     = $wpdb->query(
@@ -376,33 +397,154 @@ final class OTPQueueStore {
 		if ( 1 !== $claimed ) {
 			return null;
 		}
+		self::$claim_snapshots[ $flow_id ] = [
+			'payload'    => $stored,
+			'updated_at' => $row['updated_at'],
+			'connection' => $connection,
+		];
+		$decoded                           = $decoded ?? self::decode_queued_payload( $cipher, $flow_id, $row['reset_at'] );
+		if ( null === $decoded ) {
+			self::finish_queued_otp( $flow_id, $claim_token );
+			unset( self::$claim_snapshots[ $flow_id ] );
+			return null;
+		}
+		$decoded['claim_token'] = $claim_token;
+		return $decoded;
+	}
+
+	/** @return array{identifier:string,purpose:string,ip:string,deadline:int,user_id:?int}|null */
+	private static function decode_queued_payload( string $cipher, string $flow_id, string $reset_at ): ?array {
 		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- Decode authenticated ciphertext before AES-GCM verification.
 		$binary = base64_decode( $cipher, true );
 		if ( ! is_string( $binary ) || strlen( $binary ) < 29 || ! function_exists( 'openssl_decrypt' ) ) {
-			self::finish_queued_otp( $flow_id, $claim_token );
 			return null;
 		}
 		$plain = openssl_decrypt( substr( $binary, 28 ), 'aes-256-gcm', self::queue_key(), OPENSSL_RAW_DATA, substr( $binary, 0, 12 ), substr( $binary, 12, 16 ), $flow_id );
 		$data  = is_string( $plain ) ? json_decode( $plain, true ) : null;
 		if ( ! is_array( $data ) || ! in_array( count( $data ), [ 3, 4 ], true ) || ! is_string( $data[0] ?? null ) || ! is_string( $data[1] ?? null ) || ! is_string( $data[2] ?? null ) || ! in_array( $data[1], [ 'authenticate', 'forget', 'verify_mobile' ], true ) ) {
-			self::finish_queued_otp( $flow_id, $claim_token );
 			return null;
 		}
 
 		if ( ( 'verify_mobile' === $data[1] && ( 4 !== count( $data ) || ! is_int( $data[3] ) || $data[3] < 1 ) )
 			|| ( 'verify_mobile' !== $data[1] && 3 !== count( $data ) ) ) {
-			self::finish_queued_otp( $flow_id, $claim_token );
 			return null;
 		}
 
 		return [
-			'user_id'     => $data[3] ?? null,
-			'identifier'  => $data[0],
-			'purpose'     => $data[1],
-			'ip'          => $data[2],
-			'deadline'    => (int) strtotime( $row['reset_at'] . ' UTC' ),
-			'claim_token' => $claim_token,
+			'user_id'    => $data[3] ?? null,
+			'identifier' => $data[0],
+			'purpose'    => $data[1],
+			'ip'         => $data[2],
+			'deadline'   => (int) strtotime( $reset_at . ' UTC' ),
 		];
+	}
+
+	/** Restore only an untouched acknowledged claim while this connection owns it. */
+	public static function defer_queued_otp( string $flow_id, string $claim_token ): bool {
+		global $wpdb;
+		try {
+			$snapshot = self::$claim_snapshots[ $flow_id ] ?? null;
+			if ( null === $snapshot || ! str_starts_with( $snapshot['payload'], 'ready:' ) || ! self::owns_queued_claim( $flow_id, $claim_token ) ) {
+				return false;
+			}
+			$written = $wpdb->query(
+				$wpdb->prepare(
+					'UPDATE %i SET `payload` = %s, `updated_at` = %s WHERE `scope` = %s AND `payload` = %s',
+					$wpdb->prefix . 'pinova_rate_limits',
+					$snapshot['payload'],
+					$snapshot['updated_at'],
+					$flow_id,
+					'processing:' . $claim_token . ':' . $snapshot['payload']
+				)
+			);
+			return 1 === $written;
+		} finally {
+			self::unlock_claim( $flow_id, $claim_token );
+		}
+	}
+
+	/** Row tokens alone do not survive a database reconnect as ownership proof. */
+	public static function owns_queued_claim( string $flow_id, string $claim_token ): bool {
+		global $wpdb;
+		$connection = self::$claim_snapshots[ $flow_id ]['connection'] ?? '';
+		if ( '' === $connection || ( self::$held_claims[ $flow_id ] ?? null ) !== $claim_token ) {
+			return false;
+		}
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT CONNECTION_ID() AS connection_id, IS_USED_LOCK(%s) AS holder', 'pinova_otp_' . $flow_id ), ARRAY_A );
+		return ! $wpdb->last_error && is_array( $row ) && $connection === (string) $row['connection_id'] && $connection === (string) $row['holder'];
+	}
+
+	/** Observe token, expiry and both original connection leases in one final read. */
+	public static function immediate_claim_is_active( string $flow_id, string $claim_token, array $lease ): bool {
+		global $wpdb;
+		$connection = self::$claim_snapshots[ $flow_id ]['connection'] ?? '';
+		if ( '' === $connection || ( $lease['connection'] ?? null ) !== $connection || ( self::$held_claims[ $flow_id ] ?? null ) !== $claim_token ) {
+			return false;
+		}
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT CONNECTION_ID() AS connection_id, IS_USED_LOCK(%s) AS immediate_slot_holder, IS_USED_LOCK(%s) AS flow_holder, `payload` FROM %i WHERE `scope` = %s AND `reset_at` > UTC_TIMESTAMP() LIMIT 2',
+				$lease['name'],
+				'pinova_otp_' . $flow_id,
+				$wpdb->prefix . 'pinova_rate_limits',
+				$flow_id
+			),
+			ARRAY_A
+		);
+		if ( $wpdb->last_error || ! is_array( $rows ) || 1 !== count( $rows ) ) {
+			return false;
+		}
+		$row = $rows[0];
+		return $connection === (string) $row['connection_id'] && $connection === (string) $row['immediate_slot_holder']
+			&& $connection === (string) $row['flow_holder'] && str_starts_with( (string) $row['payload'], 'processing:' . $claim_token . ':' );
+	}
+
+	/** Two nonblocking site slots; refuse recursive acquisition by this connection. */
+	public static function acquire_immediate_slot(): ?array {
+		global $wpdb;
+		$connection = (string) $wpdb->get_var( 'SELECT CONNECTION_ID()' );
+		if ( $wpdb->last_error || '' === $connection ) {
+			return null;
+		}
+		$prefix = 'pinova_otp_fast_' . substr( hash( 'sha256', DB_NAME . ':' . $wpdb->prefix ), 0, 24 );
+		$names  = [ $prefix . '_0', $prefix . '_1' ];
+		foreach ( $names as $name ) {
+			$holder = $wpdb->get_var( $wpdb->prepare( 'SELECT IS_USED_LOCK(%s)', $name ) );
+			if ( self::database_read_failed() || $connection === (string) $holder ) {
+				return null;
+			}
+		}
+		foreach ( $names as $name ) {
+			$acquired = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) );
+			if ( self::database_read_failed() ) {
+				return null;
+			}
+			if ( '1' === (string) $acquired ) {
+				$lease = [
+					'name'       => $name,
+					'connection' => $connection,
+				];
+				if ( self::owns_immediate_slot( $lease ) ) {
+					return $lease;
+				}
+				self::release_immediate_slot( $lease );
+				return null;
+			}
+		}
+		return null;
+	}
+
+	public static function owns_immediate_slot( array $lease ): bool {
+		global $wpdb;
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT CONNECTION_ID() AS connection_id, IS_USED_LOCK(%s) AS holder', $lease['name'] ), ARRAY_A );
+		return ! $wpdb->last_error && is_array( $row ) && $lease['connection'] === (string) $row['connection_id'] && $lease['connection'] === (string) $row['holder'];
+	}
+
+	public static function release_immediate_slot( array $lease ): void {
+		global $wpdb;
+		if ( self::owns_immediate_slot( $lease ) ) {
+			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lease['name'] ) );
+		}
 	}
 
 	/** Allow another initiation to retry a failed delivery without changing its signed flow. */
@@ -543,6 +685,16 @@ final class OTPQueueStore {
 		return false !== $cancelled && false !== $deleted && false !== $cancelled_late && false !== $expired && '0' === (string) $pending;
 	}
 
+	/**
+	 * wpdb calls mutate this global between connection and ownership observations.
+	 *
+	 * @phpstan-impure
+	 */
+	private static function database_read_failed(): bool {
+		global $wpdb;
+		return '' !== (string) $wpdb->last_error;
+	}
+
 	private static function queue_key(): string {
 		return hash_hmac( 'sha256', 'pinova-otp-delivery', wp_salt( 'auth' ), true );
 	}
@@ -571,6 +723,7 @@ final class OTPQueueStore {
 			return;
 		}
 		unset( self::$held_claims[ $flow_id ] );
+		unset( self::$claim_snapshots[ $flow_id ] );
 		self::unlock_queued_otp( $flow_id );
 	}
 

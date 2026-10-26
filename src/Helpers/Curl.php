@@ -5,6 +5,7 @@ namespace Pinova\Helpers;
 use Exception;
 use JsonException;
 use WP_Error;
+use Pinova\Services\OTPImmediateDelivery;
 
 class Curl {
 
@@ -25,7 +26,7 @@ class Curl {
 		$response = wp_remote_post(
 			$url,
 			[
-				'timeout'     => 8,
+				'timeout'     => OTPImmediateDelivery::provider_timeout(),
 				'redirection' => 0,
 				'headers'     => $request_headers,
 				'body'        => $data,

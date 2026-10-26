@@ -358,11 +358,12 @@ async function inspect(flow) {
 async function verifyFlow(flow, purpose = 'login') {
     const code = codes.get(flow.label);
     ensure(typeof code === 'string', 'Synthetic provider did not capture private proof.');
-    const wrong = await http(`${base}/?rest_route=/pinova/${purpose === 'login' ? 'user/forgot/verify' : 'user/login/otp'}`, {
+    const wrong = await http(`${base}/?rest_route=/pinova/${purpose === 'login' ? 'auth/forgot/verify' : 'user/login/otp'}`, {
         label: `${flow.label}-wrong`, source: flow.source, body: { jwt: flow.token, code }, headers: { Origin: base },
     });
-    ensure(JSON.parse(wrong.text).success === false, 'Purpose mismatch accepted a delivered OTP.');
-    const correct = await http(`${base}/?rest_route=/pinova/${purpose === 'login' ? 'user/login/otp' : 'user/forgot/verify'}`, {
+    ensure(wrong.status === 401 && JSON.parse(wrong.text).success === false,
+        'Wrong-purpose endpoint did not reject the delivered proof.');
+    const correct = await http(`${base}/?rest_route=/pinova/${purpose === 'login' ? 'user/login/otp' : 'auth/forgot/verify'}`, {
         label: `${flow.label}-verify`, source: flow.source, body: { jwt: flow.token, code }, headers: { Origin: base },
     });
     ensure(correct.status === 200 && JSON.parse(correct.text).success === true, 'Purpose-correct delivered proof failed.');

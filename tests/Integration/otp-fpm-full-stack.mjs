@@ -624,7 +624,19 @@ try {
     // Obtain a real session through the real OTP login endpoint; only the
     // session-specific REST nonce is derived through a private CLI pipe.
     const loggedIn = await verifyFlow(eligible);
-    const cookieParts = (loggedIn.headers['set-cookie'] || []).map(value => value.split(';')[0]);
+    // Native login expires old cookies before issuing fresh values. A browser
+    // keeps the last value for each name; sending both can restore the old one.
+    const cookieJar = new Map();
+    for (const header of loggedIn.headers['set-cookie'] || []) {
+        const part = header.split(';')[0];
+        const separator = part.indexOf('=');
+        ensure(separator > 0, 'Native login returned an invalid cookie field.');
+        cookieJar.set(part.slice(0, separator), part);
+    }
+    const cookieParts = [...cookieJar.values()].filter(part => {
+        const value = decodeURIComponent(part.slice(part.indexOf('=') + 1)).trim();
+        return value !== '' && value !== 'deleted';
+    });
     const loggedCookie = cookieParts.find(value => value.startsWith('wordpress_logged_in_'));
     ensure(loggedCookie, 'Real OTP login did not establish its native WordPress session.');
     const nonce = await site({ action: 'nonce', logged_in_cookie: decodeURIComponent(loggedCookie.slice(loggedCookie.indexOf('=') + 1)) });

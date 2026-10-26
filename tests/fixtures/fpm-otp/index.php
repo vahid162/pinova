@@ -13,7 +13,7 @@ if ( 'cli' === PHP_SAPI ) {
 }
 
 $case = $_GET['case'] ?? 'ping';
-$cases = [ 'ping', 'healthy', 'decoy', 'failed', 'replaced', 'mutated', 'served', 'partial', 'removed', 'preexisting', 'foreign', 'late', 'late_same_priority', 'late_removed', 'fatal', 'fatal_shutdown', 'finish_false', 'unsupported', 'unsupported_cli', 'untracked', 'tracked' ];
+$cases = [ 'ping', 'healthy', 'decoy', 'failed', 'replaced', 'mutated', 'served', 'partial', 'removed', 'preexisting', 'foreign', 'late', 'late_same_priority', 'late_removed', 'fatal', 'fatal_shutdown', 'finish_false', 'unsupported', 'unsupported_cli', 'untracked', 'tracked', 'content_type', 'content_length', 'content_encoding', 'flag_off' ];
 if ( ! is_string( $case ) || ! in_array( $case, $cases, true ) ) {
 	http_response_code( 400 );
 	exit;
@@ -41,7 +41,8 @@ if ( 'ping' === $case ) {
 }
 
 require __DIR__ . '/core-bootstrap.php';
-require __DIR__ . '/CharacterizationBoundary.php';
+require __DIR__ . '/production-adapter.php';
+define( 'PINOVA_OTP_IMMEDIATE_DELIVERY', 'flag_off' !== $case );
 
 // The response remains identical for synthetic eligible and decoy contexts.
 $expected = [ 'success' => true, 'message' => 'Generic delivery response.', 'data' => [ 'login_method' => 'otp', 'ttl' => 180, 'jwt' => 'synthetic-signed-state' ] ];
@@ -63,22 +64,7 @@ register_rest_route(
 				ob_start( static fn( string $bytes ): string => strtoupper( $bytes ) );
 			}
 			$response = new WP_REST_Response( $expected, 200 );
-			$boundary = new \Pinova\Tests\FPM\CharacterizationBoundary(
-				$response,
-				$request,
-				static function () use ( $case ): void {
-					pinova_fpm_marker( 'account_enter' );
-					if ( 'decoy' === $case ) {
-						pinova_fpm_marker( 'decoy_completed' );
-						return;
-					}
-					pinova_fpm_marker( 'provider_enter' );
-					// Deliberately blocking, nonbillable work: no external API or recipient.
-					usleep( in_array( $case, [ 'tracked', 'untracked' ], true ) ? 4500000 : 3000000 );
-					pinova_fpm_marker( 'provider_completed' );
-				}
-			);
-			$boundary->arm();
+			\Pinova\Services\OTPImmediateDelivery::arm( str_repeat( '1', 32 ), $response, $request );
 			if ( 'partial' === $case ) {
 				echo 'partial-output';
 			} elseif ( 'removed' === $case ) {
@@ -97,6 +83,13 @@ if ( 'mutated' === $case ) {
 }
 if ( 'served' === $case ) {
 	add_filter( 'rest_pre_serve_request', static function () use ( $expected ): bool { echo wp_json_encode( $expected ); return true; }, 20 );
+}
+if ( in_array( $case, [ 'content_type', 'content_length', 'content_encoding' ], true ) ) {
+	add_filter( 'rest_pre_serve_request', static function ( $served ) use ( $case ) {
+		$headers = [ 'content_type' => 'Content-Type: text/plain', 'content_length' => 'Content-Length: 1', 'content_encoding' => 'Content-Encoding: gzip' ];
+		header( $headers[ $case ] );
+		return $served;
+	}, 20 );
 }
 if ( in_array( $case, [ 'late', 'late_same_priority', 'late_removed', 'fatal_shutdown' ], true ) ) {
 	// Register while serving, after arm() has installed its native-flush wrapper.
@@ -120,4 +113,6 @@ if ( 'fatal' === $case ) {
 
 $server->serve_request( '/pinova-fpm/v1/issue' );
 pinova_fpm_marker( 'rest_serve_returned' );
+// Registered after the production finalizer, so its absence of fast work is final.
+register_shutdown_function( static function (): void { pinova_fpm_marker( 'probe_completed' ); } );
 

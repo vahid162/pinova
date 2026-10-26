@@ -17,6 +17,8 @@ if [[ "${PINOVA_FPM_WORDPRESS_DIR:-}" != "${run_root}/wordpress" \
 fi
 repo_root="$(git rev-parse --show-toplevel)"
 fixture_root="${repo_root}/tests/fixtures/fpm-otp"
+export PINOVA_FPM_BOUNDARY_ADAPTER="${repo_root}/src/Services/OTPImmediateDelivery.php"
+[[ -f "${PINOVA_FPM_BOUNDARY_ADAPTER}" && ! -L "${PINOVA_FPM_BOUNDARY_ADAPTER}" ]]
 work_dir="${PINOVA_FPM_WORK_DIR}"
 fpm_bin="${PINOVA_FPM_BIN:?Missing FPM binary}"
 nginx_bin="${PINOVA_FPM_NGINX_BIN:?Missing nginx binary}"
@@ -75,6 +77,7 @@ request_terminate_timeout_track_finished = ${track_finished}
 env[PINOVA_FPM_FIXTURE] = 1
 env[PINOVA_FPM_WORDPRESS_DIR] = ${PINOVA_FPM_WORDPRESS_DIR}
 env[PINOVA_FPM_WORK_DIR] = ${work_dir}
+env[PINOVA_FPM_BOUNDARY_ADAPTER] = ${PINOVA_FPM_BOUNDARY_ADAPTER}
 php_admin_value[output_buffering] = 4096
 php_admin_flag[zlib.output_compression] = off
 php_admin_flag[display_errors] = off

@@ -64,7 +64,7 @@ function boundary_request( string $pool, string $case ): array {
 }
 
 if ( in_array( '--verify-cli', $argv, true ) ) {
-	$rows = boundary_wait( 'unsupported_cli', 'rejected_unsupported_or_output' );
+	$rows = boundary_wait( 'unsupported_cli', 'probe_completed' );
 	boundary_check( isset( $rows['synthetic_fallback_retained'] ) && ! isset( $rows['account_enter'] ) && ! isset( $rows['provider_enter'] ), 'CLI reached fast delivery or lost fallback.' );
 	echo "Unsupported CLI completion rejected; synthetic fallback retained.\n";
 	exit;
@@ -105,7 +105,7 @@ $decoy = boundary_request( 'normal', 'decoy' );
 $decoy_markers = boundary_wait( 'decoy', 'decoy_completed' );
 boundary_check( $healthy['body'] === $decoy['body'] && ! isset( $decoy_markers['provider_enter'] ), 'Synthetic eligible/decoy public responses differ or decoy sent.' );
 
-$rejections = [ 'failed', 'replaced', 'mutated', 'served', 'partial', 'removed', 'late', 'late_same_priority', 'late_removed', 'fatal', 'fatal_shutdown' ];
+$rejections = [ 'failed', 'replaced', 'mutated', 'served', 'partial', 'removed', 'late', 'late_same_priority', 'late_removed', 'fatal', 'fatal_shutdown', 'content_type', 'content_length', 'content_encoding' ];
 foreach ( $rejections as $case ) {
 	boundary_request( 'normal', $case );
 	if ( in_array( $case, [ 'fatal', 'fatal_shutdown' ], true ) ) {
@@ -114,20 +114,20 @@ foreach ( $rejections as $case ) {
 		boundary_request( 'normal', 'ping' );
 		$rows = boundary_wait( $case, 'before_fatal' );
 	} else {
-		$rows = boundary_wait( $case, 'rejected_final_response' );
+		$rows = boundary_wait( $case, 'probe_completed' );
 	}
 	boundary_check( isset( $rows['synthetic_fallback_retained'] ) && ! isset( $rows['account_enter'] ) && ! isset( $rows['provider_enter'] ), 'Rejected response performed fast delivery: ' . $case );
 }
-foreach ( [ 'preexisting', 'foreign' ] as $case ) {
+foreach ( [ 'preexisting', 'foreign', 'flag_off' ] as $case ) {
 	boundary_request( 'normal', $case );
-	$rows = boundary_wait( $case, 'rejected_unsupported_or_output' );
+	$rows = boundary_wait( $case, 'probe_completed' );
 	boundary_check( isset( $rows['synthetic_fallback_retained'] ) && ! isset( $rows['account_enter'] ) && ! isset( $rows['provider_enter'] ), 'Unsafe preexisting buffer reached fast delivery.' );
 }
 $false_finish = boundary_request( 'normal', 'finish_false' );
 $rows = boundary_wait( 'finish_false', 'finish_false' );
 boundary_check( isset( $rows['prior_finish_ok'] ) && ! isset( $rows['provider_enter'] ), 'Genuinely false second native completion did not reject delivery.' );
 boundary_request( 'unsupported', 'unsupported' );
-$rows = boundary_wait( 'unsupported', 'rejected_unsupported_or_output' );
+$rows = boundary_wait( 'unsupported', 'probe_completed' );
 boundary_check( isset( $rows['synthetic_fallback_retained'] ) && ! isset( $rows['provider_enter'] ), 'Disabled native finish did not retain queued fallback.' );
 
 // Native FPM timeout behavior is observed, not assumed from max_execution_time.
@@ -145,7 +145,8 @@ boundary_check( str_contains( $fpm_log, 'execution timed out' ), 'Native FPM ter
 
 require getenv( 'PINOVA_FPM_WORDPRESS_DIR' ) . '/wp-includes/version.php';
 $summary = [
-	'kind' => 'U1 characterization only; test candidate, synthetic account/provider, no plugin database',
+	'kind' => 'Production response adapter; synthetic account/provider/slot, no plugin database',
+	'adapter_sha256' => hash_file( 'sha256', getenv( 'PINOVA_FPM_BOUNDARY_ADAPTER' ) ),
 	'wordpress_version' => $wp_version,
 	'fpm_php_version' => $markers['provider_completed']['php_version'],
 	'fpm_output_buffering_bytes' => 4096,

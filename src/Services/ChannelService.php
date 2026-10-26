@@ -10,6 +10,8 @@ use Pinova\Channels\Email;
 use Pinova\Channels\SMS;
 use Pinova\Exceptions\SendOTPException;
 use Pinova\Exceptions\ProviderOutcomeUnknownException;
+use Pinova\Exceptions\OTPImmediateDeliveryDeferredException;
+use Pinova\Pinova;
 use Pinova\Models\OTP;
 use Pinova\Logging\Logger;
 use Pinova\Objects\Identifier;
@@ -28,6 +30,18 @@ class ChannelService {
 		foreach ( $channels as $channel => &$success ) {
 
 			if ( in_array( $channel, [ 'sms', 'bale', 'call', 'email' ], true ) ) {
+				if ( null !== $queue_claim_token ) {
+					try {
+						OTPImmediateDelivery::guard( (string) $otp->flow_id, $queue_claim_token, [ $channel ] );
+					} catch ( OTPImmediateDeliveryDeferredException $exception ) {
+						if ( ! OTPImmediateDelivery::provider_was_attempted() ) {
+							throw $exception;
+						}
+						// Prior acceptance remains authoritative. Never begin another
+						// channel after the finite budget or its connection lease ends.
+						break;
+					}
+				}
 				// A previous provider may outlive the flow or an erasure may cancel
 				// its claim. Keep accepted channels, but never start another send.
 				if ( $otp->expires_at->lessThanOrEqualTo( Carbon::now() ) ||
@@ -39,6 +53,12 @@ class ChannelService {
 				$exception = null;
 				try {
 					$success = self::send_channel( $channel, $identifier, $code, $otp->type );
+				} catch ( OTPImmediateDeliveryDeferredException $e ) {
+					if ( ! OTPImmediateDelivery::provider_was_attempted() ) {
+						throw $e;
+					}
+					$exception = $e;
+					$uncertain = true;
 				} catch ( \Throwable $e ) {
 					$exception = $e;
 					$uncertain = true;
@@ -105,6 +125,16 @@ class ChannelService {
 			throw new Exception( 'پیامک صرفا به تلفن همراه ارسال می‌شود.' );
 		}
 
+		if ( OTPImmediateDelivery::is_active() ) {
+			// Send through the exact inspected native object. Resolving it again
+			// inside SMS::send_code could admit a changed arbitrary subclass.
+			$gateway = OTPImmediateDelivery::bounded_gateway();
+			if ( null === $gateway || ! $gateway->is_enable() ) {
+				throw new OTPImmediateDeliveryDeferredException( 'Immediate SMS provider is unsupported.' );
+			}
+			$message = Pinova::get_option( 'sms.message_code' );
+			return $gateway->send( $identifier->get_value(), SMSService::replace_code( empty( $message ) ? $code : $message, $code ) );
+		}
 		return SMS::send_code( $identifier->get_value(), $code );
 	}
 
@@ -117,6 +147,12 @@ class ChannelService {
 			throw new Exception( 'پیام بله صرفا به تلفن همراه ارسال می‌شود.' );
 		}
 
+		if ( OTPImmediateDelivery::is_active() ) {
+			if ( function_exists( 'pinova_bale_send_v2' ) ) {
+				throw new OTPImmediateDeliveryDeferredException( 'Immediate Bale provider is unsupported.' );
+			}
+			return Bale::send_v3( $identifier->get_value(), $code );
+		}
 		return Bale::send_code( $identifier->get_value(), $code );
 	}
 

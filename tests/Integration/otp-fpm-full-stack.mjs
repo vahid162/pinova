@@ -340,11 +340,12 @@ async function issue(index, label, extra = {}, delay = 200) {
     mobileCases.set(providerMobile(index), label);
     delays.set(label, delay);
     const start = now();
+    const source = ++sequence;
     const response = await http(`${base}/?rest_route=/pinova/user/authenticate`, {
-        label, category: 'issuance', source: ++sequence, body: { identifier: mobile(index), ...extra }, headers: { Origin: base },
+        label, category: 'issuance', source, body: { identifier: mobile(index), ...extra }, headers: { Origin: base },
     });
     const value = normalized(response);
-    return { ...value, label, start, ms: response.ms, completed: response.completed };
+    return { ...value, label, source, start, ms: response.ms, completed: response.completed };
 }
 async function inspect(flow) {
     const result = await site({ action: 'inspect', jwt: flow.token });
@@ -357,12 +358,12 @@ async function inspect(flow) {
 async function verifyFlow(flow, purpose = 'login') {
     const code = codes.get(flow.label);
     ensure(typeof code === 'string', 'Synthetic provider did not capture private proof.');
-    const wrong = await http(`${base}/?rest_route=/pinova/${purpose === 'login' ? 'auth/forgot/verify' : 'user/login/otp'}`, {
-        label: `${flow.label}-wrong`, source: ++sequence, body: { jwt: flow.token, code }, headers: { Origin: base },
+    const wrong = await http(`${base}/?rest_route=/pinova/${purpose === 'login' ? 'user/forgot/verify' : 'user/login/otp'}`, {
+        label: `${flow.label}-wrong`, source: flow.source, body: { jwt: flow.token, code }, headers: { Origin: base },
     });
     ensure(JSON.parse(wrong.text).success === false, 'Purpose mismatch accepted a delivered OTP.');
-    const correct = await http(`${base}/?rest_route=/pinova/${purpose === 'login' ? 'user/login/otp' : 'auth/forgot/verify'}`, {
-        label: `${flow.label}-verify`, source: ++sequence, body: { jwt: flow.token, code }, headers: { Origin: base },
+    const correct = await http(`${base}/?rest_route=/pinova/${purpose === 'login' ? 'user/login/otp' : 'user/forgot/verify'}`, {
+        label: `${flow.label}-verify`, source: flow.source, body: { jwt: flow.token, code }, headers: { Origin: base },
     });
     ensure(correct.status === 200 && JSON.parse(correct.text).success === true, 'Purpose-correct delivered proof failed.');
     return correct;
@@ -546,6 +547,9 @@ try {
         receipt.baseline[kind] = { ...result, flows: undefined };
         thresholds[kind] = {
             total_php_cpu_seconds: result.resources.total_php_cpu_seconds * 1.25,
+            // Status is sampled every 125 ms; allow 500 ms of finite boundary noise
+            // in addition to the predeclared 25% completed-work headroom.
+            total_sampled_active_worker_seconds: result.resources.total_sampled_active_worker_seconds * 1.25 + 0.5,
             ordinary_p95_ms: result.ordinary_p95_ms * 1.25 + 50,
             peak_sampled_worker_rss_kib: result.resources.peak_sampled_worker_rss_kib + Math.max(32768, result.resources.peak_sampled_worker_rss_kib * 0.25),
             retained_worker_rss_kib: result.resources.retained_worker_rss_kib + Math.max(65536, result.resources.retained_worker_rss_kib * 0.1),
@@ -563,6 +567,8 @@ try {
         receipt.candidate[kind] = { ...result, flows: undefined };
         const gate = thresholds[kind];
         ensure(result.resources.total_php_cpu_seconds <= gate.total_php_cpu_seconds, 'Candidate exceeded frozen per-workload total PHP CPU gate.');
+        ensure(result.resources.total_sampled_active_worker_seconds <= gate.total_sampled_active_worker_seconds,
+            'Candidate occupied PHP workers beyond frozen per-workload headroom.');
         ensure(result.ordinary_p95_ms <= gate.ordinary_p95_ms, 'Candidate ordinary page latency regressed beyond frozen per-workload gate.');
         ensure(result.resources.peak_sampled_worker_rss_kib <= gate.peak_sampled_worker_rss_kib, 'Candidate per-worker sampled RSS exceeded frozen per-workload gate.');
         ensure(result.resources.retained_worker_rss_kib <= gate.retained_worker_rss_kib, 'Candidate retained PHP RSS exceeded frozen per-workload gate.');
@@ -624,8 +630,9 @@ try {
     mobileCases.set(providerMobile(21), 'mobile-proof');
     delays.set('mobile-proof', 200);
     const mobileStart = now();
+    const mobileSource = ++sequence;
     const mobileResponse = await http(`${base}/?rest_route=/pinova/mobile/request`, {
-        label: 'mobile-proof', source: ++sequence, body: { mobile: mobile(21) },
+        label: 'mobile-proof', source: mobileSource, body: { mobile: mobile(21) },
         headers: { Origin: base, Cookie: cookieParts.join('; '), 'X-WP-Nonce': nonce.nonce },
     });
     const mobileBody = JSON.parse(mobileResponse.text);
@@ -637,7 +644,7 @@ try {
     ensure(mobileState.rows === 1 && mobileState.purpose === 'verify_mobile' && mobileState.otp_expiry === mobileState.expiry,
         'Authenticated mobile proof did not preserve its signed account/purpose/deadline.');
     const mobileVerification = await http(`${base}/?rest_route=/pinova/mobile/verify`, {
-        label: 'mobile-proof-verify', source: ++sequence, body: { jwt: mobileFlow.token, code: codes.get('mobile-proof') },
+        label: 'mobile-proof-verify', source: mobileSource, body: { jwt: mobileFlow.token, code: codes.get('mobile-proof') },
         headers: { Origin: base, Cookie: cookieParts.join('; '), 'X-WP-Nonce': nonce.nonce },
     });
     ensure(mobileVerification.status === 200 && JSON.parse(mobileVerification.text).success === true,

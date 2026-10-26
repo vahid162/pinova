@@ -321,7 +321,10 @@ final class OTPQueueStore {
 		}
 	}
 
-	/** @return array{identifier:string,purpose:string,ip:string,deadline:int,claim_token:string,user_id:?int}|null */
+	/**
+	 * @return array{identifier:string,purpose:string,ip:string,deadline:int,claim_token:string,user_id:?int}|null
+	 * @throws \Pinova\Exceptions\OTPImmediateDeliveryDeferredException Admission callbacks may defer before the claim is returned.
+	 */
 	public static function claim_queued_otp( string $flow_id, ?callable $admission = null ): ?array {
 		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) || ! self::lock_queued_otp( $flow_id ) ) {
 			return null;
@@ -383,7 +386,7 @@ final class OTPQueueStore {
 			}
 		}
 		$connection = (string) $wpdb->get_var( 'SELECT CONNECTION_ID()' );
-		if ( $wpdb->last_error || '' === $connection ) {
+		if ( self::database_read_failed() || '' === $connection ) {
 			return null;
 		}
 
@@ -507,13 +510,13 @@ final class OTPQueueStore {
 		$names  = [ $prefix . '_0', $prefix . '_1' ];
 		foreach ( $names as $name ) {
 			$holder = $wpdb->get_var( $wpdb->prepare( 'SELECT IS_USED_LOCK(%s)', $name ) );
-			if ( $wpdb->last_error || $connection === (string) $holder ) {
+			if ( self::database_read_failed() || $connection === (string) $holder ) {
 				return null;
 			}
 		}
 		foreach ( $names as $name ) {
 			$acquired = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) );
-			if ( $wpdb->last_error ) {
+			if ( self::database_read_failed() ) {
 				return null;
 			}
 			if ( '1' === (string) $acquired ) {
@@ -680,6 +683,16 @@ final class OTPQueueStore {
 		$expired = $wpdb->query( $wpdb->prepare( $expired_sql, array_merge( $params, [ self::OTP_CLAIM_LEASE ] ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
 		$pending = $wpdb->get_var( $wpdb->prepare( $pending_sql, $params ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Only fixed placeholders are generated.
 		return false !== $cancelled && false !== $deleted && false !== $cancelled_late && false !== $expired && '0' === (string) $pending;
+	}
+
+	/**
+	 * wpdb calls mutate this global between connection and ownership observations.
+	 *
+	 * @phpstan-impure
+	 */
+	private static function database_read_failed(): bool {
+		global $wpdb;
+		return '' !== (string) $wpdb->last_error;
 	}
 
 	private static function queue_key(): string {

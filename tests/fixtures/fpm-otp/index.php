@@ -13,7 +13,7 @@ if ( 'cli' === PHP_SAPI ) {
 }
 
 $case = $_GET['case'] ?? 'ping';
-$cases = [ 'ping', 'healthy', 'decoy', 'failed', 'replaced', 'mutated', 'served', 'partial', 'removed', 'preexisting', 'foreign', 'late', 'late_same_priority', 'late_removed', 'fatal', 'fatal_shutdown', 'finish_false', 'unsupported', 'unsupported_cli', 'untracked', 'tracked', 'content_type', 'content_length', 'content_encoding', 'flag_off' ];
+$cases = [ 'ping', 'healthy', 'decoy', 'failed', 'replaced', 'mutated', 'served', 'partial', 'removed', 'preexisting', 'foreign', 'late', 'late_same_priority', 'late_removed', 'fatal', 'fatal_shutdown', 'finish_false', 'unsupported', 'unsupported_cli', 'untracked', 'tracked', 'content_type', 'content_length', 'content_encoding', 'flag_off', 'headroom_exact', 'headroom_blocked', 'headroom_reset' ];
 if ( ! is_string( $case ) || ! in_array( $case, $cases, true ) ) {
 	http_response_code( 400 );
 	exit;
@@ -43,6 +43,27 @@ if ( 'ping' === $case ) {
 require __DIR__ . '/core-bootstrap.php';
 require __DIR__ . '/production-adapter.php';
 define( 'PINOVA_OTP_IMMEDIATE_DELIVERY', 'flag_off' !== $case );
+
+if ( in_array( $case, [ 'headroom_exact', 'headroom_blocked' ], true ) ) {
+	// Tighten only this request. Keep the actual REST core, adapter, fixture and
+	// marker paths available while excluding procfs except its one optional file.
+	$allowed_paths = [ dirname( __DIR__, 3 ), ABSPATH, (string) getenv( 'PINOVA_FPM_WORK_DIR' ) ];
+	if ( 'headroom_exact' === $case ) {
+		$allowed_paths[] = '/proc/meminfo';
+	}
+	if ( false === ini_set( 'open_basedir', implode( PATH_SEPARATOR, $allowed_paths ) ) ) {
+		throw new RuntimeException( 'Could not apply the isolated request file policy.' );
+	}
+	$memory = @file_get_contents( '/proc/meminfo', false, null, 0, 8192 );
+	if ( false === $memory ) {
+		pinova_fpm_marker( 'headroom_memory_blocked' );
+	} elseif ( 1 === preg_match( '/^MemAvailable:\s+\d+\s+kB$/m', $memory ) ) {
+		pinova_fpm_marker( 'headroom_memory_readable' );
+	}
+	if ( false === @file_get_contents( '/proc/cpuinfo', false, null, 0, 8192 ) ) {
+		pinova_fpm_marker( 'headroom_neighbor_denied' );
+	}
+}
 
 // The response remains identical for synthetic eligible and decoy contexts.
 $expected = [ 'success' => true, 'message' => 'Generic delivery response.', 'data' => [ 'login_method' => 'otp', 'ttl' => 180, 'jwt' => 'synthetic-signed-state' ] ];

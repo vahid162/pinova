@@ -135,6 +135,9 @@ env[PINOVA_FPM_PROVIDER_PORT] = ${PINOVA_FPM_PROVIDER_PORT}
 php_admin_value[memory_limit] = 512M
 php_admin_value[max_execution_time] = 0
 php_admin_value[output_buffering] = 4096
+; Match a restricted site policy without admitting the rest of procfs. The
+; installed plugin symlink resolves outside the temporary WordPress tree.
+php_admin_value[open_basedir] = ${run_root}:${repo_root}:/tmp:${mysql_socket}:/proc/meminfo
 php_admin_flag[zlib.output_compression] = off
 php_admin_flag[display_errors] = off
 php_admin_flag[log_errors] = on

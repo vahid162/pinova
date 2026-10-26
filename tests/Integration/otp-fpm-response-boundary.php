@@ -105,6 +105,33 @@ $decoy = boundary_request( 'normal', 'decoy' );
 $decoy_markers = boundary_wait( 'decoy', 'decoy_completed' );
 boundary_check( $healthy['body'] === $decoy['body'] && ! isset( $decoy_markers['provider_enter'] ), 'Synthetic eligible/decoy public responses differ or decoy sent.' );
 
+$exact_headroom = boundary_request( 'normal', 'headroom_exact' );
+$exact_headroom_rows = boundary_wait( 'headroom_exact', 'provider_completed' );
+boundary_check( 200 === $exact_headroom['status'] && $healthy['body'] === $exact_headroom['body'] && $exact_headroom['seconds'] < 1.5,
+	'Exact-file restricted request did not preserve the healthy independent response.' );
+boundary_check( isset( $exact_headroom_rows['headroom_memory_readable'], $exact_headroom_rows['headroom_neighbor_denied'],
+	$exact_headroom_rows['finish_ok'], $exact_headroom_rows['account_enter'], $exact_headroom_rows['provider_enter'] )
+	&& $exact_headroom_rows['finish_ok']['pid'] === $exact_headroom_rows['provider_enter']['pid']
+	&& $exact_headroom_rows['finish_ok']['ns'] <= $exact_headroom_rows['account_enter']['ns']
+	&& $exact_headroom_rows['account_enter']['ns'] <= $exact_headroom_rows['provider_enter']['ns'],
+	'Exact-file memory access did not retain neighboring-file denial and post-finish synthetic dispatch.' );
+
+$blocked_headroom = boundary_request( 'normal', 'headroom_blocked' );
+$blocked_headroom_rows = boundary_wait( 'headroom_blocked', 'probe_completed' );
+boundary_check( 200 === $blocked_headroom['status'] && $healthy['body'] === $blocked_headroom['body']
+	&& isset( $blocked_headroom_rows['headroom_memory_blocked'], $blocked_headroom_rows['headroom_neighbor_denied'],
+		$blocked_headroom_rows['finish_ok'], $blocked_headroom_rows['synthetic_fallback_retained'] )
+	&& ! isset( $blocked_headroom_rows['account_enter'] ) && ! isset( $blocked_headroom_rows['provider_enter'] ),
+	'Unreadable memory reached fast delivery or failed to retain the synthetic fallback marker after native completion.' );
+
+$reset_headroom = boundary_request( 'normal', 'headroom_reset' );
+$reset_headroom_rows = boundary_wait( 'headroom_reset', 'provider_completed' );
+boundary_check( 200 === $reset_headroom['status'] && $healthy['body'] === $reset_headroom['body']
+	&& isset( $reset_headroom_rows['finish_ok'], $reset_headroom_rows['provider_enter'] )
+	&& $reset_headroom_rows['finish_ok']['pid'] === $blocked_headroom_rows['finish_ok']['pid']
+	&& $reset_headroom_rows['finish_ok']['ns'] <= $reset_headroom_rows['provider_enter']['ns'],
+	'Per-request memory restriction did not reset for the same native FPM child.' );
+
 $rejections = [ 'failed', 'replaced', 'mutated', 'served', 'partial', 'removed', 'late', 'late_same_priority', 'late_removed', 'fatal', 'fatal_shutdown', 'content_type', 'content_length', 'content_encoding' ];
 foreach ( $rejections as $case ) {
 	boundary_request( 'normal', $case );
@@ -159,6 +186,14 @@ $summary = [
 	'untracked_occupied_followup_seconds' => $untracked_ping['seconds'],
 	'tracked_occupied_followup_seconds' => $tracked_ping['seconds'],
 	'rejected_scenarios' => $rejections,
+	'open_basedir_compatibility' => [
+		'exact_memory_file_readable' => true,
+		'neighboring_proc_file_denied' => true,
+		'exact_file_request_completed_before_synthetic_dispatch' => true,
+		'unreadable_memory_request_finished_without_fast_dispatch' => true,
+		'unreadable_memory_synthetic_fallback_marker_retained' => true,
+		'request_local_policy_reset_on_same_fpm_child' => true,
+	],
 	'limitations' => [ 'Not production FPM CPU/RSS or real provider budget evidence.', 'Not full Pinova queue/claim/privacy integration.', 'No guarantee against arbitrary later PHP shutdown handlers.', 'Remote browser packet arrival may follow provider entry.' ],
 ];
 file_put_contents( $work . '/artifacts/summary.json', json_encode( $summary, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR ) . "\n" );

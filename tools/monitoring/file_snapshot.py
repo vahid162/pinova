@@ -207,6 +207,16 @@ class NativeFileSnapshot:
                 except subprocess.TimeoutExpired:
                     raise NativeFailure("native_child_not_reaped") from None
                 raise NativeFailure("native_scan_timeout") from None
+            except BaseException:
+                try:
+                    process.kill()
+                except BaseException:
+                    pass
+                try:
+                    process.wait(timeout=1)
+                except BaseException:
+                    pass
+                raise
             out_size, err_size = os.fstat(stdout.fileno()).st_size, os.fstat(stderr.fileno()).st_size
             if out_size >= limit or err_size >= limit:
                 raise NativeFailure("native_output_bound")

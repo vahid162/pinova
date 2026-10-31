@@ -21,7 +21,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
     return module
 
 
@@ -219,6 +221,36 @@ class SnapshotTests(unittest.TestCase):
         with mock.patch.object(M.subprocess, "Popen", side_effect=large), self.assertRaises(M.NativeFailure) as error:
             self.snapshot._run_lsof(["/proc/1/fd/3"])
         self.assertEqual("native_output_bound", str(error.exception))
+
+    def test_wait_interruption_kills_owned_child_and_reaps_without_masking_failure(self):
+        class Stop(BaseException):
+            pass
+        for reap_error in (None, subprocess.TimeoutExpired("owned-lsof", 1)):
+            with self.subTest(reap_error=type(reap_error).__name__):
+                interruption = Stop("synthetic interruption")
+                events = []
+                class Child:
+                    returncode = None
+                    def poll(self):
+                        return self.returncode
+                    def wait(self, timeout):
+                        events.append(("wait", timeout))
+                        if len(events) == 1:
+                            raise interruption
+                        if reap_error is not None:
+                            raise reap_error
+                        self.returncode = -9
+                        return -9
+                    def kill(self):
+                        events.append(("kill",))
+                child = Child()
+                with mock.patch.object(M.subprocess, "Popen", return_value=child), \
+                        mock.patch.object(M.os, "kill") as kill_pid, \
+                        mock.patch.object(M.os, "killpg") as kill_group, self.assertRaises(Stop) as error:
+                    self.snapshot._run_lsof(["/proc/1/fd/3"])
+                self.assertIs(interruption, error.exception)
+                self.assertEqual([("wait", self.snapshot.timeout_seconds), ("kill",), ("wait", 1)], events)
+                kill_pid.assert_not_called(); kill_group.assert_not_called()
 
 
 def native_characterization():

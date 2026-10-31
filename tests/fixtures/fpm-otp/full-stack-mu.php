@@ -42,6 +42,30 @@ namespace {
 	}
 
 	pinova_full_stack_marker( 'request_start' );
+	// The diagnostic sibling observes the first existing warm request only.
+	// No raw phpinfo, environment, request data or configured file paths are saved.
+	if ( '1' === getenv( 'PINOVA_FPM_NATIVE_CAPTURE' ) && 'fpm-fcgi' === PHP_SAPI
+		&& 'warm' === ( $_SERVER['HTTP_X_PINOVA_FIXTURE_CASE'] ?? '' ) ) {
+		$native_file = $fixture_root . '/private/native-environment.json';
+		$native_fd = @fopen( $native_file, 'x' );
+		if ( false !== $native_fd ) {
+			$extensions = [];
+			foreach ( get_loaded_extensions() as $extension ) {
+				$version = phpversion( $extension );
+				$extensions[ $extension ] = false === $version ? null : $version;
+			}
+			$settings = [];
+			foreach ( [ 'opcache.enable', 'opcache.enable_cli', 'opcache.optimization_level', 'opcache.jit', 'opcache.jit_buffer_size',
+				'opcache.protect_memory', 'opcache.validate_timestamps', 'opcache.file_update_protection', 'opcache.revalidate_freq' ] as $key ) {
+				$settings[ $key ] = (string) ini_get( $key );
+			}
+			fwrite( $native_fd, json_encode( [ 'php_version' => PHP_VERSION, 'sapi' => PHP_SAPI,
+				'zend_version' => zend_version(), 'extensions' => $extensions, 'settings' => $settings,
+				'resource_acceptance' => false ], JSON_THROW_ON_ERROR ) );
+			fclose( $native_fd );
+			chmod( $native_file, 0600 );
+		}
+	}
 	if ( defined( 'WP_CLI' ) && WP_CLI ) {
 		\WP_CLI::add_hook( 'before_invoke:pinova otp run', static function (): void { pinova_full_stack_marker( 'cli_command' ); } );
 		$barrier = (string) getenv( 'PINOVA_FPM_CLI_BARRIER' );

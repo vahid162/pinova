@@ -89,7 +89,8 @@ jobs:
           fi
       - name: Verify isolated cross-UID file writers and retained generations
         run: |
-          sudo --preserve-env=GITHUB_ACTIONS python3 -I -B tests/ops/test_file_snapshot.py --native-characterization > "$RUNNER_TEMP/pinova-native-file-witness-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          set -o pipefail
+          sudo --preserve-env=GITHUB_ACTIONS python3 -I -B tests/ops/test_file_snapshot.py --native-characterization | tee "$RUNNER_TEMP/pinova-native-file-witness-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
       - name: Verify native allocation, transactions and finite projection
         if: ${{ !cancelled() }}
         run: php tests/ops/mariadb_event_snapshot.php

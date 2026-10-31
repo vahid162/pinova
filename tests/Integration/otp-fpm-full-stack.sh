@@ -138,6 +138,14 @@ diagnostic_checkpoint shell_setup
 "${wp[@]}" eval-file "${fixture_root}/full-stack-site.php" --use-include \
 	<<< '{"action":"setup"}' > "${run_root}/private/setup.log" 2>&1
 
+native_global_limits='' native_pool_limits='' native_environment=''
+if [[ "${PINOVA_FPM_NATIVE_CAPTURE:-}" == 1 ]]; then
+	[[ "${php_version}" == 8.4 && "${PINOVA_FPM_LOGGING_PROFILE:-}" == normal \
+		&& -f "${PINOVA_FPM_CAMPAIGN_ROOT}/private/native-capture/state.json" ]]
+	native_global_limits='rlimit_core = 268435456'
+	native_pool_limits=$'process.dumpable = yes\nrlimit_core = 268435456'
+	native_environment='env[PINOVA_FPM_NATIVE_CAPTURE] = 1'
+fi
 cat > "${run_root}/fpm.conf" <<EOF
 [global]
 daemonize = no
@@ -146,6 +154,7 @@ pid = ${run_root}/fpm.pid
 ; Ten fixed application workers plus one native status worker. This bounds
 ; instrumentation inventory identically in both revision arms; no host tuning.
 process.max = 11
+${native_global_limits}
 [fixture]
 user = root
 group = root
@@ -158,11 +167,13 @@ clear_env = yes
 catch_workers_output = yes
 request_terminate_timeout = 20s
 request_terminate_timeout_track_finished = yes
+${native_pool_limits}
 env[GITHUB_RUN_ID] = ${GITHUB_RUN_ID}
 env[GITHUB_RUN_ATTEMPT] = ${GITHUB_RUN_ATTEMPT}
 env[PINOVA_FPM_FULL_STACK_ROOT] = ${run_root}
 env[PINOVA_FPM_FULL_STACK_FIXTURE] = 1
 env[PINOVA_FPM_PROVIDER_PORT] = ${PINOVA_FPM_PROVIDER_PORT}
+${native_environment}
 php_admin_value[memory_limit] = 512M
 php_admin_value[max_execution_time] = 0
 php_admin_value[output_buffering] = 4096

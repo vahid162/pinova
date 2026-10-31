@@ -600,8 +600,8 @@ final class OTPQueueStore {
 				return 'unavailable';
 			}
 			$row = $rows[0];
-			if ( $connection !== (string) ( $row['connection_id'] ?? '' ) || $connection !== (string) ( $row['immediate_slot_holder'] ?? '' )
-				|| $connection !== (string) ( $row['flow_holder'] ?? '' ) || ! array_key_exists( 'bucket_key', $row ) ) {
+			if ( (string) ( $row['connection_id'] ?? '' ) !== $connection || (string) ( $row['immediate_slot_holder'] ?? '' ) !== $connection
+				|| (string) ( $row['flow_holder'] ?? '' ) !== $connection || ! array_key_exists( 'bucket_key', $row ) ) {
 				return 'unavailable';
 			}
 			if ( null === $row['bucket_key'] ) {
@@ -965,12 +965,12 @@ final class OTPQueueStore {
 				return true;
 			}
 			if ( self::database_read_failed() || '0' !== (string) $acquired ) {
-				self::$diagnostic_release_unknown       = true;
+				self::$diagnostic_release_unknown        = true;
 				self::$diagnostic_flow_locks[ $flow_id ] = true;
 			}
 			return false;
 		} catch ( \Throwable $throwable ) {
-			self::$diagnostic_release_unknown       = true;
+			self::$diagnostic_release_unknown        = true;
 			self::$diagnostic_flow_locks[ $flow_id ] = true;
 			throw $throwable;
 		} finally {

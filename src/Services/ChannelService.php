@@ -47,24 +47,33 @@ class ChannelService {
 
 			if ( in_array( $channel, [ 'sms', 'bale', 'call', 'email' ], true ) ) {
 				OTPQueueStore::set_provider_channel( $channel );
-				if ( null !== $queue_claim_token ) {
-					try {
+				try {
+					if ( null !== $queue_claim_token ) {
 						OTPImmediateDelivery::guard( (string) $otp->flow_id, $queue_claim_token, [ $channel ] );
 						OTPQueueStore::guard_provider();
-					} catch ( OTPDeliveryDeferredException $exception ) {
-						if ( false === OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token ) ) {
-							throw $exception;
-						}
-						$uncertain = $uncertain || null === OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token );
-						// Prior acceptance remains authoritative. Never begin another
-						// channel after the finite budget or its connection lease ends.
+					}
+					// Keep accepted channels if a preceding provider outlives the
+					// flow or an erasure cancels it, but never start another send.
+					if ( $otp->expires_at->lessThanOrEqualTo( Carbon::now() ) ) {
 						break;
 					}
-				}
-				// A previous provider may outlive the flow or an erasure may cancel
-				// its claim. Keep accepted channels, but never start another send.
-				if ( $otp->expires_at->lessThanOrEqualTo( Carbon::now() ) ||
-					( null !== $queue_claim_token && ! RateLimitService::queued_otp_is_active( (string) $otp->flow_id, $queue_claim_token ) ) ) {
+					if ( null !== $queue_claim_token ) {
+						$claim_state = OTPQueueStore::queued_claim_state( (string) $otp->flow_id, $queue_claim_token );
+						if ( 'unavailable' === $claim_state ) {
+							throw new OTPDeliveryDeferredException( 'Queued channel ownership is unavailable.' );
+						}
+						if ( 'active' !== $claim_state ) {
+							break;
+						}
+					}
+				} catch ( OTPDeliveryDeferredException $exception ) {
+					$attempted = null === $queue_claim_token ? null : OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token );
+					if ( false === $attempted ) {
+						throw $exception;
+					}
+					$uncertain = $uncertain || null === $attempted;
+					// Prior acceptance remains authoritative. An unattempted
+					// deferral must not become a terminal known provider failure.
 					break;
 				}
 

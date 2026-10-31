@@ -33,7 +33,7 @@ namespace {
 		if ( ! preg_match( '/\A[a-z][a-z0-9_-]{0,47}\z/D', $case ) ) {
 			$case = 'invalid';
 		}
-		$allowed = [ 'request_start', 'early_shutdown', 'finished', 'account_lookup', 'provider_enter', 'provider_return', 'blocked_http', 'blocked_mail' ];
+		$allowed = [ 'request_start', 'early_shutdown', 'finished', 'account_lookup', 'provider_enter', 'provider_return', 'blocked_http', 'blocked_mail', 'cli_ready', 'cli_command' ];
 		if ( ! in_array( $event, $allowed, true ) ) {
 			return;
 		}
@@ -42,6 +42,32 @@ namespace {
 	}
 
 	pinova_full_stack_marker( 'request_start' );
+	if ( defined( 'WP_CLI' ) && WP_CLI ) {
+		\WP_CLI::add_hook( 'before_invoke:pinova otp run', static function (): void { pinova_full_stack_marker( 'cli_command' ); } );
+		$barrier = (string) getenv( 'PINOVA_FPM_CLI_BARRIER' );
+		if ( '' !== $barrier ) {
+			if ( ! preg_match( '/\A[1-9][0-9]{0,3}\z/D', $barrier ) ) { exit( 1 ); }
+			\WP_CLI::add_hook( 'after_wp_load', static function () use ( $fixture_root, $barrier ): void {
+				$prefix = $fixture_root . '/private/cli-' . $barrier;
+				pinova_full_stack_marker( 'cli_ready' );
+				if ( false === file_put_contents( $prefix . '.booted.tmp', (string) getmypid(), LOCK_EX )
+					|| ! rename( $prefix . '.booted.tmp', $prefix . '.booted' ) ) { exit( 1 ); }
+				$end = hrtime( true ) + 15000000000;
+				do {
+					clearstatcache( true, $prefix . '.release' );
+					if ( is_file( $prefix . '.release' ) ) {
+						// These processes booted before the new flow was scheduled.
+						// Discard both individual and autoloaded option snapshots.
+						wp_cache_delete( 'cron', 'options' );
+						wp_cache_delete( 'alloptions', 'options' );
+						return;
+					}
+					usleep( 1000 );
+				} while ( hrtime( true ) < $end );
+				exit( 1 );
+			} );
+		}
+	}
 	// Registered at MU bootstrap, before the production finalizer; this is not
 	// the end of a request or its post-response provider tail.
 	register_shutdown_function( static function (): void { pinova_full_stack_marker( 'early_shutdown' ); } );

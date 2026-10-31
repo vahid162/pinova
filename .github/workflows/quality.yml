@@ -49,6 +49,8 @@ jobs:
           node-version: '24.21.0'
       - run: npm run lint:js
       - run: npm run test:js
+      - name: Verify bounded log-observation behavior
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/ops -p 'test_log_cursor.py' -v
 
   repository-lint:
     name: Workflow and shell lint
@@ -158,7 +160,7 @@ jobs:
         run: npm run env:stop
 
   browser-account-ui:
-    name: Account UI / Stage 1 Chromium
+    name: Account UI / Chromium and WebKit
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -185,7 +187,7 @@ jobs:
         env:
           WP_VERSION: '7.1'
           WC_VERSION: '11.1.0'
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       - run: npm run env:start -- --update
       - name: Install PDO MySQL in the disposable browser containers
         run: |
@@ -199,7 +201,7 @@ jobs:
           curl --fail --retry 10 --retry-delay 2 --retry-connrefused "${PLAYWRIGHT_BASE_URL}/login" --output /dev/null
       - name: Verify real REST-to-Cron delivery boundary
         run: bash tests/Integration/cron-rest-boundary.sh
-      - name: Run Stage 1 browser acceptance
+      - name: Run Chromium and WebKit acceptance
         run: npm run test:browser
       - name: Verify modal tests detect real product faults
         timeout-minutes: 8
@@ -469,14 +471,20 @@ jobs:
           retention-days: 7
 
   otp-fpm-full-stack:
-    name: OTP PHP-FPM queue and resources
+    name: OTP PHP-FPM queue and resources (${{ matrix.php }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
     env:
       PINOVA_TEST_PROFILE: third-party
       PINOVA_TEST_PLUGIN_SET: deployed
       PINOVA_FPM_FULL_STACK_ROOT: /tmp/pinova-fpm-full-${{ github.run_id }}-${{ github.run_attempt }}
-      PINOVA_FPM_BIN: /usr/sbin/php-fpm8.3
+      PINOVA_FPM_BIN: /usr/sbin/php-fpm${{ matrix.php }}
+      PINOVA_FPM_PHP_BIN: /usr/bin/php${{ matrix.php }}
+      PINOVA_FPM_PHP_VERSION: ${{ matrix.php }}
       PINOVA_FPM_NGINX_BIN: /usr/sbin/nginx
       PINOVA_FPM_MYSQL_SOCKET: /var/run/mysqld/mysqld.sock
       PINOVA_FPM_MYSQL_DEFAULTS_FILE: /tmp/pinova-fpm-full-${{ github.run_id }}-${{ github.run_attempt }}/mysql-admin.cnf
@@ -484,7 +492,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
-          php-version: '8.3'
+          php-version: ${{ matrix.php }}
           coverage: none
           extensions: curl, dom, fileinfo, gd, mbstring, pdo_mysql, simplexml, xml, xmlreader, xmlwriter, zip
           tools: composer:2.10.3, wp-cli:2.12.0
@@ -495,7 +503,7 @@ jobs:
         run: |
           sudo add-apt-repository --yes ppa:ondrej/php
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends php8.3-fpm php8.3-curl php8.3-gd php8.3-mbstring php8.3-mysql php8.3-xml php8.3-zip nginx
+          sudo apt-get install -y --no-install-recommends "php${PINOVA_FPM_PHP_VERSION}-fpm" "php${PINOVA_FPM_PHP_VERSION}-curl" "php${PINOVA_FPM_PHP_VERSION}-gd" "php${PINOVA_FPM_PHP_VERSION}-mbstring" "php${PINOVA_FPM_PHP_VERSION}-mysql" "php${PINOVA_FPM_PHP_VERSION}-xml" "php${PINOVA_FPM_PHP_VERSION}-zip" nginx
           sudo systemctl start mysql.service
           mkdir -p "${PINOVA_FPM_FULL_STACK_ROOT}"
           sudo install -m 0600 /dev/null "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}"
@@ -518,6 +526,7 @@ jobs:
             GITHUB_WORKSPACE="${GITHUB_WORKSPACE}" PATH="${PATH}" \
             PINOVA_FPM_FULL_STACK_ROOT="${PINOVA_FPM_FULL_STACK_ROOT}" \
             PINOVA_FPM_BIN="${PINOVA_FPM_BIN}" PINOVA_FPM_NGINX_BIN="${PINOVA_FPM_NGINX_BIN}" \
+            PINOVA_FPM_PHP_BIN="${PINOVA_FPM_PHP_BIN}" PINOVA_FPM_PHP_VERSION="${PINOVA_FPM_PHP_VERSION}" \
             PINOVA_FPM_WP_CLI="${PINOVA_FPM_WP_CLI}" PINOVA_FPM_MYSQL_SOCKET="${PINOVA_FPM_MYSQL_SOCKET}" \
             PINOVA_FPM_MYSQL_DEFAULTS_FILE="${PINOVA_FPM_MYSQL_DEFAULTS_FILE}" \
             bash tests/Integration/otp-fpm-full-stack.sh
@@ -525,7 +534,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: otp-fpm-full-stack-${{ github.run_id }}-${{ github.run_attempt }}
+          name: otp-fpm-full-stack-php-${{ matrix.php }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.PINOVA_FPM_FULL_STACK_ROOT }}/receipt
           if-no-files-found: error
           retention-days: 7

@@ -18,10 +18,19 @@ fi
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 fixture_root="${repo_root}/tests/fixtures/fpm-otp"
 fpm_bin="${PINOVA_FPM_BIN:?Missing native FPM binary}"
+php_bin="${PINOVA_FPM_PHP_BIN:-$(command -v php)}"
+php_version="${PINOVA_FPM_PHP_VERSION:-8.3}"
 nginx_bin="${PINOVA_FPM_NGINX_BIN:?Missing native nginx binary}"
 wp_cli="${PINOVA_FPM_WP_CLI:?Missing executable WP-CLI}"
 mysql_socket="${PINOVA_FPM_MYSQL_SOCKET:?Missing existing MySQL Unix socket}"
-[[ -x "${fpm_bin}" && -x "${nginx_bin}" && -x "${wp_cli}" && -S "${mysql_socket}" ]]
+[[ "${php_version}" =~ ^8\.[34]$ && -x "${php_bin}" && -x "${fpm_bin}" && -x "${nginx_bin}" && -x "${wp_cli}" && -S "${mysql_socket}" ]]
+[[ "$("${php_bin}" -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')" == "${php_version}" ]]
+export PINOVA_FPM_PHP_VERSION="${php_version}" PINOVA_FPM_PHP_BIN="${php_bin}"
+plugin_root="${PINOVA_FPM_PLUGIN_ROOT:-${repo_root}}"
+if [[ "${plugin_root}" != "${repo_root}" ]]; then
+	[[ "${plugin_root}" == "${run_root}/runtime" && -d "${plugin_root}" && ! -L "${plugin_root}" \
+		&& "${PINOVA_FPM_REVISION_ARM:-}" =~ ^[ab][123]$ && "${PINOVA_FPM_REVISION_SOURCE:-}" =~ ^[a-f0-9]{40}$ ]]
+fi
 export PINOVA_FPM_FULL_STACK_FIXTURE=1
 export PINOVA_FPM_PROVIDER_PORT=18081
 export PINOVA_FPM_HTTP_PORT=18080
@@ -72,7 +81,7 @@ SQL
 		cp -a "${repo_root}/.build/third-party/${plugin}" "${run_root}/wordpress/wp-content/plugins/${plugin}"
 	done
 	[[ ! -e "${run_root}/wordpress/wp-content/plugins/pinova" ]]
-	ln -s "${repo_root}" "${run_root}/wordpress/wp-content/plugins/pinova"
+	ln -s "${plugin_root}" "${run_root}/wordpress/wp-content/plugins/pinova"
 	printf 'off\n' > "${run_root}/mode"
 	export PINOVA_FPM_DB_NAME="${database}" PINOVA_FPM_DB_PASSWORD="${password}"
 	# A new namespace has no external interfaces/routes. The Unix DB socket is
@@ -88,7 +97,7 @@ if ip -o link show | grep -Ev '^[0-9]+: lo:' | grep -q . || ip route show | grep
 	exit 1
 fi
 export PINOVA_FPM_NETWORK_ISOLATED=1
-wp=("${wp_cli}" --allow-root --path="${run_root}/wordpress")
+wp=("${php_bin}" "${wp_cli}" --allow-root --path="${run_root}/wordpress")
 "${wp[@]}" config create --skip-check --dbname="${PINOVA_FPM_DB_NAME}" --dbuser="${PINOVA_FPM_DB_NAME}" \
 	--dbpass="${PINOVA_FPM_DB_PASSWORD}" --dbhost="localhost:${mysql_socket}" --dbprefix=wp_fpm_ \
 	> "${run_root}/private/config-create.log" 2>&1

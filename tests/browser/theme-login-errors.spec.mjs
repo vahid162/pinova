@@ -75,7 +75,7 @@ function json(route, data, status = 200, headers = {}) {
 }
 
 for (const kind of ['woodmart', 'flatsome']) {
-    test(`${kind}: wrong password shows plain feedback and the received reference`, async ({ page }) => {
+    test(`${kind}: wrong password shows plain feedback and the received reference`, async ({ page }, testInfo) => {
         const root = await openTheme(page, kind, route => {
             if (route.request().url().includes('/user/authenticate')) {
                 return json(route, { success: true, data: { login_method: 'password' } });
@@ -96,6 +96,17 @@ for (const kind of ['woodmart', 'flatsome']) {
         await expect(root.locator('[pinova-text="status.reference"]')).toHaveText(reference);
         await expect(root.locator('[pinova-text="status.reference"]')).toHaveAttribute('dir', 'ltr');
         await expect(root.getByRole('status')).toHaveAttribute('aria-atomic', 'true');
+        for (const [layout, viewport] of [
+            ['desktop', { width: 1280, height: 800 }],
+            ['mobile', { width: 390, height: 844 }],
+        ]) {
+            await page.setViewportSize(viewport);
+            await expect(root.getByRole('status')).toBeVisible();
+            await expect(root.locator('[pinova-text="status.reference"]')).toBeVisible();
+            const screenshot = testInfo.outputPath(`${kind}-${layout}-feedback.png`);
+            await page.screenshot({ path: screenshot, fullPage: true, animations: 'disabled' });
+            await testInfo.attach(`${kind}-${layout}-feedback`, { path: screenshot, contentType: 'image/png' });
+        }
     });
 
     test(`${kind}: incorrect OTP, throttling and invalid response preserve visible safe feedback`, async ({ page }) => {

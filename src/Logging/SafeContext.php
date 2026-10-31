@@ -186,11 +186,11 @@ final class SafeContext {
 	}
 
 	/** Reject anonymous/path-bearing names without resolving or autoloading symbols. */
-	private function sanitize_exception_class( string $class ): string {
-		if ( '' === $class || 160 < strlen( $class ) ) {
+	private function sanitize_exception_class( string $class_name ): string {
+		if ( '' === $class_name || 160 < strlen( $class_name ) ) {
 			return '';
 		}
-		$segments = explode( '\\', $class );
+		$segments = explode( '\\', $class_name );
 		if ( '' === $segments[0] ) {
 			array_shift( $segments );
 		}
@@ -199,7 +199,7 @@ final class SafeContext {
 				return '';
 			}
 		}
-		return $class;
+		return $class_name;
 	}
 
 	/** @param mixed $code */

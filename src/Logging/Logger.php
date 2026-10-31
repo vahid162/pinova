@@ -146,7 +146,7 @@ final class Logger extends AbstractLogger {
 			}
 			$context['operation']     = $diagnostic->operation();
 			$context['flow_deadline'] = $diagnostic->deadline();
-			$context                 = array_merge( $context, call_user_func( $this->metadata_provider ) );
+			$context                  = array_merge( $context, call_user_func( $this->metadata_provider ) );
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- Pure logger contract also runs without WordPress.
 			$encoded = json_encode( $context, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR );
 			if ( ! is_string( $encoded ) || DiagnosticContext::MAX_CONTEXT_BYTES < strlen( $encoded )
@@ -220,7 +220,7 @@ final class Logger extends AbstractLogger {
 	 * @param array<string, mixed> $context
 	 */
 	private function write( string $level, $message, array $context ): void {
-		$event   = $this->sanitize_event( $message );
+		$event = $this->sanitize_event( $message );
 		if ( DiagnosticContext::EVENT === $event ) {
 			// Neither PSR-3 calls nor the administrative audit bypass admit detail.
 			return;

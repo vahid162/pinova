@@ -25,16 +25,40 @@ final class DiagnosticContext {
 	];
 
 	private const ERROR_CODES = [
-		'none', 'disabled', 'unsupported_runtime', 'unsupported_buffer',
-		'response_unhealthy', 'completion_unavailable', 'completion_failed',
-		'headroom_unavailable', 'headroom_insufficient', 'slot_unavailable',
-		'channel_unsupported', 'deadline_expired', 'claim_unavailable',
-		'budget_expired', 'queue_schedule_failed', 'queue_acknowledgement_failed',
-		'invalid_payload', 'duplicate_records', 'policy_rejected', 'already_completed',
-		'provider_returned_false', 'provider_exception', 'provider_timeout',
-		'provider_outcome_unknown', 'invalid_token', 'record_not_found',
-		'flow_mismatch', 'purpose_mismatch', 'already_verified', 'attempt_limit',
-		'ip_mismatch', 'invalid_code', 'claim_rejected', 'operation_failed',
+		'none',
+		'disabled',
+		'unsupported_runtime',
+		'unsupported_buffer',
+		'response_unhealthy',
+		'completion_unavailable',
+		'completion_failed',
+		'headroom_unavailable',
+		'headroom_insufficient',
+		'slot_unavailable',
+		'channel_unsupported',
+		'deadline_expired',
+		'claim_unavailable',
+		'budget_expired',
+		'queue_schedule_failed',
+		'queue_acknowledgement_failed',
+		'invalid_payload',
+		'duplicate_records',
+		'policy_rejected',
+		'already_completed',
+		'provider_returned_false',
+		'provider_exception',
+		'provider_timeout',
+		'provider_outcome_unknown',
+		'invalid_token',
+		'record_not_found',
+		'flow_mismatch',
+		'purpose_mismatch',
+		'already_verified',
+		'attempt_limit',
+		'ip_mismatch',
+		'invalid_code',
+		'claim_rejected',
+		'operation_failed',
 	];
 
 	private const CODE_VALUES = [
@@ -98,7 +122,7 @@ final class DiagnosticContext {
 		$details['operation']     = $this->operation;
 		$details['observed_at']   = $this->last_observed;
 		$details['flow_deadline'] = $this->deadline;
-		$safe                    = self::sanitize( $details );
+		$safe                     = self::sanitize( $details );
 		if ( [] === $safe ) {
 			$this->coverage = 'incomplete';
 			return;
@@ -140,7 +164,11 @@ final class DiagnosticContext {
 		}
 	}
 
-	/** A pure local recheck, not an authentication or delivery permission. */
+	/**
+	 * A local clock/state recheck, not an authentication or delivery permission.
+	 *
+	 * @phpstan-impure
+	 */
 	public function is_current(): bool {
 		if ( ! $this->valid ) {
 			return false;

@@ -80,8 +80,8 @@ final class EventEvidence {
 		$context_limit     = DiagnosticContext::EVENT === $event ? DiagnosticContext::MAX_CONTEXT_BYTES : 8192;
 		$context_truncated = ! empty( $row['context_truncated'] ) || strlen( $encoded ) > $context_limit;
 		$stored            = $context_truncated ? [] : json_decode( $encoded, true, 32 );
-		$stored = is_array( $stored ) ? $stored : [];
-		$safe   = [];
+		$stored            = is_array( $stored ) ? $stored : [];
+		$safe              = [];
 		foreach ( [
 			'attempt'             => 1000,
 			'attempts'            => 1000,

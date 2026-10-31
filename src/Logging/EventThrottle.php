@@ -126,7 +126,13 @@ final class EventThrottle {
 	public static function initialize_diagnostics(): bool {
 		return (bool) self::diagnostic_operation(
 			static function ( \wpdb $database ): bool {
-				$payload = wp_json_encode( [ 'v' => 1, 'slots' => [], 'limited' => false ] );
+				$payload = wp_json_encode(
+					[
+						'v'       => 1,
+						'slots'   => [],
+						'limited' => false,
+					]
+				);
 				if ( false === $payload || false === $database->query(
 					$database->prepare(
 						'INSERT IGNORE INTO %i (bucket_key, scope, hits, reset_at, updated_at, payload)
@@ -296,7 +302,13 @@ final class EventThrottle {
 				return null;
 			}
 		}
-		return [ 'row' => $row, 'hits' => $hits, 'now' => $now, 'reset' => $reset, 'decoded' => $decoded ];
+		return [
+			'row'     => $row,
+			'hits'    => $hits,
+			'now'     => $now,
+			'reset'   => $reset,
+			'decoded' => $decoded,
+		];
 	}
 
 	/** Exactly one affected row admits; a reconnect/replay cannot win a stale CAS. */

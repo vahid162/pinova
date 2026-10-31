@@ -121,6 +121,70 @@ class LogCursorTest(unittest.TestCase):
         self.assertEqual(3, result["retained_files"])
         self.assertEqual([], result["detected_gaps"])
 
+    def test_replacement_between_event_drain_and_open_cannot_silently_lose_a_generation(self):
+        cursor = self.cursor()
+        self.path.rename(self.logs / "baseline")
+        first_generation = b"PHP Warning: unresolved first generation\n"
+        self.path.write_bytes(first_generation)
+        retained = self.logs / "first-generation"
+        native_open = MODULE.os.open
+        raced = False
+
+        def replace_before_native_open(name, flags, *args, **kwargs):
+            nonlocal raced
+            if not raced and name == cursor._name and kwargs.get("dir_fd") == cursor._parent_fd:
+                raced = True
+                # CREATE has already been drained. Change the name before the
+                # unresolved generation's actual open, retaining its old bytes.
+                self.path.rename(retained)
+                self.path.write_bytes(b"PHP Fatal error: replacement generation\n")
+            return native_open(name, flags, *args, **kwargs)
+
+        with patch.object(MODULE.os, "open", side_effect=replace_before_native_open):
+            cursor.observe()
+        self.assertTrue(raced, "The fixture must reach the intended native-open race.")
+        self.assertEqual(first_generation, retained.read_bytes())
+        result = cursor.observe()
+        both_observed = (result["totals"]["php_warning"] == 1
+                         and result["totals"]["php_fatal"] == 1)
+        self.assertTrue(both_observed or result["detected_gaps"],
+                        "A replaced generation must be observed or explicitly marked as a gap.")
+        self.assertFalse(result["coverage_complete"])
+        if result["detected_gaps"]:
+            self.append(b"ordinary later row\n")
+            self.assertTrue(set(result["detected_gaps"]).issubset(cursor.observe()["detected_gaps"]))
+
+    def test_replaced_ancestor_invalidates_absolute_parent_but_preserves_old_fd_writes(self):
+        holder = self.root / "holder"
+        logs = holder / "logs"
+        logs.mkdir(parents=True)
+        source = logs / "source.log"
+        source.write_bytes(b"")
+        cursor = LogCursor(source)
+        self.addCleanup(cursor.close)
+        with source.open("ab", buffering=0) as old_writer:
+            # The watched child directory is not itself renamed. Its ancestor
+            # moves, so a MOVE_SELF event for that child is not a witness.
+            holder.rename(self.root / "retained-holder")
+            logs.mkdir(parents=True)
+            source.write_bytes(b"PHP Fatal error: new absolute path\n")
+            held_parent = os.fstat(cursor._parent_fd)
+            current_parent = logs.stat()
+            self.assertNotEqual((held_parent.st_dev, held_parent.st_ino),
+                                (current_parent.st_dev, current_parent.st_ino))
+            old_writer.write(b"PHP Warning: retained old descriptor\n")
+            result = cursor.observe()
+            self.assertEqual(1, result["counts"]["php_warning"])
+            self.assertTrue(any(reason.startswith("parent_") for reason in result["detected_gaps"]),
+                            "Replacing an ancestor must explicitly invalidate the absolute parent identity.")
+            self.assertFalse(result["current_path_available"])
+            self.assertEqual("incomplete", result["history_assurance"])
+            old_writer.write(b"PHP Warning: later old descriptor\n")
+            later = cursor.observe()
+            self.assertEqual(1, later["counts"]["php_warning"])
+            self.assertTrue(set(result["detected_gaps"]).issubset(later["detected_gaps"]))
+        self.assertFalse(result["coverage_complete"])
+
     def test_generation_removed_before_open_latches_an_unrecoverable_gap(self):
         cursor = self.cursor()
         self.path.rename(self.logs / "baseline")

@@ -1,0 +1,17 @@
+name: Observer race contract proof
+
+on:
+  push:
+    branches: ['proof/diagnostics-u6-observer-races']
+
+permissions:
+  contents: read
+
+jobs:
+  observer-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prove open and ancestor races cannot silently lose observations
+        run: python3 -I -B -m unittest discover -s tests/ops -p test_log_cursor.py -v

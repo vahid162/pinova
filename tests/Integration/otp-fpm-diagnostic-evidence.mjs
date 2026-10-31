@@ -1,6 +1,9 @@
 /** Finite observations for disposable diagnostic probes; import performs no I/O. */
 import { constants, openSync, closeSync, fstatSync, readSync, realpathSync } from 'node:fs';
 const MAX_TEXT = 65536;
+// Encloses the unchanged 180s admission wait, observed setup/warmup and
+// measurement time, plus finite orchestration/cleanup contingency.
+export const REVISION_ARM_TIMEOUT_MS = 420000;
 export const DIAGNOSTIC_CASES = Object.freeze([
     { id: '83-normal-baseline', php: '8.3', logging: 'normal', arm: 'a1' },
     { id: '84-normal-candidate', php: '8.4', logging: 'normal', arm: 'b1' },
@@ -11,7 +14,9 @@ const PID_MAX = 2147483647;
 const phases = new Set(['shell_prepare', 'shell_database', 'shell_config', 'shell_install', 'shell_activate', 'shell_setup',
     'native_start', 'controller_start', 'readiness', 'ordinary_warmup', 'headroom_wait', 'revision_warmup', 'warm_issue',
     'warm_response', 'warm_runner', 'warm_acceptance', 'warm_verify', 'warm_stabilize', 'revision_measurement',
-    'measurement_issue', 'measurement_runner', 'measurement_acceptance', 'probe_completed', 'controller_failed', 'cleanup']);
+    'measurement_issue', 'measurement_pages', 'measurement_runner', 'measurement_acceptance', 'measurement_quiescent',
+    'measurement_inspect', 'measurement_verify', 'measurement_finish', 'revision_postmeasurement',
+    'probe_completed', 'controller_failed', 'cleanup']);
 const signals = { 1: 'SIGHUP', 2: 'SIGINT', 3: 'SIGQUIT', 4: 'SIGILL', 5: 'SIGTRAP', 6: 'SIGABRT', 7: 'SIGBUS',
     8: 'SIGFPE', 9: 'SIGKILL', 11: 'SIGSEGV', 13: 'SIGPIPE', 14: 'SIGALRM', 15: 'SIGTERM', 17: 'SIGCHLD',
     18: 'SIGCONT', 19: 'SIGSTOP', 20: 'SIGTSTP', 31: 'SIGSYS' };
@@ -31,7 +36,7 @@ export function executionEvidence(result, elapsedMs) {
         signal: signal == null ? null : Object.values(signals).includes(signal) ? signal : 'unknown',
         error_code: error == null ? null : ['ETIMEDOUT', 'ENOBUFS', 'ENOENT', 'EACCES'].includes(error) ? error : 'OTHER',
         elapsed_ms: typeof elapsedMs === 'number' && Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs <= 3600000 ? Math.round(elapsedMs) : null,
-        timeout_ms: 180000, stdout_bytes: bytes(result?.stdout), stderr_bytes: bytes(result?.stderr) };
+        timeout_ms: REVISION_ARM_TIMEOUT_MS, stdout_bytes: bytes(result?.stdout), stderr_bytes: bytes(result?.stderr) };
 }
 export function sanitizeCheckpoint(value) {
     const v = value && typeof value === 'object' && !Array.isArray(value) ? value : {};

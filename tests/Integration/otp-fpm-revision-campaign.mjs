@@ -5,7 +5,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, real
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateCampaign } from './revision-resource-gates.mjs';
-import { DIAGNOSTIC_CASES, executionEvidence, readDiagnosticEvidence } from './otp-fpm-diagnostic-evidence.mjs';
+import { DIAGNOSTIC_CASES, REVISION_ARM_TIMEOUT_MS, executionEvidence, readDiagnosticEvidence } from './otp-fpm-diagnostic-evidence.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const id = process.env.GITHUB_RUN_ID;
@@ -102,11 +102,11 @@ try {
         const execution = spawnSync('bash', [path.join(repo, 'tests/Integration/otp-fpm-full-stack.sh')], {
             cwd: repo, env: { ...process.env, PINOVA_FPM_PLUGIN_ROOT: `${runRoot}/runtime`,
                 PINOVA_FPM_REVISION_ARM: arm, PINOVA_FPM_REVISION_SOURCE: source },
-            encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 180000,
+            encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: REVISION_ARM_TIMEOUT_MS,
         });
         // Persist child outcome before any receipt parsing or cleanup can fail.
         activeRow.execution = executionEvidence(execution, performance.now() - executionStarted);
-        if (probeCase) activeRow.parent_diagnostic_evidence = { ...readDiagnosticEvidence(runRoot),
+        if (probeCase || execution.status !== 0 || execution.error || execution.signal) activeRow.parent_diagnostic_evidence = { ...readDiagnosticEvidence(runRoot),
             collection_boundary: 'after_fixture_exit_or_timeout', termination_causation_unverified: true };
         save();
         writeFileSync(stdout, `${execution.stdout || ''}\n${execution.stderr || ''}`, { mode: 0o600 });
@@ -123,7 +123,8 @@ try {
         Object.assign(activeRow, { profile_sha256: profile,
             state: execution.status === 0 && receipt?.state === 'passed' ? 'passed' : 'failed',
             measurement: probeCase ? null : receipt?.revision_arm || null,
-            ...(probeCase ? { diagnostic: receipt?.diagnostic_probe || null,
+            ...(probeCase ? { diagnostic: receipt?.diagnostic_probe || null } : {}),
+            ...(activeRow.parent_diagnostic_evidence ? {
                 diagnostic_evidence: receipt?.diagnostic_evidence || activeRow.parent_diagnostic_evidence } : {}),
             failure_phase: receipt?.failure_phase || (execution.status === 0 ? null : 'fixture_execution'),
         });

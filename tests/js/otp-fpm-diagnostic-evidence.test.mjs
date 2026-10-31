@@ -23,12 +23,15 @@ test('finite parser bounds and unknown labels cannot smuggle raw diagnostics', (
 });
 test('execution status is finite even when no child receipt exists', () => {
     const result = executionEvidence({ status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT', message: 'private URI OTP' },
-        stdout: 'secret-output', stderr: 'private-script' }, 180012);
+        stdout: 'secret-output', stderr: 'private-script' }, 420012);
     assert.equal(result.error_code, 'ETIMEDOUT'); assert.equal(result.signal, 'SIGTERM');
-    assert.equal(result.elapsed_ms, 180012); assert.equal(result.timeout_ms, 180000);
+    assert.equal(result.elapsed_ms, 420012); assert.equal(result.timeout_ms, 420000);
     assert.equal(JSON.stringify(result).includes('private'), false);
     assert.equal(executionEvidence({ signal: 'SIGSECRET', error: { code: 'SECRET' } }, Infinity).signal, 'unknown');
     assert.equal(executionEvidence({}, -1).elapsed_ms, null);
+    const completed = executionEvidence({ status: 0, signal: null, stdout: '', stderr: '' }, 305000);
+    assert.equal(completed.exit_code, 0); assert.equal(completed.error_code, null);
+    assert.equal(completed.elapsed_ms, 305000); assert.equal(completed.timeout_ms, 420000);
 });
 test('checkpoint normalization accepts only finite phase and lifecycle fields', () => {
     const result = sanitizeCheckpoint({ phase: 'warm_issue', arm: 'b1', flow_index: 5, at_ms: 1793459146000,
@@ -37,6 +40,10 @@ test('checkpoint normalization accepts only finite phase and lifecycle fields', 
     assert.equal(JSON.stringify(result).includes('otp'), false);
     const invalid = sanitizeCheckpoint({ phase: 'private-secret', flow_index: 999, at_ms: NaN, pid: -1 });
     assert.equal(invalid.phase, 'unknown'); assert.equal(invalid.flow_index, null); assert.equal(invalid.at_ms, null);
+    const measured = sanitizeCheckpoint({ phase: 'measurement_acceptance', flow_index: 10, pid: 123,
+        uri: '/private/?otp=123456', resource_acceptance: true });
+    assert.equal(measured.phase, 'measurement_acceptance'); assert.equal(measured.flow_index, 10);
+    assert.equal(measured.resource_acceptance, false); assert.equal(JSON.stringify(measured).includes('otp'), false);
 });
 test('last finite markers preserve chronology with no arbitrary context', () => {
     const rows = Array.from({ length: 70 }, (_, index) => JSON.stringify({ case: 'revision-warm-worker-5', event: 'cli_command',

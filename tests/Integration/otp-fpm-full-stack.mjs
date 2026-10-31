@@ -61,10 +61,18 @@ ensure(!probeId || (probeCase && probeCase.php === selectedPhp && probeCase.logg
     probeCase.arm === process.env.PINOVA_FPM_REVISION_ARM), 'Invalid focused diagnostic case.');
 const checkpointStarted = performance.now();
 let checkpointFailed = false;
+let lastCheckpoint = null;
+let measuring = false;
 function checkpoint(phaseName, flowIndex = null) {
-    if (!probeCase) return;
     const value = sanitizeCheckpoint({ phase: phaseName, flow_index: flowIndex, arm: process.env.PINOVA_FPM_REVISION_ARM,
         at_ms: Date.now(), elapsed_ms: Math.round(performance.now() - checkpointStarted), pid: process.pid });
+    lastCheckpoint = value;
+    // Ordinary campaigns update memory during measurement. Sparse preceding
+    // checkpoints survive an outer timeout without measured-window file I/O.
+    if (measuring) return;
+    if (!probeCase && !(process.env.PINOVA_FPM_REVISION_ARM &&
+        ['controller_start', 'readiness', 'ordinary_warmup', 'headroom_wait', 'revision_warmup',
+            'revision_measurement', 'revision_postmeasurement'].includes(phaseName))) return;
     try {
         writeFileSync(path.join(root, 'phase-checkpoint.json.tmp'), JSON.stringify(value) + '\n', { mode: 0o600 });
         renameSync(path.join(root, 'phase-checkpoint.json.tmp'), path.join(root, 'phase-checkpoint.json'));
@@ -363,7 +371,6 @@ function processSample() {
     ensure(children.length > 0 && children.length <= 64, 'FPM process inventory is unavailable.');
     return children.map(pid => inspectProcess(Number(pid), tick));
 }
-let measuring = false;
 let processSampler;
 let samples = [];
 let measuredCli = [];
@@ -967,6 +974,7 @@ try {
     for (const timer of pendingTimers) clearTimeout(timer);
     clearInterval(monitor);
     clearInterval(statusMonitor);
+    measuring = false;
     const unfinished = [...liveCli];
     for (const invocation of unfinished) invocation.abort();
     await Promise.allSettled(unfinished.map(invocation => invocation.result));
@@ -984,7 +992,10 @@ try {
     if (probeCase) {
         receipt.resource_acceptance = false;
         receipt.diagnostic_checkpoint_failed = checkpointFailed;
-        receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), collection_boundary: 'controller_before_fpm_teardown' };
+    }
+    if (probeCase || (process.env.PINOVA_FPM_REVISION_ARM && receipt.state === 'failed')) {
+        receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), last_phase: lastCheckpoint,
+            checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
     }
     sanitizedReceipt('full-stack-result.json', receipt);
 }

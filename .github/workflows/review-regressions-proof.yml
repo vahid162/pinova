@@ -2,7 +2,7 @@ name: Final review regression proof
 
 on:
   push:
-    branches: ['proof/diagnostics-review-regressions-*']
+    branches: ['proof/diagnostics-review-regressions-*', 'verify/diagnostics-u6-final-*']
   workflow_dispatch:
 
 permissions:
@@ -67,3 +67,44 @@ jobs:
       - run: composer install --no-interaction --no-progress --prefer-dist
       - name: Exercise HTTP completion projection
         run: vendor/bin/phpunit --configuration=phpunit.xml.dist --filter IssueMonitorTest
+
+  sidebar-lifecycle-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.21.0'
+      - name: Exercise actual form sidebar close and owned teardown
+        run: node --test tests/js/auth-webotp-lifecycle.test.mjs
+      - name: Prove sidebar regressions detect each omitted lifecycle safeguard
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {readFileSync, writeFileSync} from 'node:fs';
+          import {spawnSync} from 'node:child_process';
+          const target = 'assets/js/pages/login-form.js';
+          const original = readFileSync(target, 'utf8');
+          const faults = [
+            ["target.on('wdCloseSide.pinovaAuth', close);", '/* isolated proof fault: subscription omitted */', 'native sidebar close must abort'],
+            ["this.themeWebOtpCleanup = () => target.off('wdCloseSide.pinovaAuth', close);", 'this.themeWebOtpCleanup = () => {};', 'destroy must preserve the other mount'],
+            ["this.themeWebOtpCleanup = () => target.off('wdCloseSide.pinovaAuth', close);", "this.themeWebOtpCleanup = () => target.off('wdCloseSide.pinovaAuth');", 'destroy must preserve the other mount'],
+          ];
+          for (let index = 0; index < faults.length; index++) {
+            const [needle, replacement, expected] = faults[index];
+            assert.equal(original.split(needle).length, 2, 'source mutation must match exactly once');
+            let result;
+            try {
+              writeFileSync(target, original.replace(needle, replacement));
+              result = spawnSync(process.execPath, ['--test', '--test-name-pattern=^sidebar:', 'tests/js/auth-webotp-lifecycle.test.mjs'], {encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 30000});
+            } finally { writeFileSync(target, original); }
+            assert.equal(result.error, undefined, 'fault execution must complete');
+            assert.notEqual(result.status, 0, 'omitted lifecycle safety must be detected');
+            assert.equal(result.signal, null, 'signal termination is not an assertion witness');
+            assert.match(result.stdout, /AssertionError/);
+            assert.ok(result.stdout.includes(expected), 'the intended lifecycle assertion must fail');
+            console.log(`Sidebar fault ${index + 1}: intended assertion detected; source restored.`);
+          }
+          assert.equal(readFileSync(target, 'utf8'), original);
+          JS

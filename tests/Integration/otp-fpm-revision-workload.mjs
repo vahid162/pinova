@@ -62,26 +62,35 @@ export async function revisionWorkload({ ensure, root, writeFileSync, issue, ord
     receipt.revision_arm.ordinary_samples_ms = pageTimes;
     let completed = 0;
     for (let chunk = 0; chunk < 10; chunk++) {
+        checkpoint('measurement_issue', chunk + 1);
         const flow = await issue(chunk + 1, `revision-normal-${chunk + 1}`);
+        checkpoint('measurement_pages', chunk + 1);
         for (let pageIndex = 0; pageIndex < 10; pageIndex++) {
             const page = await ordinary(chunk * 10 + pageIndex, 'revision-normal-page');
             ensure(page.status === 200, 'Revision ordinary page failed.');
             pageTimes.push(page.ms);
             receipt.revision_arm.ordinary_count = pageTimes.length;
         }
+        checkpoint('measurement_runner', chunk + 1);
         await runWorker(`revision-normal-worker-${chunk + 1}`);
+        checkpoint('measurement_acceptance', chunk + 1);
         await until(() => records.some(record => record.case === flow.label && record.accepted !== null), 'Revision provider acceptance missing.');
+        checkpoint('measurement_quiescent', chunk + 1);
         await quiescent();
+        checkpoint('measurement_inspect', chunk + 1);
         const state = await inspect(flow);
         ensure(state.rows === 1 && state.purpose === 'login' && state.otp_expiry === state.expiry &&
             state.accepted_channels.length === 1 && state.accepted_channels[0] === 'sms' &&
             records.filter(record => record.case === flow.label).length === 1,
         'Revision delivery changed purpose, deadline or provider cardinality.');
+        checkpoint('measurement_verify', chunk + 1);
         await verifyFlow(flow);
         completed++;
         receipt.revision_arm.completed_stub_flows = completed;
     }
+    checkpoint('measurement_finish');
     const resources = await endMeasure();
+    checkpoint('revision_postmeasurement');
     const after = await site({ action: 'stats' });
     ensure(resources.measured_runner_invocations === 10 && completed === 10 && pageTimes.length === 100,
         'Revision arm did not complete its predeclared workload.');

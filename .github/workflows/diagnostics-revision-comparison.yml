@@ -16,7 +16,7 @@ jobs:
   compare:
     name: Revision resources / PHP ${{ matrix.php }} / ${{ matrix.logging }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

@@ -21,6 +21,8 @@ final class OTPQueueStore {
 	/** @var array<string,true> A flush gate only, never claim or provider permission. */
 	private static array $diagnostic_flow_locks      = [];
 	private static int $diagnostic_lock_acquisitions = 0;
+	/** @var array<string,?string> At most the two site slots; null means acquisition ownership is unknown. */
+	private static array $diagnostic_immediate_slots = [];
 
 	/**
 	 * Reserve a durable, opaque decoy flow for the same lifetime as a real OTP.
@@ -677,7 +679,7 @@ final class OTPQueueStore {
 	 */
 	public static function has_held_claims(): bool {
 		return self::$diagnostic_release_unknown || 0 < self::$diagnostic_lock_acquisitions
-			|| [] !== self::$diagnostic_flow_locks || [] !== self::$held_claims;
+			|| [] !== self::$diagnostic_flow_locks || [] !== self::$diagnostic_immediate_slots || [] !== self::$held_claims;
 	}
 
 	/** Pure attachment to the exact existing in-memory claim. */
@@ -706,6 +708,9 @@ final class OTPQueueStore {
 	/** Two nonblocking site slots; refuse recursive acquisition by this connection. */
 	public static function acquire_immediate_slot(): ?array {
 		global $wpdb;
+		if ( 2 <= count( self::$diagnostic_immediate_slots ) ) {
+			return null;
+		}
 		$connection = (string) $wpdb->get_var( 'SELECT CONNECTION_ID()' );
 		if ( $wpdb->last_error || '' === $connection ) {
 			return null;
@@ -718,22 +723,40 @@ final class OTPQueueStore {
 				return null;
 			}
 		}
-		foreach ( $names as $name ) {
-			$acquired = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) );
-			if ( self::database_read_failed() ) {
-				return null;
-			}
-			if ( '1' === (string) $acquired ) {
-				$lease = [
-					'name'       => $name,
-					'connection' => $connection,
-				];
-				if ( self::owns_immediate_slot( $lease ) ) {
-					return $lease;
+		++self::$diagnostic_lock_acquisitions;
+		try {
+			foreach ( $names as $name ) {
+				$tracked  = array_key_exists( $name, self::$diagnostic_immediate_slots );
+				$previous = self::$diagnostic_immediate_slots[ $name ] ?? null;
+				// wpdb can reenter after GET_LOCK succeeds but before a lease is returned.
+				self::$diagnostic_immediate_slots[ $name ] = null;
+				$acquired = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) );
+				if ( self::database_read_failed() ) {
+					return null;
 				}
-				self::release_immediate_slot( $lease );
+				if ( '0' === (string) $acquired ) {
+					if ( $tracked ) {
+						self::$diagnostic_immediate_slots[ $name ] = $previous;
+					} else {
+						unset( self::$diagnostic_immediate_slots[ $name ] );
+					}
+					continue;
+				}
+				if ( '1' === (string) $acquired ) {
+					$lease = [
+						'name'       => $name,
+						'connection' => $connection,
+					];
+					if ( self::owns_immediate_slot( $lease ) ) {
+						unset( self::$diagnostic_immediate_slots[ $name ] );
+						return $lease;
+					}
+					self::release_immediate_slot( $lease );
+				}
 				return null;
 			}
+		} finally {
+			--self::$diagnostic_lock_acquisitions;
 		}
 		return null;
 	}
@@ -754,7 +777,14 @@ final class OTPQueueStore {
 			|| 1 !== preg_match( '/\Apinova_otp_fast_[a-f0-9]{24}_[01]\z/D', $lease['name'] ) || '' === $lease['connection'] ) {
 			return false;
 		}
-		return self::release_named_lock_observed( $lease['name'], $lease['connection'] );
+		$connection = array_key_exists( $lease['name'], self::$diagnostic_immediate_slots )
+			? self::$diagnostic_immediate_slots[ $lease['name'] ] : $lease['connection'];
+		self::$diagnostic_immediate_slots[ $lease['name'] ] = $connection;
+		if ( ! self::release_named_lock_observed( $lease['name'], $connection ) ) {
+			return false;
+		}
+		unset( self::$diagnostic_immediate_slots[ $lease['name'] ] );
+		return true;
 	}
 
 	/** Never infer original release merely because the current connection changed. */

@@ -1,0 +1,37 @@
+name: Native public trust readiness
+
+on:
+  push:
+    branches: ['verify/release-trust-refresh']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-trust-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-tuf-refresh:
+    name: Pinned native TUF refresh on isolated egress
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compile bounded helper without execution
+        run: python3 -I -c 'from pathlib import Path; p=Path("tools/proof-native-trust-refresh.py"); compile(p.read_text(), str(p), "exec")'
+      - name: Authenticate current public trust through retained pinned roots
+        run: python3 -I tools/proof-native-trust-refresh.py --seed tests/fixtures/public-tuf-seed.json --output "/tmp/pinova-release-trust-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+      - name: Retain public metadata and bounded native proof
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-tuf-refresh-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/pinova-release-trust-${{ github.run_id }}-${{ github.run_attempt }}/trust
+            /tmp/pinova-release-trust-${{ github.run_id }}-${{ github.run_attempt }}/refresh-receipt.json
+            /tmp/pinova-release-trust-${{ github.run_id }}-${{ github.run_attempt }}/*-result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

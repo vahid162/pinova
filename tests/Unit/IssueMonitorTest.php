@@ -194,6 +194,82 @@ final class IssueMonitorTest extends TestCase {
 		}
 	}
 
+	public function test_timeline_selectors_reject_ambiguous_or_untrusted_linkage(): void {
+		$flow = str_repeat( 'a', 32 );
+		$correlation = '123e4567-e89b-42d3-a456-426614174000';
+		self::assertSame( [ 'valid' => true, 'type' => 'flow', 'value' => $flow ], IssueMonitor::selector( [ 'flow_id' => $flow ] ) );
+		self::assertSame( [ 'valid' => true, 'type' => 'correlation', 'value' => $correlation ], IssueMonitor::selector( [ 'correlation_id' => $correlation ] ) );
+		foreach ( [
+			[ 'flow_id' => $flow, 'correlation_id' => $correlation ],
+			[ 'flow_id' => [ $flow ] ],
+			[ 'flow_id' => strtoupper( $flow ) ],
+			[ 'correlation_id' => 'private-reference' ],
+			[ 'correlation_id' => '123e4567-e89b-12d3-a456-426614174000' ],
+		] as $filters ) {
+			self::assertSame( [ 'valid' => false, 'type' => 'invalid', 'value' => '' ], IssueMonitor::selector( $filters ) );
+		}
+	}
+
+	public function test_timeline_separates_transport_acceptance_verification_and_session_observations(): void {
+		$now = time();
+		$transport = $this->row( 2, 'otp.diagnostic', [ 'stage' => 'provider_completed', 'observed_at' => $now - 5, 'result' => 'accepted', 'provider_duration_ms' => 53, 'password' => 'private-password' ] );
+		$started = $this->row( 1, 'otp.diagnostic', [ 'stage' => 'provider_started', 'observed_at' => $now - 6 ] );
+		$verified = $this->row( 3, 'otp.verified' );
+		$timeline = IssueMonitor::timeline( [ $verified, $transport, $started ] );
+		self::assertSame( [ 1, 2, 3 ], array_column( $timeline['events'], 'id' ) );
+		self::assertTrue( $timeline['observed_facts']['transport_completed'] );
+		self::assertFalse( $timeline['observed_facts']['channel_accepted'] );
+		self::assertTrue( $timeline['observed_facts']['otp_verified'] );
+		self::assertFalse( $timeline['observed_facts']['session_created'] );
+		self::assertSame( 'not_verified', $timeline['physical_delivery'] );
+		self::assertTrue( $timeline['catalogue_is_not_required_sequence'] );
+		self::assertContains( 'channel_completed', $timeline['unobserved_stages'] );
+		self::assertSame( $now - 5, $timeline['events'][1]['context']['observed_at'] );
+		self::assertSame( $transport['created_at'], $timeline['events'][1]['created_at'] );
+		self::assertStringNotContainsString( 'private', json_encode( $timeline ) );
+
+		$accepted = $this->row( 4, 'otp.diagnostic', [ 'stage' => 'channel_completed', 'observed_at' => $now - 4, 'result' => 'accepted', 'channel' => 'email' ] );
+		$unknown = $this->row( 5, 'otp.diagnostic', [ 'stage' => 'channel_completed', 'observed_at' => $now - 3, 'result' => 'unknown' ] );
+		$session = $this->row( 6, 'auth.session_created' );
+		$timeline = IssueMonitor::timeline( [ $accepted, $unknown, $session ] );
+		self::assertTrue( $timeline['observed_facts']['channel_accepted'] );
+		self::assertTrue( $timeline['observed_facts']['channel_outcome_unknown'] );
+		self::assertTrue( $timeline['observed_facts']['session_created'] );
+		self::assertFalse( $timeline['observed_facts']['otp_verified'] );
+		self::assertSame( 'not_verified', $timeline['physical_delivery'] );
+	}
+
+	public function test_timeline_is_bounded_and_does_not_fabricate_legacy_stages(): void {
+		$rows = [];
+		for ( $id = 1; $id <= 1001; ++$id ) {
+			$rows[] = $this->row( $id, 'otp.created', [ 'identifier' => str_repeat( 'private', 1000 ), 'remaining_seconds' => 100 ] );
+		}
+		$timeline = IssueMonitor::timeline( $rows );
+		self::assertCount( 1000, $timeline['events'] );
+		self::assertSame( [], $timeline['observed_stages'] );
+		self::assertCount( 8, $timeline['unobserved_stages'] );
+		self::assertFalse( $timeline['observed_facts']['channel_accepted'] );
+		self::assertLessThanOrEqual( 2097152, strlen( json_encode( $timeline ) ) );
+		self::assertStringNotContainsString( 'private', json_encode( $timeline ) );
+
+		// Historical release tags are syntax-checked; use retained data to reach the byte cap.
+		$release_tag = 'v' . str_repeat( '1', 6000 ) . '.0.0-rc1';
+		$context = json_encode( [ 'release_tag' => $release_tag, 'identifier' => 'private-secret', 'remaining_seconds' => 100 ] );
+		self::assertLessThan( 8192, strlen( $context ) );
+		foreach ( $rows as &$row ) {
+			$row['context'] = $context;
+		}
+		unset( $row );
+		$timeline = IssueMonitor::timeline( $rows );
+		self::assertTrue( $timeline['byte_truncated'] );
+		self::assertNotEmpty( $timeline['events'] );
+		self::assertLessThan( 1000, count( $timeline['events'] ) );
+		self::assertSame( $release_tag, $timeline['events'][0]['context']['release_tag'] );
+		self::assertLessThanOrEqual( 2097152, strlen( json_encode( $timeline ) ) );
+		self::assertSame( [], $timeline['observed_stages'] );
+		self::assertStringNotContainsString( 'private-secret', json_encode( $timeline ) );
+	}
+
 	private function row( int $id, string $event, array $context = [] ): array {
 		return [
 			'id' => $id,

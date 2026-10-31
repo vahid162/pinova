@@ -101,9 +101,10 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 'not_verified', $report['coverage']['physical_delivery'] );
 		self::assertSame( 'info', $report['coverage']['minimum_level'] );
 		// Settings accepts the selected duration and stores its absolute deadline.
-		update_option( 'pinova_logging', [ 'minimum_level' => 'error', 'diagnostic_until' => 900 ] );
+		update_option( 'pinova_logging', [ 'minimum_level' => 'error', 'diagnostic_until' => 900, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ] );
 		self::assertGreaterThan( time(), get_option( 'pinova_logging' )['diagnostic_until'] );
-		self::assertSame( 'debug', IssueMonitor::report()['coverage']['minimum_level'] );
+		self::assertSame( 'error', IssueMonitor::report()['coverage']['minimum_level'] );
+		self::assertSame( 'active', IssueMonitor::report()['diagnostics']['status'] );
 	}
 
 	public function test_review_preserves_evidence_and_recurrence_reopens_it(): void {
@@ -125,6 +126,149 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 'open', $reopened['state'] );
 		self::assertSame( 2, $reopened['observed_count'] );
 		self::assertSame( 'resolved_unverified', $reopened['review']['state'] );
+	}
+
+	public function test_exact_flow_timeline_is_redacted_ordered_and_cannot_review_global_issues(): void {
+		global $wpdb;
+		$flow = str_repeat( 'a', 32 );
+		$first = $this->insert_event( 'otp.diagnostic', [ 'stage' => 'provider_completed', 'observed_at' => time() - 5, 'provider_duration_ms' => 53, 'result' => 'accepted', 'password' => 'private-secret' ] );
+		$second = $this->insert_event( 'otp.verified' );
+		$unrelated = $this->insert_event();
+		foreach ( [ $first, $second ] as $id ) {
+			$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => $flow ], [ 'id' => $id ] );
+		}
+		$summary = IssueMonitor::report();
+		$report = IssueMonitor::report( [ 'flow_id' => $flow ] );
+		self::assertSame( 'timeline', $report['mode'] );
+		self::assertSame( [], $report['issues'] );
+		self::assertSame( [ $first, $second ], array_column( $report['timeline']['events'], 'id' ) );
+		self::assertSame( $unrelated, $report['coverage']['snapshot_event_id'] );
+		self::assertSame( 3, $report['coverage']['rows_examined'] );
+		self::assertTrue( $report['timeline']['observed_facts']['transport_completed'] );
+		self::assertFalse( $report['timeline']['observed_facts']['channel_accepted'] );
+		self::assertTrue( $report['timeline']['observed_facts']['otp_verified'] );
+		self::assertFalse( $report['timeline']['observed_facts']['session_created'] );
+		self::assertSame( 'not_verified', $report['timeline']['physical_delivery'] );
+		$issue = $summary['issues'][0];
+		self::assertFalse( IssueMonitor::review( $report, $issue['code'], 'acknowledged', $issue['last_event_id'], IssueMonitor::review_token( $issue['review'] ) ) );
+		self::assertSame( $summary['issues'], IssueMonitor::report()['issues'] );
+		self::assertStringNotContainsString( 'private-secret', wp_json_encode( $report ) );
+
+		$this->post( 'pinova_export_issues', [ 'flow_id' => $flow ] );
+		$export = json_decode( $this->invoke( 'export_response', false ), true );
+		self::assertSame( $report['timeline'], $export['timeline'] );
+		self::assertSame( $report['selected_selector'], $export['selected_selector'] );
+		$_GET = [ 'flow_id' => $flow ];
+		ob_start();
+		Issues::render();
+		$html = ob_get_clean();
+		self::assertStringContainsString( 'خط زمانی رخدادهای مشاهده‌شده', $html );
+		self::assertStringContainsString( 'curl.post', $html );
+		self::assertStringNotContainsString( 'pinova_review_issue', $html );
+		self::assertStringNotContainsString( 'private-secret', $html );
+	}
+
+	public function test_correlation_expands_only_a_sole_valid_flow_and_keeps_request_only_rows(): void {
+		global $wpdb;
+		$flow = str_repeat( 'b', 32 );
+		$correlation = '123e4567-e89b-42d3-a456-426614174000';
+		$other = '223e4567-e89b-42d3-a456-426614174000';
+		$request_only = $this->insert_event();
+		$linked = $this->insert_event( 'otp.queued' );
+		$expanded = $this->insert_event( 'otp.created' );
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => $flow ], [ 'id' => $linked ] );
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => $flow, 'correlation_id' => $other ], [ 'id' => $expanded ] );
+		$uppercase_reference = $this->insert_event();
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => str_repeat( 'c', 32 ), 'correlation_id' => strtoupper( $correlation ) ], [ 'id' => $uppercase_reference ] );
+		$uppercase_flow = $this->insert_event();
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => strtoupper( $flow ), 'correlation_id' => $other ], [ 'id' => $uppercase_flow ] );
+		$report = IssueMonitor::report( [ 'correlation_id' => $correlation ] );
+		self::assertSame( 'sole_flow', $report['timeline']['linkage'] );
+		self::assertSame( $flow, $report['timeline']['expanded_flow_id'] );
+		self::assertSame( [ $request_only, $linked, $expanded ], array_column( $report['timeline']['events'], 'id' ) );
+		self::assertSame( 5, $report['coverage']['rows_examined'] );
+		self::assertTrue( $report['coverage']['complete'] );
+		self::assertSame( [ $linked, $expanded ], array_column( IssueMonitor::report( [ 'flow_id' => $flow ] )['timeline']['events'], 'id' ) );
+		// Existing raw viewer/export filters retain exact conjunction semantics.
+		$raw = LogRepository::incident_batch( [ 'flow_id' => $flow, 'correlation_id' => $correlation ] );
+		self::assertSame( [ $linked ], array_map( 'intval', array_column( $raw['rows'], 'id' ) ) );
+
+		$ambiguous = $this->insert_event();
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => str_repeat( 'c', 32 ) ], [ 'id' => $ambiguous ] );
+		$report = IssueMonitor::report( [ 'correlation_id' => $correlation ] );
+		self::assertSame( 'ambiguous', $report['timeline']['linkage'] );
+		self::assertSame( '', $report['timeline']['expanded_flow_id'] );
+		self::assertSame( [ $request_only, $linked, $ambiguous ], array_column( $report['timeline']['events'], 'id' ) );
+		self::assertFalse( $report['coverage']['complete'] );
+	}
+
+	public function test_timeline_freezes_its_snapshot_before_correlation_witnesses(): void {
+		global $wpdb;
+		$first = $this->insert_event();
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => str_repeat( 'd', 32 ) ], [ 'id' => $first ] );
+		$added = 0;
+		$interleave = function ( string $query ) use ( &$added, $wpdb ): string {
+			if ( 0 === $added && str_contains( $query, 'SELECT DISTINCT `flow_id`' ) ) {
+				$added = $this->insert_event();
+				$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => str_repeat( 'e', 32 ) ], [ 'id' => $added ] );
+			}
+			return $query;
+		};
+		add_filter( 'query', $interleave );
+		try {
+			$report = IssueMonitor::report( [ 'correlation_id' => '123e4567-e89b-42d3-a456-426614174000' ] );
+		} finally {
+			remove_filter( 'query', $interleave );
+		}
+		self::assertGreaterThan( $first, $added );
+		self::assertSame( $first, $report['coverage']['snapshot_event_id'] );
+		self::assertSame( 'sole_flow', $report['timeline']['linkage'] );
+		self::assertSame( [ $first ], array_column( $report['timeline']['events'], 'id' ) );
+		self::assertSame( 'ambiguous', IssueMonitor::report( [ 'correlation_id' => '123e4567-e89b-42d3-a456-426614174000' ] )['timeline']['linkage'] );
+	}
+
+	public function test_timeline_invalid_selectors_and_read_failures_remain_incomplete(): void {
+		global $wpdb;
+		$this->insert_event();
+		foreach ( [
+			[ 'flow_id' => str_repeat( 'a', 32 ), 'correlation_id' => '123e4567-e89b-42d3-a456-426614174000' ],
+			[ 'correlation_id' => [ 'private-secret' ] ],
+			[ 'flow_id' => 'private-secret' ],
+		] as $filters ) {
+			$report = IssueMonitor::report( $filters );
+			self::assertFalse( $report['coverage']['valid_selector'] );
+			self::assertFalse( $report['coverage']['complete'] );
+			self::assertSame( [], $report['issues'] );
+			self::assertStringNotContainsString( 'private-secret', wp_json_encode( $report ) );
+		}
+		$deny = static fn( string $query ): string => str_contains( $query, 'SELECT DISTINCT `flow_id`' ) ? 'SELECT * FROM pinova_missing_timeline_fixture' : $query;
+		$previous = $wpdb->suppress_errors( true );
+		add_filter( 'query', $deny );
+		try {
+			$report = IssueMonitor::report( [ 'correlation_id' => '123e4567-e89b-42d3-a456-426614174000' ] );
+		} finally {
+			remove_filter( 'query', $deny );
+			$wpdb->suppress_errors( $previous );
+			$wpdb->last_error = '';
+		}
+		self::assertFalse( $report['coverage']['complete'] );
+		self::assertSame( [], $report['timeline'] );
+	}
+
+	public function test_timeline_events_and_lookup_witnesses_share_the_existing_row_budget(): void {
+		global $wpdb;
+		$flow = str_repeat( 'f', 32 );
+		for ( $index = 0; $index < 1001; ++$index ) {
+			$id = $this->insert_event();
+			$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => $flow ], [ 'id' => $id ] );
+		}
+		$report = IssueMonitor::report( [ 'flow_id' => $flow ] );
+		self::assertSame( 1000, $report['coverage']['rows_examined'] );
+		self::assertSame( 1, $report['coverage']['lookup_rows'] );
+		self::assertCount( 999, $report['timeline']['events'] );
+		self::assertTrue( $report['coverage']['truncated'] );
+		self::assertFalse( $report['coverage']['complete'] );
+		self::assertLessThanOrEqual( 2097152, strlen( wp_json_encode( $report ) ) );
 	}
 
 	public function test_current_queue_snapshot_is_separate_from_history_and_exposes_no_payload_or_ids(): void {

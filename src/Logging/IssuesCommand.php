@@ -16,6 +16,12 @@ final class IssuesCommand {
 	 * [--to=<date>]
 	 * : Last UTC calendar date; at most seven days including --from.
 	 *
+	 * [--flow=<flow>]
+	 * : Exact 32-character lowercase flow ID; timeline only.
+	 *
+	 * [--correlation=<request>]
+	 * : Exact server UUIDv4 request reference; choose this or --flow.
+	 *
 	 * ## EXAMPLES
 	 *
 	 *     wp pinova logs report
@@ -24,15 +30,20 @@ final class IssuesCommand {
 	 * @param array<string,mixed> $assoc_args
 	 */
 	public function __invoke( array $args, array $assoc_args ): void {
-		if ( $args || array_diff( array_keys( $assoc_args ), [ 'from', 'to' ] ) ) {
-			\WP_CLI::error( 'Use only --from=YYYY-MM-DD and --to=YYYY-MM-DD; output is JSON.' );
+		if ( $args || array_diff( array_keys( $assoc_args ), [ 'from', 'to', 'flow', 'correlation' ] ) ) {
+			\WP_CLI::error( 'Use --from/--to and optionally one --flow or --correlation; output is JSON.' );
 		}
 		$report = IssueMonitor::report(
 			[
-				'created_from' => $assoc_args['from'] ?? '',
-				'created_to'   => $assoc_args['to'] ?? '',
+				'created_from'   => $assoc_args['from'] ?? '',
+				'created_to'     => $assoc_args['to'] ?? '',
+				'flow_id'        => $assoc_args['flow'] ?? '',
+				'correlation_id' => $assoc_args['correlation'] ?? '',
 			]
 		);
+		if ( ! $report['coverage']['valid_selector'] ) {
+			\WP_CLI::error( 'Choose one valid flow ID or server UUIDv4 correlation reference.' );
+		}
 		if ( ! $report['coverage']['valid_range'] ) {
 			\WP_CLI::error( 'Select both UTC dates, at most seven calendar days, ending no later than today.' );
 		}

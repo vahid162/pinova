@@ -252,4 +252,44 @@ echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode($id);
         expect(output).not.toContain('window.pinovaLogsSecret');
     }
     expect(await page.evaluate(() => window.pinovaLogsSecret)).toBeUndefined();
+
+    const flow = evidenceQuery.get('flow_id');
+    const timeline = await readData(String.raw`
+$saved = get_option('${fixtureOption}');
+echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode(\Pinova\Logging\IssueMonitor::report($saved['dates'] + ['flow_id' => '${flow}']));
+`);
+    const timelineQuery = new URLSearchParams({ page: 'pinova-logs', ...fixture.dates, flow_id: flow });
+    await page.goto(`/wp-admin/admin.php?${timelineQuery}`, { waitUntil: 'domcontentloaded' });
+    await expect(issues.getByRole('heading', { name: 'خط زمانی رخدادهای مشاهده‌شده', exact: true })).toBeVisible();
+    await expect(issues).toContainText('دریافت گوشی: تأیید نشده');
+    await expect(issues.getByRole('button', { name: 'بررسی شد', exact: true })).toHaveCount(0);
+    await expect(issues.locator('input[name="flow_id"]')).toHaveValue(flow);
+    const timelineDownload = page.waitForEvent('download');
+    await issues.getByRole('button', { name: 'دریافت گزارش مشکلات برای بررسی', exact: true }).click();
+    const timelineFile = await timelineDownload;
+    expect(await timelineFile.failure()).toBeNull();
+    const timelineJson = await readFile(await timelineFile.path(), 'utf8');
+    const timelineExport = JSON.parse(timelineJson);
+    expect(timelineExport.mode).toBe('timeline');
+    expect(timelineExport.timeline).toEqual(timeline.timeline);
+    expect(timelineExport.selected_selector).toEqual(timeline.selected_selector);
+    expect(timelineExport.issues).toEqual([]);
+    expect(timelineExport.timeline.physical_delivery).toBe('not_verified');
+    expect(timelineJson).not.toContain(secret);
+    expect(Buffer.byteLength(timelineJson)).toBeLessThanOrEqual(2 * 1024 * 1024);
+
+    const commandReport = await readData(String.raw`
+$saved = get_option('${fixtureOption}');
+$command = 'pinova logs report --from=' . $saved['dates']['created_from'] . ' --to=' . $saved['dates']['created_to'] . ' --flow=${flow}';
+$json = WP_CLI::runcommand($command, ['return' => true, 'launch' => false]);
+$report = json_decode($json, true);
+if (!is_array($report)) { throw new RuntimeException('The real report command must return JSON.'); }
+echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode($report);
+`);
+    expect(commandReport.timeline).toEqual(timeline.timeline);
+    expect(commandReport.selected_selector).toEqual(timeline.selected_selector);
+    const { snapshot_event_id: commandSnapshot, ...commandCoverage } = commandReport.coverage;
+    const { snapshot_event_id: timelineSnapshot, ...timelineCoverage } = timeline.coverage;
+    expect(commandCoverage).toEqual(timelineCoverage);
+    expect(commandSnapshot).toBeGreaterThanOrEqual(timelineSnapshot);
 });

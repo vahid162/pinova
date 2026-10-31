@@ -389,6 +389,68 @@ final class LogRepository {
 	 * @return array{rows:array<int, array<string,mixed>>,success:bool}
 	 */
 	public static function incident_batch( array $filters, int $before_id = 0, int $limit = 100, string $level = '' ): array {
+		return self::read_incident_batch( $filters, $before_id, $limit, $level, false );
+	}
+
+	/** Timeline-only expansion preserves the viewer/export's conjunctive filters.
+	 * @param array<string,mixed> $filters
+	 * @return array{rows:array<int,array<string,mixed>>,success:bool}
+	 */
+	public static function timeline_batch( array $filters, int $before_id, int $limit ): array {
+		return self::read_incident_batch( $filters, $before_id, $limit, '', true );
+	}
+
+	/** @param array<string,mixed> $filters
+	 * @return array{success:bool,flows:string[],lookup_rows:int,snapshot_event_id:int}
+	 */
+	public static function timeline_lookup( array $filters ): array {
+		global $wpdb;
+		$result  = [
+			'success'           => false,
+			'flows'             => [],
+			'lookup_rows'       => 0,
+			'snapshot_event_id' => 0,
+		];
+		$filters = self::filter_values( $filters );
+		if ( ! $filters['valid'] || ! self::table_exists() ) {
+			return $result;
+		}
+		$latest = $wpdb->get_var( $wpdb->prepare( 'SELECT MAX(`id`) FROM %i', self::table_name() ) );
+		if ( self::database_error_present() || ( null !== $latest && ( ! ctype_digit( (string) $latest ) || PHP_INT_MAX <= (int) $latest ) ) ) {
+			return $result;
+		}
+		$result['lookup_rows']       = 1;
+		$result['snapshot_event_id'] = (int) $latest;
+		if ( '' !== $filters['correlation_id'] ) {
+			[ $where, $values ] = self::where_clause( $filters, '', true );
+			$values[]           = $result['snapshot_event_id'];
+			$flows              = $wpdb->get_col(
+				// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Fixed WHERE clauses and their values are assembled together.
+				$wpdb->prepare(
+					// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- WHERE contains only fixed clauses and placeholders.
+					'SELECT DISTINCT `flow_id` FROM %i' . $where . " AND `id` <= %d AND CHAR_LENGTH(`flow_id`) = 32 AND BINARY `flow_id` = BINARY LOWER(`flow_id`) AND `flow_id` REGEXP '^[0-9a-f]{32}$' LIMIT 2",
+					array_merge( [ self::table_name() ], $values )
+				)
+			);
+			if ( ! is_array( $flows ) || self::database_error_present() ) {
+				return $result;
+			}
+			$result['lookup_rows'] += count( $flows );
+			foreach ( $flows as $flow ) {
+				if ( ! is_string( $flow ) || ! preg_match( '/\A[a-f0-9]{32}\z/', $flow ) ) {
+					return $result;
+				}
+			}
+			$result['flows'] = $flows;
+		}
+		$result['success'] = true;
+		return $result;
+	}
+
+	/** @param array<string,mixed> $filters
+	 * @return array{rows:array<int,array<string,mixed>>,success:bool}
+	 */
+	private static function read_incident_batch( array $filters, int $before_id, int $limit, string $level, bool $expand_correlation ): array {
 		global $wpdb;
 
 		$filters = self::filter_values( $filters );
@@ -405,12 +467,25 @@ final class LogRepository {
 				'success' => false,
 			];
 		}
-		[ $where, $values ] = self::where_clause( $filters, $level );
-		$where             .= '' === $where ? ' WHERE ' : ' AND ';
-		$where             .= '`id` < %d';
-		$values[]           = $before_id > 0 ? $before_id : PHP_INT_MAX;
-		$values[]           = max( 1, min( 100, $limit ) );
-		$rows               = $wpdb->get_results(
+		if ( $expand_correlation && '' !== $filters['correlation_id'] && '' !== $filters['flow_id'] ) {
+			$base                   = $filters;
+			$base['correlation_id'] = '';
+			$base['flow_id']        = '';
+			[ $where, $values ]     = self::where_clause( $base, $level );
+			$where                 .= '' === $where ? ' WHERE ' : ' AND ';
+			$where                 .= '((`correlation_id` = %s AND BINARY `correlation_id` = BINARY %s) OR (`flow_id` = %s AND BINARY `flow_id` = BINARY %s))';
+			$values[]               = $filters['correlation_id'];
+			$values[]               = $filters['correlation_id'];
+			$values[]               = $filters['flow_id'];
+			$values[]               = $filters['flow_id'];
+		} else {
+			[ $where, $values ] = self::where_clause( $filters, $level, $expand_correlation );
+		}
+		$where   .= '' === $where ? ' WHERE ' : ' AND ';
+		$where   .= '`id` < %d';
+		$values[] = $before_id > 0 ? $before_id : PHP_INT_MAX;
+		$values[] = max( 1, min( 100, $limit ) );
+		$rows     = $wpdb->get_results(
 			// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Dynamic fixed-clause WHERE values are assembled together.
 			$wpdb->prepare(
 				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The WHERE fragment contains only fixed clauses and placeholders.
@@ -580,7 +655,7 @@ final class LogRepository {
 	 * @param array{valid:bool,event:string,correlation_id:string,flow_id:string,user_id:int,created_from:string,created_to:string} $filters
 	 * @return array{string,array<int,int|string>}
 	 */
-	private static function where_clause( array $filters, string $level ): array {
+	private static function where_clause( array $filters, string $level, bool $binary_selectors = false ): array {
 		$clauses = [];
 		$values  = [];
 		foreach ( [
@@ -591,6 +666,10 @@ final class LogRepository {
 			if ( '' !== $value ) {
 				$clauses[] = '`' . $column . '` = %s';
 				$values[]  = $value;
+				if ( $binary_selectors && in_array( $column, [ 'correlation_id', 'flow_id' ], true ) ) {
+					$clauses[] = 'BINARY `' . $column . '` = BINARY %s';
+					$values[]  = $value;
+				}
 			}
 		}
 		if ( 'logging.unknown_event' === $filters['event'] ) {

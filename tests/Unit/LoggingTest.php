@@ -283,20 +283,34 @@ final class LoggingTest extends TestCase {
 		self::assertCount( 1, $handler->records );
 		self::assertSame( 'auth.rate_limited', $handler->records[0]['event'] );
 
-		$diagnostic = new Logger(
-			$handler,
-			new SafeContext( static fn(): string => 'salt' ),
-			static fn(): array => [
-				'minimum_level'    => 'error',
-				'diagnostic_until' => time() + 60,
-			],
-			static fn(): string => 'diagnostic'
-		);
-		$diagnostic->debug( 'auth.trace' );
-		self::assertTrue( $diagnostic->is_enabled( 'debug' ) );
-
-		self::assertCount( 2, $handler->records );
-		self::assertSame( 'auth.trace', $handler->records[1]['event'] );
+		$now     = time();
+		$windows = [
+			'legacy active'      => [ 'diagnostic_until' => $now + 60 ],
+			'operation active'   => [ 'diagnostic_until' => $now + 60, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ],
+			'flow active'        => [ 'diagnostic_until' => $now + 60, 'diagnostic_scope' => [ 'type' => 'flow', 'value' => str_repeat( 'a', 32 ) ] ],
+			'operation expired'  => [ 'diagnostic_until' => $now - 1, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ],
+			'operation disabled' => [ 'diagnostic_until' => 0, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ],
+		];
+		foreach ( $windows as $label => $window ) {
+			$config     = [ 'minimum_level' => 'error' ] + $window;
+			$diagnostic = new Logger(
+				$handler,
+				new SafeContext( static fn(): string => 'salt' ),
+				static fn(): array => $config,
+				static fn(): string => 'diagnostic'
+			);
+			foreach ( [ 'debug', 'info', 'notice', 'warning' ] as $level ) {
+				self::assertFalse( $diagnostic->is_enabled( $level ), $label . ' must preserve the ordinary minimum level.' );
+				$diagnostic->log( $level, 'auth.trace' );
+			}
+			self::assertTrue( $diagnostic->is_enabled( 'ERROR' ) );
+			self::assertFalse( $diagnostic->is_enabled( 'unknown' ) );
+			self::assertCount( 1, $handler->records );
+			$diagnostic->error( 'auth.request_failed' );
+			self::assertCount( 2, $handler->records );
+			self::assertSame( 'auth.request_failed', $handler->records[1]['event'] );
+			array_pop( $handler->records );
+		}
 	}
 
 	public function test_enabled_check_fails_closed_when_configuration_throws(): void {

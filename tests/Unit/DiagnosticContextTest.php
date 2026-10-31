@@ -12,6 +12,10 @@ use Pinova\Logging\SafeContext;
 
 final class DiagnosticContextTest extends TestCase {
 
+	public function test_stage_catalogue_contains_only_possible_finite_observations(): void {
+		self::assertSame( [ 'queue_accepted', 'immediate_admission', 'worker_started', 'provider_started', 'provider_completed', 'channel_completed', 'delivery_completed', 'verification_completed' ], DiagnosticContext::stage_names() );
+	}
+
 	public function test_observe_is_memory_only_and_flush_preserves_the_actual_occurrence_time(): void {
 		$now          = time();
 		$observed     = $now;

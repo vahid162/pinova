@@ -204,6 +204,13 @@ final class DiagnosticContext {
 		return $this->coverage;
 	}
 
+	/** Possible observations, not a required sequence for every delivery path.
+	 * @return string[]
+	 */
+	public static function stage_names(): array {
+		return array_keys( self::STAGES );
+	}
+
 	/**
 	 * One finite catalogue for incoming and historical diagnostic context.
 	 * Component and symbolic source are derived, never caller-controlled prose.

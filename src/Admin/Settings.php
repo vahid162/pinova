@@ -5,6 +5,7 @@ namespace Pinova\Admin;
 use Pinova\Integrations\IntegrationSettings;
 use Pinova\Integrations\Woocommerce\VirtualCheckout;
 use Pinova\Integrations\Wordpress\NativeLoginGate;
+use Pinova\Logging\EventThrottle;
 use Pinova\Services\SMSService;
 use Pinova\Services\UserService;
 use Psr\Log\LogLevel;
@@ -12,6 +13,15 @@ use Psr\Log\LogLevel;
 class Settings extends \Nabik\Utils\V1\Settings {
 
 	protected static ?\Nabik\Utils\V1\Settings $_instance = null;
+
+	/**
+	 * Last authorized normalization, only for the Settings API's same-request second pass.
+	 *
+	 * @var array{previous:array<array-key,mixed>,value:array<string,mixed>,actor:int}|null
+	 */
+	private static ?array $logging_normalization = null;
+
+	private static bool $logging_read_failed = false;
 
 	public static function instance() {
 		if ( is_null( self::$_instance ) ) {
@@ -240,7 +250,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 						LogLevel::ERROR   => 'Error و بالاتر',
 					],
 					'default'           => LogLevel::WARNING,
-					'desc'              => 'سطح Debug از این گزینه فعال نمی‌شود و فقط پنجرهٔ تشخیصی زمان‌دار می‌تواند آن را موقتاً فعال کند.',
+					'desc'              => 'این حداقل سطح برای رخدادهای عادی حفظ می‌شود؛ جزئیات تشخیصی فقط در دامنه و پنجرهٔ انتخاب‌شده ثبت می‌شوند.',
 					'sanitize_callback' => [ self::class, 'sanitize_log_level' ],
 				],
 				[
@@ -253,11 +263,17 @@ class Settings extends \Nabik\Utils\V1\Settings {
 				],
 				[
 					'id'                => 'diagnostic_until',
-					'label'             => 'پنجرهٔ Debug',
+					'label'             => 'پنجرهٔ جزئیات تشخیصی',
 					'type'              => 'diagnostic_window',
 					'default'           => 0,
-					'desc'              => 'Debug به‌طور خودکار در زمان تعیین‌شده منقضی می‌شود و هیچ‌گاه OTP، رمز، token یا شناسهٔ خام را ثبت نمی‌کند.',
+					'desc'              => 'پنجره به‌طور خودکار منقضی می‌شود و سطح عادی ثبت را تغییر نمی‌دهد. دریافت گوشی از پذیرش سرویس‌دهنده جداست؛ هیچ کد یا شناسهٔ خامی ثبت نمی‌شود.',
 					'sanitize_callback' => [ self::class, 'sanitize_diagnostic_window' ],
+				],
+				[
+					'id'      => 'diagnostic_scope',
+					'label'   => 'دامنهٔ جزئیات تشخیصی',
+					'type'    => 'diagnostic_scope',
+					'default' => [],
 				],
 			],
 			IntegrationSettings::OPTION => $this->integration_fields(),
@@ -368,6 +384,10 @@ class Settings extends \Nabik\Utils\V1\Settings {
 	 * @return mixed
 	 */
 	public function sanitize_options( $options ) {
+		if ( 'sanitize_option_pinova_logging' === current_filter() ) {
+			return self::sanitize_logging_options( $options );
+		}
+
 		if ( 'sanitize_option_pinova_integrations' === current_filter() ) {
 			// options.php enforces the Settings API nonce; also reject unauthorized programmatic saves.
 			return IntegrationSettings::normalize(
@@ -511,7 +531,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 	}
 
 	public static function sanitize_log_level( $level ): string {
-		$level = strtolower( sanitize_key( (string) $level ) );
+		$level = is_string( $level ) ? strtolower( sanitize_key( $level ) ) : '';
 
 		return in_array( $level, [ LogLevel::INFO, LogLevel::NOTICE, LogLevel::WARNING, LogLevel::ERROR ], true )
 			? $level
@@ -519,13 +539,130 @@ class Settings extends \Nabik\Utils\V1\Settings {
 	}
 
 	public static function sanitize_log_retention( $days ): int {
-		return max( 1, min( 90, absint( $days ) ) );
+		return is_int( $days ) || is_string( $days ) ? max( 1, min( 90, absint( $days ) ) ) : 14;
 	}
 
 	public static function sanitize_diagnostic_window( $seconds ): int {
-		$seconds = absint( $seconds );
+		$seconds = is_int( $seconds ) || is_string( $seconds ) ? (string) $seconds : '';
 
-		return in_array( $seconds, [ 900, 3600, DAY_IN_SECONDS ], true ) ? time() + $seconds : 0;
+		return in_array( $seconds, [ '900', '3600', '86400' ], true ) ? time() + (int) $seconds : 0;
+	}
+
+	/**
+	 * Whole-option ownership keeps duration actions distinct from stored epochs.
+	 *
+	 * @param mixed $options
+	 * @return array<string,mixed>
+	 */
+	private static function sanitize_logging_options( $options ): array {
+		global $wpdb;
+		$before = is_object( $wpdb ) ? (int) ( $wpdb->num_queries ?? 0 ) : 0;
+		try {
+			$previous = get_option( 'pinova_logging', [] );
+			$read_ok  = ! is_object( $wpdb ) || $before >= (int) ( $wpdb->num_queries ?? 0 ) || '' === (string) $wpdb->last_error;
+		} catch ( \Throwable $throwable ) {
+			unset( $throwable );
+			$previous = [];
+			$read_ok  = false;
+		}
+		$previous = is_array( $previous ) ? $previous : [];
+		$options  = is_array( $options ) ? $options : [];
+		$result   = [
+			'minimum_level'  => self::sanitize_log_level( $options['minimum_level'] ?? $previous['minimum_level'] ?? LogLevel::WARNING ),
+			'retention_days' => self::sanitize_log_retention( $options['retention_days'] ?? $previous['retention_days'] ?? 14 ),
+		];
+		foreach ( [ 'diagnostic_until', 'diagnostic_scope', 'diagnostic_budget_initialized' ] as $key ) {
+			if ( array_key_exists( $key, $previous ) ) {
+				$result[ $key ] = $previous[ $key ];
+			}
+		}
+		self::$logging_read_failed = self::$logging_read_failed || ! $read_ok;
+		if ( self::$logging_read_failed ) {
+			// This latch forbids initialization; it does not claim that a budget row exists.
+			$result['diagnostic_until']              = 0;
+			$result['diagnostic_scope']              = [];
+			$result['diagnostic_budget_initialized'] = true;
+			return $result;
+		}
+		$actor = get_current_user_id();
+		if ( 0 >= $actor || ! current_user_can( 'manage_options' ) ) {
+			return $result;
+		}
+		if ( null !== self::$logging_normalization && $actor === self::$logging_normalization['actor']
+			&& $previous === self::$logging_normalization['previous'] && $options === self::$logging_normalization['value'] ) {
+			return self::$logging_normalization['value'];
+		}
+		$now             = time();
+		$previous_until  = $previous['diagnostic_until'] ?? 0;
+		$previous_until  = is_int( $previous_until ) && 0 <= $previous_until && $now + DAY_IN_SECONDS >= $previous_until ? $previous_until : 0;
+		$action          = $options['diagnostic_until'] ?? 'keep';
+		$keep            = 'keep' === $action || ( is_int( $action ) && $action === $previous_until );
+		$until           = $keep ? $previous_until : self::sanitize_diagnostic_window( $action );
+		$scope_submitted = array_key_exists( 'diagnostic_scope', $options ) || array_key_exists( 'diagnostic_scope_type', $options );
+		$scope           = $scope_submitted ? self::requested_diagnostic_scope( $options ) : self::diagnostic_scope( $previous['diagnostic_scope'] ?? [] );
+		if ( ! $keep && [] === $scope ) {
+			$until = 0;
+		}
+		$result['diagnostic_until'] = $until;
+		$result['diagnostic_scope'] = $scope;
+		if ( $now < $until && [] !== $scope && ! array_key_exists( 'diagnostic_budget_initialized', $previous ) ) {
+			if ( EventThrottle::initialize_diagnostics() ) {
+				$result['diagnostic_budget_initialized'] = true;
+			} else {
+				$until = 0;
+			}
+		}
+		$result['diagnostic_until'] = $until;
+
+		self::$logging_normalization = [
+			'previous' => $previous,
+			'value'    => $result,
+			'actor'    => $actor,
+		];
+		return $result;
+	}
+
+	/**
+	 * @param array<array-key,mixed> $options
+	 * @return array{type:string,value:string}|array{}
+	 */
+	private static function requested_diagnostic_scope( array $options ): array {
+		if ( array_key_exists( 'diagnostic_scope_type', $options ) ) {
+			if ( array_key_exists( 'diagnostic_scope', $options ) ) {
+				return [];
+			}
+			$type = $options['diagnostic_scope_type'];
+			return self::diagnostic_scope(
+				[
+					'type'  => $type,
+					'value' => 'operation' === $type ? ( $options['diagnostic_operation'] ?? '' ) : ( $options['diagnostic_flow_id'] ?? '' ),
+				]
+			);
+		}
+		return self::diagnostic_scope( $options['diagnostic_scope'] ?? [] );
+	}
+
+	/**
+	 * @param mixed $scope
+	 * @return array{type:string,value:string}|array{}
+	 */
+	private static function diagnostic_scope( $scope ): array {
+		if ( ! is_array( $scope ) || 2 !== count( $scope ) || ! is_string( $scope['value'] ?? null ) ) {
+			return [];
+		}
+		if ( 'operation' === ( $scope['type'] ?? '' ) && in_array( $scope['value'], [ 'queued_otp', 'verify_otp', 'verify_mobile' ], true ) ) {
+			return [
+				'type'  => 'operation',
+				'value' => $scope['value'],
+			];
+		}
+		if ( 'flow' === ( $scope['type'] ?? '' ) && preg_match( '/\A[a-f0-9]{32}\z/D', $scope['value'] ) ) {
+			return [
+				'type'  => 'flow',
+				'value' => $scope['value'],
+			];
+		}
+		return [];
 	}
 
 	public static function sanitize_delete_data_on_uninstall( $enabled ): int {
@@ -537,10 +674,12 @@ class Settings extends \Nabik\Utils\V1\Settings {
 
 	public function callback_diagnostic_window( array $args ): void {
 		$options = get_option( $args['section'], [] );
+		$options = is_array( $options ) ? $options : [];
 		$until   = isset( $options[ $args['id'] ] ) ? (int) $options[ $args['id'] ] : 0;
 		$name    = sprintf( '%s[%s]', $args['section'], $args['id'] );
 		?>
 		<select name="<?php echo esc_attr( $name ); ?>" id="<?php echo esc_attr( $name ); ?>">
+			<option value="keep"><?php esc_html_e( 'حفظ مهلت فعلی', 'pinova' ); ?></option>
 			<option value="0"><?php esc_html_e( 'خاموش', 'pinova' ); ?></option>
 			<option value="900"><?php esc_html_e( 'فعال برای ۱۵ دقیقه', 'pinova' ); ?></option>
 			<option value="3600"><?php esc_html_e( 'فعال برای یک ساعت', 'pinova' ); ?></option>
@@ -551,7 +690,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 				<?php
 				printf(
 					/* translators: %s: debug expiration date and time. */
-					esc_html__( 'Debug تا %s فعال است. ذخیره با مقدار «خاموش»، پنجره را متوقف می‌کند.', 'pinova' ),
+					esc_html__( 'مهلت ذخیره‌شده: %s. حفظ مهلت، زمان را تمدید نمی‌کند؛ «خاموش» جزئیات تازه را متوقف می‌کند.', 'pinova' ),
 					esc_html( wp_date( 'Y-m-d H:i:s', $until ) )
 				);
 				?>
@@ -560,6 +699,40 @@ class Settings extends \Nabik\Utils\V1\Settings {
 		<?php if ( ! empty( $args['desc'] ) ) : ?>
 			<p class="description"><?php echo wp_kses_post( $args['desc'] ); ?></p>
 		<?php endif; ?>
+		<?php
+	}
+
+	public function callback_diagnostic_scope( array $args ): void {
+		$options = get_option( $args['section'], [] );
+		$scope   = self::diagnostic_scope( is_array( $options ) ? ( $options['diagnostic_scope'] ?? [] ) : [] );
+		$type    = $scope['type'] ?? '';
+		$prefix  = (string) $args['section'];
+		?>
+		<label for="pinova-diagnostic-scope-type"><?php esc_html_e( 'انتخاب دامنه', 'pinova' ); ?></label>
+		<select id="pinova-diagnostic-scope-type" name="<?php echo esc_attr( $prefix ); ?>[diagnostic_scope_type]">
+			<option value=""><?php esc_html_e( 'دامنه‌ای انتخاب نشده', 'pinova' ); ?></option>
+			<option value="operation" <?php selected( $type, 'operation' ); ?>><?php esc_html_e( 'یک عملیات', 'pinova' ); ?></option>
+			<option value="flow" <?php selected( $type, 'flow' ); ?>><?php esc_html_e( 'یک جریان مشخص', 'pinova' ); ?></option>
+		</select>
+		<p>
+			<label for="pinova-diagnostic-operation"><?php esc_html_e( 'عملیات', 'pinova' ); ?></label>
+			<select id="pinova-diagnostic-operation" name="<?php echo esc_attr( $prefix ); ?>[diagnostic_operation]">
+				<?php
+				foreach ( [
+					'queued_otp'    => __( 'آماده‌سازی و ارسال کد', 'pinova' ),
+					'verify_otp'    => __( 'بررسی کد ورود یا بازیابی', 'pinova' ),
+					'verify_mobile' => __( 'بررسی مالکیت موبایل', 'pinova' ),
+				] as $operation => $label ) :
+					?>
+					<option value="<?php echo esc_attr( $operation ); ?>" <?php selected( 'operation' === $type ? $scope['value'] : '', $operation ); ?>><?php echo esc_html( $label ); ?></option>
+				<?php endforeach; ?>
+			</select>
+		</p>
+		<p>
+			<label for="pinova-diagnostic-flow"><?php esc_html_e( 'شناسهٔ جریان ثبت‌شده', 'pinova' ); ?></label>
+			<input id="pinova-diagnostic-flow" type="text" dir="ltr" class="regular-text" maxlength="32" name="<?php echo esc_attr( $prefix ); ?>[diagnostic_flow_id]" value="<?php echo esc_attr( 'flow' === $type ? $scope['value'] : '' ); ?>" autocomplete="off">
+		</p>
+		<p class="description"><?php esc_html_e( 'فقط دامنهٔ انتخاب‌شده بررسی می‌شود. شناسهٔ جریان باید از گزارش معتبر گرفته شود؛ کد تأیید، توکن، شماره یا ایمیل را وارد نکنید. پنجرهٔ قدیمیِ بدون دامنه، جزئیات تازه ثبت نمی‌کند.', 'pinova' ); ?></p>
 		<?php
 	}
 

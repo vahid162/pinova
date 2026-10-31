@@ -97,27 +97,19 @@ jobs:
               subprocess.run(['dpkg-deb', '--extract', str(archive), str(destination)], timeout=30, check=True,
                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
               destination.chmod(0o700)
-              phase = 'build_identity'
-              def build_id(path):
-                  result = subprocess.run(['readelf', '-n', str(path)], timeout=10, check=True,
-                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                  assert len(result.stdout) <= 65536 and not result.stderr
-                  ids = re.findall(rb'Build ID:\s*([a-f0-9]{40})', result.stdout)
-                  assert len(ids) == 1
-                  return ids[0].decode()
-              identity = build_id('/usr/sbin/php-fpm8.4')
+              phase = 'collector_elf_reader'
+              helper = Path.cwd() / 'tests/Integration/native-fpm-crash-evidence.py'
+              spec = importlib.util.spec_from_file_location('symbol_identity_reader', helper)
+              reader = importlib.util.module_from_spec(spec)
+              sys.modules[spec.name] = reader
+              spec.loader.exec_module(reader)
+              identity = reader.build_id('/usr/sbin/php-fpm8.4')
               assert identity == '6d4f4250c0d4b32619cc09e3bafc6f1d0d37059b'
               symbol = destination / 'usr/lib/debug/.build-id' / identity[:2] / (identity[2:] + '.debug')
               info = symbol.lstat()
               assert stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
               assert info.st_size <= 128 * 1024 * 1024 and symbol.resolve() == symbol
-              assert build_id(symbol) == identity
-              phase = 'collector_elf_reader'
-              helper = Path.cwd() / 'tests/Integration/native-fpm-crash-evidence.py'
-              spec = importlib.util.spec_from_file_location('symbol_identity_reader', helper)
-              reader = importlib.util.module_from_spec(spec)
-              spec.loader.exec_module(reader)
-              assert reader.build_id('/usr/sbin/php-fpm8.4') == identity and reader.build_id(symbol) == identity
+              assert reader.build_id(symbol) == identity
               def digest(path):
                   value = hashlib.sha256()
                   with path.open('rb') as stream:
@@ -128,7 +120,8 @@ jobs:
               value = {'schema':'pinova.native-debug-symbols.v1', 'state':'verified', 'source_commit':source,
                   'run_id':run, 'attempt':attempt, 'package_version':version, 'architecture':'amd64',
                   'executable_build_id':identity, 'debug_file_sha256':digest(symbol),
-                  'archive_sha256':digest(archive), 'engine_installed_by_this_step':False, 'resource_acceptance':False}
+                  'archive_sha256':digest(archive), 'identity_reader':'bounded_elf_notes',
+                  'collector_source_sha256':digest(helper), 'engine_installed_by_this_step':False, 'resource_acceptance':False}
               target = root / 'native-debug-symbols-preparation.json'
               with target.open('x') as stream:
                   json.dump(value, stream, sort_keys=True)

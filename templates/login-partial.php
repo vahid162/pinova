@@ -74,6 +74,7 @@ echo $custom_styles;
 			<div class="flex items-start justify-center py-4">
 				<div
 					pinova-data="pinovaLoginForm()"
+					data-pinova-theme-partial
 					class="w-[390px] sm:relative  overflow-hidden max-w-full"
 				>
 

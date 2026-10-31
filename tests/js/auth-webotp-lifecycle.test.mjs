@@ -34,6 +34,7 @@ function harness(kind, respond = () => ({ success: true, data: { login_method: '
     vm.runInContext(shared + scripts[kind], context);
     const state = factory();
     state.$nextTick = callback => callback();
+    state.$root = {isConnected: true, querySelector: () => focus};
     state.modalIsOpen = kind === 'modal' ? true : undefined;
     state.submit = () => submissions.push({ step: state.stepName, jwt: state.forms[state.stepName].inputs.jwt?.value });
     state.forms.authenticate.inputs.identifier.value = 'buyer@example.test';
@@ -117,24 +118,28 @@ for (const kind of ['form', 'modal']) {
         assert.equal(h.state.forms.loginByOtp.inputs.code.value, '2222');
     });
 
-    test(`${kind}: immediate autofill during response handling waits until the request lock clears`, async () => {
+    test(`${kind}: autofill while busy is submitted once after the current request ends`, async () => {
         const h = harness(kind);
-        const start = h.state.startWebOtp;
-        h.state.startWebOtp = function (...args) {
-            start.apply(this, args);
-            assert.equal(this.pageLoaderIsActive, true);
-            h.credentials.at(-1).resolve({ code: '1234' });
-        };
-        await h.state.authenticate();
+        h.state.stepName = 'loginByOtp';
+        h.state.forms.loginByOtp.inputs.jwt.value = 'new-flow';
+        const request = h.state.beginRequest();
+        h.state.startWebOtp('loginByOtp');
+        h.credentials[0].resolve({ code: '1234' });
         await settled();
-        assert.equal(h.state.pageLoaderIsActive, false);
+        assert.equal(h.state.pageLoaderIsActive, true);
+        assert.equal(h.state.forms.loginByOtp.inputs.code.value, '');
+        assert.equal(h.submissions.length, 0);
+        h.state.endRequest(request);
+        assert.equal(h.state.forms.loginByOtp.inputs.code.value, '1234');
+        assert.equal(h.submissions.length, 1);
+        h.state.resumeWebOtp();
         assert.equal(h.submissions.length, 1);
     });
 
     test(`${kind}: a detached component cannot receive credentials`, async () => {
         const h = harness(kind);
         await h.state.authenticate();
-        h.state.$el = { isConnected: false };
+        h.state.authRoot.isConnected = false;
         h.credentials[0].resolve({ code: '1234' });
         await settled();
         assert.equal(h.submissions.length, 0);
@@ -173,3 +178,68 @@ test('modal close/reopen leaves the earlier credential unable to enter a new acc
     await settled();
     assert.equal(h.submissions.length, 1);
 });
+
+
+for (const kind of ['form', 'modal']) {
+    test(`${kind}: invoking a detached old button does not replace the captured component root`, async () => {
+        const h = harness(kind);
+        const captured = h.state.authRoot;
+        h.state.$el = {isConnected: false};
+        await h.state.authenticate();
+        assert.equal(h.state.authRoot, captured);
+        assert.equal(h.credentials.length, 1);
+        h.credentials[0].resolve({code: '1234'});
+        await settled();
+        assert.equal(h.submissions.length, 1);
+    });
+
+    test(`${kind}: a rejected manual code preserves one wait for a different current SMS`, async () => {
+        const h = harness(kind, route => route.endsWith('/authenticate')
+            ? {success: true, data: {login_method: 'otp', jwt: 'same-flow', ttl: 180}}
+            : {success: false, message: 'Wrong code', data: {}, http: {status: 401}});
+        await h.state.authenticate();
+        h.state.forms.loginByOtp.inputs.code.value = '1111';
+        await h.state.loginByOtp();
+        assert.equal(h.credentials.length, 1, 'failed verification must not start another subscription');
+        assert.equal(h.credentials[0].options.signal.aborted, false);
+        h.credentials[0].resolve({code: '2222'});
+        await settled();
+        assert.equal(h.submissions.length, 1);
+        assert.equal(h.state.forms.loginByOtp.inputs.code.value, '2222');
+    });
+
+    test(`${kind}: SMS during failed verification survives field clearing, without retrying the rejected code`, async () => {
+        for (const incoming of ['1111', '2222']) {
+            let finish;
+            const h = harness(kind, route => route.endsWith('/authenticate')
+                ? {success: true, data: {login_method: 'otp', jwt: 'same-flow', ttl: 180}}
+                : new Promise(resolve => { finish = resolve; }));
+            await h.state.authenticate();
+            h.state.forms.loginByOtp.inputs.code.value = '1111';
+            const verifying = h.state.loginByOtp();
+            h.credentials[0].resolve({code: incoming});
+            await settled();
+            assert.equal(h.submissions.length, 0);
+            assert.equal(h.state.forms.loginByOtp.inputs.code.value, '1111');
+            finish({success: false, message: 'Wrong code', data: {}, http: {status: 401}});
+            await verifying;
+            assert.equal(h.state.forms.loginByOtp.inputs.code.value, incoming);
+            assert.equal(h.submissions.length, incoming === '1111' ? 0 : 1);
+            assert.equal(h.credentials.length, 1);
+        }
+    });
+
+    test(`${kind}: throttling ends the existing browser wait without rearming`, async () => {
+        const h = harness(kind, route => route.endsWith('/authenticate')
+            ? {success: true, data: {login_method: 'otp', jwt: 'same-flow', ttl: 180}}
+            : {success: false, message: 'Try later', data: {}, http: {status: 429}});
+        await h.state.authenticate();
+        h.state.forms.loginByOtp.inputs.code.value = '1111';
+        await h.state.loginByOtp();
+        assert.equal(h.credentials[0].options.signal.aborted, true);
+        h.credentials[0].resolve({code: '2222'});
+        await settled();
+        assert.equal(h.submissions.length, 0);
+        assert.equal(h.credentials.length, 1);
+    });
+}

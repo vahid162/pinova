@@ -71,6 +71,8 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
             return;
         }
 
+        this.stopWebOtp();
+
         try {
             const data = { ...otherData };
             for (const key in this.forms.authenticate.inputs) {
@@ -152,6 +154,8 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 }
             }
 
+            this.otpSubmittedCodes[formName] = data.code;
+
             const result = await pinovaApiRequest('pinova/user/login/otp', {
                 method: 'POST',
                 notifyOnError: false,
@@ -168,6 +172,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
             }
 
             if (result.success) {
+                this.stopWebOtp();
                 pinovaNotyf.success(result.message || 'درخواست با موفقیت انجام شد!');
                 location.reload();
             } else {
@@ -177,7 +182,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 }
                 this.handleRequestFailure(result);
                 this.forms[formName].inputs.code.value = '';
-                this.resetOtpAutoSubmit(formName);
+
             }
         } catch (error) {
             if (!this.requestIsCurrent(request)) {
@@ -252,6 +257,8 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 }
             }
 
+            this.otpSubmittedCodes['forgotPassword'] = data.code;
+
             const result = await pinovaApiRequest('pinova/auth/forgot/verify', {
                 method: 'POST',
                 notifyOnError: false,
@@ -275,7 +282,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
             } else {
                 this.handleRequestFailure(result);
                 this.forms.forgotPassword.inputs.code.value = '';
-                this.resetOtpAutoSubmit('forgotPassword');
+
             }
         } catch (error) {
             if (!this.requestIsCurrent(request)) {
@@ -343,7 +350,6 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
             signal: controller ? controller.signal : null,
         };
 
-        this.stopWebOtp();
         this.clearStatus();
         this.pageLoaderIsActive = true;
         this.activeRequestId = request.id;

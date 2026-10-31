@@ -23,7 +23,102 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             window.addEventListener('beforeunload', () => { this.cancelRequest(); this.stopTimer(); });
 
             this.initWebOtpLifecycle();
+            this.initThemeWebOtpLifecycle();
 
+        },
+
+        initThemeWebOtpLifecycle(){
+            const root = this.authRoot;
+            if(!root?.hasAttribute?.('data-pinova-theme-partial')){
+                return;
+            }
+            const visible = () => root.isConnected && window.getComputedStyle(root).visibility === 'visible'
+                && Array.from(root.getClientRects()).some(rect => rect.width > 0 && rect.height > 0
+                    && rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth);
+            const close = () => this.cancelRequest();
+            const sidebar = root.closest('.login-form-side');
+            const popup = root.closest('#login-form-popup');
+            const dropdown = root.closest('.wd-dropdown-register');
+            const jq = window.jQuery;
+            if(sidebar && typeof jq === 'function'){
+                const target = jq(sidebar);
+                target.on('wdCloseSide.pinovaAuth', close);
+                this.themeWebOtpCheck = visible;
+                this.themeWebOtpCleanup = () => target.off('wdCloseSide.pinovaAuth', close);
+            }else if(popup){
+                let bound = null;
+                this.themeWebOtpCheck = () => {
+                    const instance = jq?.magnificPopup?.instance;
+                    const target = instance?.ev;
+                    if(!instance?.isOpen || instance.content?.[0] !== popup
+                        || typeof target?.on !== 'function' || typeof target?.off !== 'function'){
+                        return false;
+                    }
+                    if(bound?.[0] !== target[0]){
+                        bound?.off('mfpBeforeClose.pinovaAuth', close);
+                        target.on('mfpBeforeClose.pinovaAuth', close);
+                        bound = target;
+                    }
+                    return visible();
+                };
+                this.themeWebOtpCleanup = () => bound?.off('mfpBeforeClose.pinovaAuth', close);
+            }else if(dropdown && typeof MutationObserver === 'function'){
+                // Only the two verified Woodmart dropdown owners are observed. Class
+                // history matters: closing and reopening in one task still ends the old wait.
+                const parent = dropdown.parentElement;
+                const owners = [dropdown, parent];
+                const classes = node => node.getAttribute('class') || '';
+                const shown = values => {
+                    const child = values[0].split(/\s+/);
+                    const ancestor = values[1].split(/\s+/);
+                    return child.includes('wd-opened') || child.some(value => value.includes('wd-active'))
+                        || (ancestor.includes('wd-event-click') && ancestor.includes('wd-opened'))
+                        || (ancestor.includes('wd-event-hover') && parent.matches(':hover'));
+                };
+                const crossedClosedState = records => {
+                    if(records.length > 64 || records.some(record => (record.oldValue || '').length > 4096)) return true;
+                    const values = owners.map(node => records.find(record => record.target === node)?.oldValue ?? classes(node));
+                    if(!shown(values)) return true;
+                    for(let index = 0; index < records.length; ++index){
+                        const record = records[index];
+                        const owner = owners.indexOf(record.target);
+                        if(owner < 0) return true;
+                        const next = records.slice(index + 1).find(candidate => candidate.target === record.target);
+                        values[owner] = next?.oldValue ?? classes(record.target);
+                        if(!shown(values)) return true;
+                    }
+                    return false;
+                };
+                const observer = new MutationObserver(records => {
+                    if(crossedClosedState(records) || !visible()) close();
+                });
+                owners.forEach(node => observer.observe(node, {attributes: true, attributeFilter: ['class'], attributeOldValue: true}));
+                const checkVisibility = () => { if(!shown(owners.map(classes)) || !visible()) close(); };
+                parent.addEventListener('mouseleave', checkVisibility);
+                parent.addEventListener('focusout', checkVisibility);
+                this.themeWebOtpCheck = () => {
+                    const records = observer.takeRecords();
+                    if(records.length && crossedClosedState(records)){
+                        close();
+                        return false;
+                    }
+                    return shown(owners.map(classes)) && visible();
+                };
+                this.themeWebOtpCleanup = () => {
+                    observer.disconnect();
+                    parent.removeEventListener('mouseleave', checkVisibility);
+                    parent.removeEventListener('focusout', checkVisibility);
+                };
+            }else{
+                // Unknown theme lifecycle disables optional autofill, never manual authentication.
+                this.themeWebOtpCheck = () => false;
+            }
+        },
+
+        destroy(){
+            this.cancelRequest();
+            this.stopTimer();
+            this.themeWebOtpCleanup?.();
         },
 
         submit(){
@@ -92,6 +187,8 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             if(!request){
                 return;
             }
+
+            this.stopWebOtp();
 
             try{
                 const data = {...otherData};
@@ -177,6 +274,8 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                     }
                 }
 
+                this.otpSubmittedCodes[formName] = data.code;
+
                 const result = await pinovaApiRequest('pinova/user/login/otp', {
                     method: 'POST',
                     notifyOnError: false,
@@ -193,6 +292,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                 }
 
                 if(result.success){
+                    this.stopWebOtp();
                     const responseData = result.data;
                     pinovaNotyf.success(result.message ? result.message : 'درخواست با موفقیت انجام شد!');
 
@@ -208,7 +308,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                     }
                     this.handleRequestFailure(result);
                     this.forms[formName].inputs.code.value = '';
-                    this.resetOtpAutoSubmit(formName);
+
                 }
 
             }catch (error){
@@ -291,6 +391,8 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                     }
                 }
 
+                this.otpSubmittedCodes['forgotPassword'] = data.code;
+
                 const result = await pinovaApiRequest('pinova/auth/forgot/verify', {
                     method: 'POST',
                     notifyOnError: false,
@@ -315,7 +417,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
                 }else{
                     this.handleRequestFailure(result);
                     this.forms.forgotPassword.inputs.code.value = '';
-                    this.resetOtpAutoSubmit('forgotPassword');
+
                 }
 
             }catch (error){
@@ -380,7 +482,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             if(this.pageLoaderIsActive){
                 return null;
             }
-            this.stopWebOtp();
+            this.themeWebOtpCheck?.();
             const controller = typeof AbortController === 'function' ? new AbortController() : null;
             const request = {id: ++this.requestSequence, signal: controller ? controller.signal : null};
             this.pageLoaderIsActive = true;
@@ -416,7 +518,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
         focusFirstInvalidField(){
             setTimeout(()=>{
-                const step = this.$el?.querySelector(`[data-pinova-step="${this.stepName}"]`) || document.getElementById(this.stepName);
+                const step = this.authRoot?.querySelector(`[data-pinova-step="${this.stepName}"]`) || document.getElementById(this.stepName);
                 const firstInvalidField = step && step.querySelector('[aria-invalid="true"]');
                 if(firstInvalidField){
                     firstInvalidField.focus();
@@ -426,7 +528,7 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
 
         focusStepHeading(stepName){
             setTimeout(()=>{
-                const step = this.$el?.querySelector(`[data-pinova-step="${stepName}"]`) || document.getElementById(stepName);
+                const step = this.authRoot?.querySelector(`[data-pinova-step="${stepName}"]`) || document.getElementById(stepName);
                 const heading = step && step.querySelector('[data-pinova-step-heading]');
                 if(heading){
                     heading.focus({preventScroll: true});

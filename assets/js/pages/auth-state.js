@@ -3,6 +3,9 @@ export function createAuthState() {
         logo: pinova.logo,
         stepName: 'authenticate',
         previousStepName: null,
+        authRoot: null,
+        themeWebOtpCheck: null,
+        themeWebOtpCleanup: null,
         webOtpSequence: 0,
         webOtpAbort: null,
         pendingWebOtp: null,
@@ -173,6 +176,7 @@ export function createAuthState() {
         },
 
         initWebOtpLifecycle() {
+            this.authRoot = this.$root || this.$el || null;
             window.addEventListener('pagehide', () => {
                 this.webOtpPageActive = false;
                 this.cancelRequest();
@@ -199,14 +203,16 @@ export function createAuthState() {
                 && this.stepName === context.formName
                 && this.forms[context.formName].inputs.jwt.value === context.jwt
                 && this.forms.authenticate.inputs.identifier.value === context.identifier
-                && this.modalIsOpen !== false && this.$el?.isConnected !== false;
+                && this.modalIsOpen !== false && this.authRoot?.isConnected !== false
+                && (!this.themeWebOtpCheck || this.themeWebOtpCheck());
         },
 
         startWebOtp(formName) {
             this.stopWebOtp();
             if (!Object.prototype.hasOwnProperty.call(this.otpSubmittedCodes, formName)
                 || !this.forms[formName].inputs.jwt.value || !this.webOtpPageActive
-                || this.modalIsOpen === false || this.$el?.isConnected === false
+                || this.modalIsOpen === false || this.authRoot?.isConnected === false
+                || (this.themeWebOtpCheck && !this.themeWebOtpCheck())
                 || !('OTPCredential' in window) || typeof AbortController !== 'function'
                 || typeof navigator.credentials?.get !== 'function') {
                 return;
@@ -225,10 +231,11 @@ export function createAuthState() {
                         if (!this.webOtpIsCurrent(context) || !otp || typeof otp.code !== 'string') {
                             return;
                         }
-                        this.forms[formName].inputs.code.value = pinovaCleanNumericInput(otp.code);
+                        const code = pinovaCleanNumericInput(otp.code);
                         if (this.pageLoaderIsActive) {
-                            this.pendingWebOtp = context;
+                            this.pendingWebOtp = {...context, code};
                         } else {
+                            this.forms[formName].inputs.code.value = code;
                             this.handleOtpInput(formName);
                         }
                     }).catch(() => {});
@@ -241,6 +248,7 @@ export function createAuthState() {
             const context = this.pendingWebOtp;
             this.pendingWebOtp = null;
             if (context && this.webOtpIsCurrent(context)) {
+                this.forms[context.formName].inputs.code.value = context.code;
                 this.handleOtpInput(context.formName);
             }
         },
@@ -312,6 +320,9 @@ export function createAuthState() {
         },
 
         handleRequestFailure(result) {
+            if (result?.http?.status === 429) {
+                this.stopWebOtp();
+            }
             this.setStatus(result?.userMessage || result?.message || 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید.', 'error', result?.userMessage ? result.http?.correlationId : '');
         },
 

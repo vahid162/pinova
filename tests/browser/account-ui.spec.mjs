@@ -577,8 +577,13 @@ test('checkout modal remains dismissible while an authentication request is pend
     const requestGate = new Promise(resolve => {
         releaseRequest = resolve;
     });
+    let markRequestArrived;
+    const requestArrived = new Promise(resolve => {
+        markRequestArrived = resolve;
+    });
 
     await page.route(authenticateRoute, async route => {
+        markRequestArrived();
         await requestGate;
         try {
             await route.fulfill({
@@ -604,8 +609,15 @@ test('checkout modal remains dismissible while an authentication request is pend
 
     try {
         await opener.click();
-        await page.locator('#pinova-modal-identifier').fill('buyer@example.test');
+        await expect(page.locator('#pinova-modal-authenticate [data-pinova-step-heading]')).toBeFocused();
+        const identifier = page.locator('#pinova-modal-identifier');
+        await identifier.fill('buyer@example.test');
+        await expect(identifier).toHaveValue('buyer@example.test');
+        await expect.poll(() => page.evaluate(() =>
+            document.querySelector('#pinovaLoginModal')._x_dataStack[0].forms.authenticate.inputs.identifier.value,
+        )).toBe('buyer@example.test');
         await page.locator('#pinova-modal-authenticate button[type="submit"]').click();
+        await requestArrived;
 
         await expect(page.locator('#pinovaLoginModal .pinova-auth-layout')).toHaveAttribute('aria-busy', 'true');
         await expect.poll(() => modalMain.evaluate(element => element.inert)).toBe(true);

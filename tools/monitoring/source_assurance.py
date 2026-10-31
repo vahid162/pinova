@@ -177,11 +177,12 @@ class FileSourceAssurance(_Assurance):
                 self.gaps.add("reader_detected_gap")
             if reader.get("read_backlog") is True:
                 self.gaps.add("reader_read_bound")
+            before_processes = {tuple(x) for x in before}
             for ref in refs:
                 if (not isinstance(ref, dict) or set(ref) != {"identity", "process"}
                         or not _pair(ref["identity"]) or not _pair(ref["process"])
                         or tuple(ref["identity"]) not in identities
-                        or tuple(ref["process"]) not in {tuple(x) for x in before}):
+                        or tuple(ref["process"]) not in before_processes):
                     raise ValueError()
             if len(self._identities | identities) > self.max_generations:
                 self.gaps.add("generation_bound")

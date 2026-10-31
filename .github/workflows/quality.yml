@@ -53,7 +53,7 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/ops -p 'test_*.py' -v
 
   native-events:
-    name: Native MariaDB event allocation witness
+    name: Native event and file source witnesses
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -81,6 +81,15 @@ jobs:
           php-version: '8.3'
           coverage: none
           extensions: mysqli
+      - name: Provision native file observer
+        run: |
+          if [ ! -x /usr/bin/lsof ]; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y lsof
+          fi
+      - name: Verify isolated cross-UID file writers and retained generations
+        run: |
+          sudo --preserve-env=GITHUB_ACTIONS python3 -I -B tests/ops/test_file_snapshot.py --native-characterization > "$RUNNER_TEMP/pinova-native-file-witness-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
       - name: Verify native allocation, transactions and finite projection
         if: ${{ !cancelled() }}
         run: php tests/ops/mariadb_event_snapshot.php
@@ -89,7 +98,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-event-witness-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/pinova-native-event-witness-${{ github.run_id }}-${{ github.run_attempt }}.json
+          path: |
+            ${{ runner.temp }}/pinova-native-event-witness-${{ github.run_id }}-${{ github.run_attempt }}.json
+            ${{ runner.temp }}/pinova-native-file-witness-${{ github.run_id }}-${{ github.run_attempt }}.json
           if-no-files-found: error
           retention-days: 7
 

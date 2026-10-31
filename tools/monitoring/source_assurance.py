@@ -61,6 +61,7 @@ class _Assurance:
         self.gaps = set()
         self._last_sequence = None
         self._last_read_ns = None
+        self._last_read_started_ns = None
         self._clock_origin = None
         self._final = None
 
@@ -79,6 +80,7 @@ class _Assurance:
         elif abs((wall - self._clock_origin[1]) - (end - self._clock_origin[0])) > 5 * SECOND_NS:
             self.gaps.add("clock_discontinuity")
         self._last_sequence, self._last_read_ns = seq, end
+        self._last_read_started_ns = start
         return end
 
     def fail(self, reason):
@@ -223,8 +225,8 @@ class FileSourceAssurance(_Assurance):
             return copy.deepcopy(self._final)
         now_ns = time.monotonic_ns() if now_ns is None else now_ns
         self.observe(reader, witness, now_ns=now_ns)
-        if (self._window_start_ns is None or self._last_read_ns is None
-                or self._last_read_ns < self._window_start_ns + DAY_NS + self.grace_ns):
+        if (self._window_start_ns is None or self._last_read_started_ns is None
+                or self._last_read_started_ns < self._window_start_ns + DAY_NS + self.grace_ns):
             self.gaps.add("window_or_producer_drain_short")
         if self._native is None or self._reader is None:
             self.gaps.add("missing_final_source_snapshot")
@@ -357,8 +359,8 @@ class EventContinuityLedger(_Assurance):
             raise ValueError("event_end_already_frozen")
         now_ns = time.monotonic_ns() if now_ns is None else now_ns
         try:
-            end = self._native(witness, now_ns)
-            if self._base is None or end < self._started_ns + DAY_NS:
+            self._native(witness, now_ns)
+            if self._base is None or self._last_read_started_ns < self._started_ns + DAY_NS:
                 raise ValueError()
             self._end = witness["next_id_before"] - 1
             self._end_sequence = witness["sequence"]

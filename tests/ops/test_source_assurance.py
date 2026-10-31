@@ -66,6 +66,20 @@ class Files:
 
 
 class FileSourceTests(unittest.TestCase):
+    def test_final_snapshot_must_start_after_window_and_producer_drain(self):
+        for starts_before_boundary in (True, False):
+            with self.subTest(starts_before_boundary=starts_before_boundary):
+                f = Files("nginx_append_rename_unlink_5s_v1"); f.begin()
+                boundary = f.object._window_start_ns + DAY + f.object.grace_ns
+                f.advance(boundary - NS if starts_before_boundary else boundary)
+                witness = f.witness()
+                completed = boundary + NS
+                witness.update(read_completed_ns=completed, wall_epoch_ns=1_700_000_000 * NS + completed)
+                result = f.object.finalize(f.reader, witness, now_ns=completed)
+                self.assertEqual(not starts_before_boundary, result["coverage_complete"])
+                if starts_before_boundary:
+                    self.assertIn("window_or_producer_drain_short", result["reasons"])
+
     def test_full_verified_window_passes_without_changing_generic_reader_claim(self):
         f = Files(); f.begin(); result = f.finish()
         self.assertTrue(result["coverage_complete"])
@@ -243,6 +257,23 @@ class Events:
 
 
 class EventLedgerTests(unittest.TestCase):
+    def test_end_allocation_fence_must_start_after_full_window(self):
+        for starts_before_boundary in (True, False):
+            with self.subTest(starts_before_boundary=starts_before_boundary):
+                e = Events()
+                e.advance(DAY - NS if starts_before_boundary else DAY)
+                witness = e.witness()
+                e.now = DAY + NS
+                witness.update(read_completed_ns=e.now, wall_epoch_ns=1_700_000_000 * NS + e.now)
+                if starts_before_boundary:
+                    witness["next_id_after"] = 101
+                    e.next_id = 101
+                e.object.freeze_end(witness, now_ns=e.now)
+                result = e.finish()
+                self.assertEqual(not starts_before_boundary, result["coverage_complete"])
+                if starts_before_boundary:
+                    self.assertIn("invalid_native_event_end", result["reasons"])
+
     def test_dense_rows_are_counted_once_and_full_window_can_pass(self):
         e = Events(); e.next_id = 103
         e.consume([(100, "info"), (101, "warning"), (102, "error")])

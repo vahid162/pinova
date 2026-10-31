@@ -104,7 +104,7 @@ test('keyboard controls, image alternatives, and live feedback are explicit', ()
 });
 
 test('changed standalone assets use an account-specific cache revision', () => {
-    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.8'/);
+    assert.match(template, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.9'/);
 
     for (const asset of [
         'assets/css/style.css',
@@ -394,4 +394,23 @@ test('support references are isolated from the message and displayed left to rig
     assert.match(template, /<div pinova-text="status.message" dir="auto"><\/div>/);
     assert.match(template, /<bdi dir="ltr" pinova-text="status.reference"><\/bdi>/);
     assert.match(template, /کد پیگیری برای پشتیبانی:/);
+});
+
+
+test('theme partial exposes text feedback and native accessible field controls', () => {
+    assert.match(themePartial, /pinova-text="status.message"/);
+    assert.match(themePartial, /role="status" aria-live="polite" aria-atomic="true"/);
+    assert.match(themePartial, /<bdi dir="ltr" pinova-text="status.reference"/);
+    assert.match(themePartial, /wp_unique_id\( 'pinova-theme-' \)/);
+    assert.doesNotMatch(themePartial, /pinova-html=/);
+    assert.doesNotMatch(themePartial, /if \(forms\.[^.]+\.inputs\.code\.value\.length/);
+    assert.equal((themePartial.match(/data-pinova-step-heading tabindex="-1"/g) || []).length, 6);
+    assert.equal((themePartial.match(/pinova-bind:aria-invalid=/g) || []).length, 7);
+    assert.equal((themePartial.match(/aria-describedby=/g) || []).length, 7);
+    assert.equal((themePartial.match(/role="alert" aria-atomic="true"/g) || []).length, 7);
+    for (const formName of ['signIn', 'loginByOtp', 'forgotPassword']) {
+        assert.ok(themePartial.includes(`handleOtpInput('${formName}')`));
+        assert.ok(themePartial.includes(`pinova-text="forms.${formName}.msg"`));
+    }
+    assert.doesNotMatch(themePartial, /<div\s+[^>]*pinova-on:click=/);
 });

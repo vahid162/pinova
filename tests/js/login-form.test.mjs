@@ -56,6 +56,7 @@ function harness(
     }
 
     const context = vm.createContext({
+        AbortController,
         clearInterval(id) {
             clearedIntervals.push(id);
         },
@@ -201,21 +202,15 @@ test('OTP input normalizes digits and autosubmits each complete code exactly onc
     }
 });
 
-test('WebOTP uses the normalized exact-length autosubmit path', async () => {
-    const { listeners, state } = harness(undefined, { codeLength: 4, webOtpCode: '۱۲٣٤' });
+test('WebOTP starts after accepted state and uses normalized exact-length autosubmit', async () => {
+    const { listeners, state } = harness({success: true, data: {login_method: 'otp', jwt: 'active-flow', ttl: 180}}, { codeLength: 4, webOtpCode: '۱۲٣٤' });
     let submissions = 0;
-    state.stepName = 'signIn';
-    state.submit = () => {
-        submissions += 1;
-    };
-
+    state.submit = () => { submissions += 1; };
     state.init();
-    assert.equal(typeof listeners.DOMContentLoaded, 'function');
-    listeners.DOMContentLoaded();
+    assert.equal(listeners.DOMContentLoaded, undefined);
+    await state.authenticate();
     await Promise.resolve();
-    await Promise.resolve();
-
-    assert.equal(state.forms.signIn.inputs.code.value, '1234');
+    assert.equal(state.forms.loginByOtp.inputs.code.value, '1234');
     assert.equal(submissions, 1);
 });
 

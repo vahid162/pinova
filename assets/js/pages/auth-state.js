@@ -3,6 +3,13 @@ export function createAuthState() {
         logo: pinova.logo,
         stepName: 'authenticate',
         previousStepName: null,
+        authRoot: null,
+        themeWebOtpCheck: null,
+        themeWebOtpCleanup: null,
+        webOtpSequence: 0,
+        webOtpAbort: null,
+        pendingWebOtp: null,
+        webOtpPageActive: true,
         pageLoaderIsActive: false,
         codeLength: pinova.code_length,
         allowedSteps: [
@@ -168,6 +175,84 @@ export function createAuthState() {
             btnResendIsActive: false,
         },
 
+        initWebOtpLifecycle() {
+            this.authRoot = this.$root || this.$el || null;
+            window.addEventListener('pagehide', () => {
+                this.webOtpPageActive = false;
+                this.cancelRequest();
+                this.stopWebOtp();
+                this.stopTimer();
+            });
+            window.addEventListener('pageshow', () => {
+                this.webOtpPageActive = true;
+            });
+        },
+
+        stopWebOtp() {
+            ++this.webOtpSequence;
+            const abort = this.webOtpAbort;
+            this.webOtpAbort = null;
+            this.pendingWebOtp = null;
+            if (abort) {
+                abort();
+            }
+        },
+
+        webOtpIsCurrent(context) {
+            return context.sequence === this.webOtpSequence && this.webOtpPageActive
+                && this.stepName === context.formName
+                && this.forms[context.formName].inputs.jwt.value === context.jwt
+                && this.forms.authenticate.inputs.identifier.value === context.identifier
+                && this.modalIsOpen !== false && this.authRoot?.isConnected !== false
+                && (!this.themeWebOtpCheck || this.themeWebOtpCheck());
+        },
+
+        startWebOtp(formName) {
+            this.stopWebOtp();
+            if (!Object.prototype.hasOwnProperty.call(this.otpSubmittedCodes, formName)
+                || !this.forms[formName].inputs.jwt.value || !this.webOtpPageActive
+                || this.modalIsOpen === false || this.authRoot?.isConnected === false
+                || (this.themeWebOtpCheck && !this.themeWebOtpCheck())
+                || !('OTPCredential' in window) || typeof AbortController !== 'function'
+                || typeof navigator.credentials?.get !== 'function') {
+                return;
+            }
+            const controller = new AbortController();
+            const context = {
+                sequence: this.webOtpSequence,
+                formName,
+                jwt: this.forms[formName].inputs.jwt.value,
+                identifier: this.forms.authenticate.inputs.identifier.value,
+            };
+            this.webOtpAbort = () => controller.abort();
+            try {
+                Promise.resolve(navigator.credentials.get({ otp: { transport: ['sms'] }, signal: controller.signal }))
+                    .then(otp => {
+                        if (!this.webOtpIsCurrent(context) || !otp || typeof otp.code !== 'string') {
+                            return;
+                        }
+                        const code = pinovaCleanNumericInput(otp.code);
+                        if (this.pageLoaderIsActive) {
+                            this.pendingWebOtp = {...context, code};
+                        } else {
+                            this.forms[formName].inputs.code.value = code;
+                            this.handleOtpInput(formName);
+                        }
+                    }).catch(() => {});
+            } catch {
+                this.stopWebOtp();
+            }
+        },
+
+        resumeWebOtp() {
+            const context = this.pendingWebOtp;
+            this.pendingWebOtp = null;
+            if (context && this.webOtpIsCurrent(context)) {
+                this.forms[context.formName].inputs.code.value = context.code;
+                this.handleOtpInput(context.formName);
+            }
+        },
+
         setStatus(message, tone = 'error', reference = '') {
             this.status.message = message || 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید.';
             this.status.tone = tone;
@@ -235,6 +320,9 @@ export function createAuthState() {
         },
 
         handleRequestFailure(result) {
+            if (result?.http?.status === 429) {
+                this.stopWebOtp();
+            }
             this.setStatus(result?.userMessage || result?.message || 'درخواست انجام نشد. کمی بعد دوباره تلاش کنید.', 'error', result?.userMessage ? result.http?.correlationId : '');
         },
 
@@ -243,6 +331,7 @@ export function createAuthState() {
         },
 
         clearStepSecrets(stepName) {
+            this.stopWebOtp();
             switch (stepName) {
                 case 'signIn':
                 case 'loginByOtp':
@@ -265,6 +354,7 @@ export function createAuthState() {
         },
 
         resetSensitiveState() {
+            this.stopWebOtp();
             this.stopTimer();
             this.forms.signIn.inputs.jwt.value = '';
             this.forms.signIn.inputs.code.value = '';

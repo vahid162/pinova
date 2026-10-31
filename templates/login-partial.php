@@ -13,6 +13,7 @@ $submit_button_classes = $submit_button_classes ?? '';
 
 /**@var string $custom_style */
 $custom_styles = $custom_styles ?? '';
+$partial_id    = wp_unique_id( 'pinova-theme-' );
 /*Custom nav arrow based on elementor accent color*/
 $nav_arrow_left = '<svg class="md:h-5 h-4 nav-arrow" width="20" height="21" viewBox="0 0 20 21" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 15.7693L7.5 10.7693L12.5 5.76929" stroke="var(--e-global-color-accent)" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -56,7 +57,7 @@ $allowed_navigation_svg = [
 <link rel='stylesheet' href='<?php echo esc_url( PINOVA_URL ); ?>assets/css/notyf.min.css?ver=<?php echo esc_attr( PINOVA_VERSION ); ?>' media='all'/>
 
 <!-- Page script -->
-<script src="<?php echo esc_url( PINOVA_URL ); ?>assets/js/pages/login-form.js?ver=<?php echo esc_attr( PINOVA_VERSION ); ?>" type="module"></script>
+<script src="<?php echo esc_url( PINOVA_URL ); ?>assets/js/pages/login-form.js?ver=<?php echo esc_attr( PINOVA_VERSION . '.9' ); ?>" type="module"></script>
 
 
 <!-- Custom partial styles (override and new styles) -->
@@ -73,6 +74,7 @@ echo $custom_styles;
 			<div class="flex items-start justify-center py-4">
 				<div
 					pinova-data="pinovaLoginForm()"
+					data-pinova-theme-partial
 					class="w-[390px] sm:relative  overflow-hidden max-w-full"
 				>
 
@@ -85,30 +87,40 @@ echo $custom_styles;
 						<span class="loader"></span>
 					</div>
 
+					<div pinova-bind:inert="pageLoaderIsActive">
 					<!-- static -->
 					<div class="relative mb-8">
 						<div class="h-full absolute top-0 right-0 flex items-center py-4">
-							<div
+							<button type="button" aria-label="بازگشت به مرحله قبل"
 								pinova-cloak
 								pinova-show="stepName !== 'authenticate'"
 								pinova-on:click="backStep()"
 								class="cursor-pointer h-6"
 							>
-								<img class="h-full" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/arrow-right.svg">
-							</div>
-							<button
+								<img alt="" aria-hidden="true" class="h-full" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/arrow-right.svg">
+							</button>
+							<button type="button"
 								pinova-cloak
-								pinova-show="(stepName === 'authenticate')"
+								pinova-show="(stepName === 'authenticate')" aria-label="بازگشت"
 								pinova-on:click="pinovaGoBack()"
 								class="inline-block h-6"
 							>
-								<img class="h-full" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/arrow-right.svg">
+								<img alt="" aria-hidden="true" class="h-full" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/arrow-right.svg">
 							</button>
 						</div>
 					</div>
+
+					<div pinova-cloak pinova-show="status.message" class="mb-5 text-error-500" role="status" aria-live="polite" aria-atomic="true">
+						<div pinova-text="status.message" dir="auto"></div>
+						<div pinova-show="status.reference">
+							<span>کد پیگیری برای پشتیبانی:</span>
+							<bdi dir="ltr" pinova-text="status.reference"></bdi>
+						</div>
+					</div>
 					<template pinova-if="stepName === 'authenticate'">
-						<div id="authenticate" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
-							<label class="mb-5">
+						<div id="authenticate" data-pinova-step="authenticate" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
+							<h2 class="screen-reader-text" data-pinova-step-heading tabindex="-1">ورود / ثبت‌نام</h2>
+							<label for="<?php echo esc_attr( $partial_id . '-identifier' ); ?>" class="mb-5">
 								شماره موبایل یا نام کاربری
 								&nbsp;
 								<span class="required" aria-hidden="true">*</span>
@@ -116,6 +128,11 @@ echo $custom_styles;
 							</label>
 							<div class="mb-5">
 								<input
+									id="<?php echo esc_attr( $partial_id . '-identifier' ); ?>"
+									aria-describedby="<?php echo esc_attr( $partial_id . '-identifier-error' ); ?>"
+									pinova-bind:aria-invalid="Boolean(forms.authenticate.inputs.identifier.errorMsg)"
+									required dir="auto"
+									autocomplete="username"
 									type="text"
 									pinova-on:keyup.enter="submit()"
 									pinova-model="forms.authenticate.inputs.identifier.value"
@@ -125,16 +142,16 @@ echo $custom_styles;
 									name="username"
 								>
 								<div
+									id="<?php echo esc_attr( $partial_id . '-identifier-error' ); ?>" role="alert" aria-atomic="true"
 									pinova-show="forms.authenticate.inputs.identifier.errorMsg"
 									pinova-text="forms.authenticate.inputs.identifier.errorMsg"
 									class="text-error-500 md:text-sm text-xs pt-1.5 empty:!pt-0"
 								>
 								</div>
 							</div>
-							<button
+							<button type="button"
 								pinova-on:click="submit()"
 								class="block w-full p-2.5 <?php echo esc_attr( $submit_button_classes ); ?>"
-								type="button"
 							>
 								تایید
 							</button>
@@ -142,15 +159,18 @@ echo $custom_styles;
 					</template>
 
 					<template pinova-if="stepName === 'signIn'">
-						<div id="signIn" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
-							<label pinova-html="forms.signIn.msg" class="md:mb-5 mb-4"></label>
+						<div id="signIn" data-pinova-step="signIn" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
+							<h2 class="screen-reader-text" data-pinova-step-heading tabindex="-1">کد تأیید</h2>
+							<p pinova-text="forms.signIn.msg" class="md:mb-5 mb-4"></p>
 							<div class="mb-5">
+								<label for="<?php echo esc_attr( $partial_id . '-signin-code' ); ?>">کد تأیید</label>
 								<input
+									id="<?php echo esc_attr( $partial_id . '-signin-code' ); ?>"
+									aria-describedby="<?php echo esc_attr( $partial_id . '-signin-code-error' ); ?>"
+									pinova-bind:aria-invalid="Boolean(forms.signIn.inputs.code.errorMsg)"
+									required
 									pinova-on:keyup.enter="submit()"
-									pinova-on:input="
-										forms.signIn.inputs.code.value = pinovaCleanNumericInput(forms.signIn.inputs.code.value);
-										if (forms.signIn.inputs.code.value.length === codeLength) submit();
-									"
+									pinova-on:input="handleOtpInput('signIn')"
 									pinova-model="forms.signIn.inputs.code.value"
 									type="text"
 									inputmode="numeric"
@@ -162,6 +182,7 @@ echo $custom_styles;
 									pinova-bind:class="{'!border-error-300' : forms.signIn.inputs.code.errorMsg}"
 								>
 								<div
+									id="<?php echo esc_attr( $partial_id . '-signin-code-error' ); ?>" role="alert" aria-atomic="true"
 									pinova-show="forms.signIn.inputs.code.errorMsg"
 									pinova-text="forms.signIn.inputs.code.errorMsg"
 									class="text-error-500 md:text-sm text-xs pt-1.5 empty:!pt-0"
@@ -169,7 +190,7 @@ echo $custom_styles;
 								</div>
 							</div>
 							<div class="mb-5">
-								<button
+								<button type="button"
 										pinova-on:click="authenticate({force_otp : '1'})"
 										pinova-bind:disabled="!time.btnResendIsActive"
 										class="flex w-full items-center justify-center border border-gray-300 rounded-[8px] text-gray-700 font-semibold hover:bg-gray-100 disabled:hover:bg-transparent py-2.5 px-4"
@@ -194,10 +215,9 @@ echo $custom_styles;
 								</span>
 								</button>
 							</div>
-							<button
+							<button type="button"
 								pinova-on:click="submit()"
 								class="block w-full p-2.5 mb-4 <?php echo esc_attr( $submit_button_classes ); ?>"
-								type="button"
 							>
 								تایید
 							</button>
@@ -216,8 +236,9 @@ echo $custom_styles;
 					</template>
 
 					<template pinova-if="stepName === 'loginByPassword'">
-						<div id="loginByPassword" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
-							<label class="md:mb-5 mb-4">
+						<div id="loginByPassword" data-pinova-step="loginByPassword" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
+							<h2 class="screen-reader-text" data-pinova-step-heading tabindex="-1">ورود با رمز عبور</h2>
+							<label class="md:mb-5 mb-4" for="<?php echo esc_attr( $partial_id . '-password' ); ?>">
 								رمز عبور را وارد کنید
 							</label>
 							<div class="mb-5">
@@ -226,28 +247,34 @@ echo $custom_styles;
 									class="relative"
 								>
 									<input
+									id="<?php echo esc_attr( $partial_id . '-password' ); ?>"
+									aria-describedby="<?php echo esc_attr( $partial_id . '-password-error' ); ?>"
+									pinova-bind:aria-invalid="Boolean(forms.loginByPassword.inputs.password.errorMsg)"
+									required
+									autocomplete="current-password"
 										pinova-on:keyup.enter="submit()"
 										pinova-model="forms.loginByPassword.inputs.password.value"
 										pinova-bind:type="`${typeIsPassword ? 'password' : 'text'}`"
 										class="block w-full py-2.5 px-3 pl-10"
 										pinova-bind:class="{'!border-error-300' : forms.loginByPassword.inputs.password.errorMsg}"
 									>
-									<div
+									<button type="button" aria-label="نمایش رمز عبور"
 										pinova-show="typeIsPassword"
 										pinova-on:click="typeIsPassword = false"
 										class="absolute left-0 top-0 h-full flex items-center cursor-pointer pl-3"
 									>
-										<img class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye.svg">
-									</div>
-									<div
+										<img alt="" aria-hidden="true" class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye.svg">
+									</button>
+									<button type="button" aria-label="پنهان کردن رمز عبور"
 										pinova-show="!typeIsPassword"
 										pinova-on:click="typeIsPassword = true"
 										class="absolute left-0 top-0 h-full flex items-center cursor-pointer pl-3"
 									>
-										<img class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye-off.svg">
-									</div>
+										<img alt="" aria-hidden="true" class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye-off.svg">
+									</button>
 								</div>
 								<div
+									id="<?php echo esc_attr( $partial_id . '-password-error' ); ?>" role="alert" aria-atomic="true"
 									pinova-show="forms.loginByPassword.inputs.password.errorMsg"
 									pinova-text="forms.loginByPassword.inputs.password.errorMsg"
 									class="text-error-500 md:text-sm text-xs pt-1.5 empty:!pt-0"
@@ -255,27 +282,24 @@ echo $custom_styles;
 								</div>
 							</div>
 							<div class="mb-5">
-								<button
+								<button type="button"
 									pinova-on:click="authenticate({force_otp: '1'}, 'loginByOtp')"
 									class="flex items-center gap-1.5 font-semibold mb-3 text-primary-500"
-									type="button"
 								>
 									<span>ورود با رمز یک‌بار‌مصرف</span>
 									<?php echo wp_kses( $nav_arrow_left, $allowed_navigation_svg ); ?>
 								</button>
-								<button
+								<button type="button"
 									pinova-on:click="authenticate({forget: '1'}, 'forgotPassword')"
 									class="flex items-center gap-1.5 font-semibold text-primary-500"
-									type="button"
 								>
 									<span>فراموشی رمز عبور</span>
 									<?php echo wp_kses( $nav_arrow_left, $allowed_navigation_svg ); ?>
 								</button>
 							</div>
-							<button
+							<button type="button"
 								pinova-on:click="submit()"
 								class="block w-full p-2.5 <?php echo esc_attr( $submit_button_classes ); ?>"
-								type="button"
 							>
 								ورود
 							</button>
@@ -283,15 +307,18 @@ echo $custom_styles;
 					</template>
 
 					<template pinova-if="stepName === 'loginByOtp'">
-						<div id="loginByOtp" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
-							<label pinova-html="forms.loginByOtp.msg" class="md:mb-5 mb-4"></label>
+						<div id="loginByOtp" data-pinova-step="loginByOtp" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
+							<h2 class="screen-reader-text" data-pinova-step-heading tabindex="-1">کد تأیید</h2>
+							<p pinova-text="forms.loginByOtp.msg" class="md:mb-5 mb-4"></p>
 							<div class="mb-5">
+								<label for="<?php echo esc_attr( $partial_id . '-login-code' ); ?>">کد تأیید</label>
 								<input
+									id="<?php echo esc_attr( $partial_id . '-login-code' ); ?>"
+									aria-describedby="<?php echo esc_attr( $partial_id . '-login-code-error' ); ?>"
+									pinova-bind:aria-invalid="Boolean(forms.loginByOtp.inputs.code.errorMsg)"
+									required
 									pinova-on:keyup.enter="submit()"
-									pinova-on:input="
-										forms.loginByOtp.inputs.code.value = pinovaCleanNumericInput(forms.loginByOtp.inputs.code.value);
-										if (forms.loginByOtp.inputs.code.value.length === codeLength) submit();
-									"
+									pinova-on:input="handleOtpInput('loginByOtp')"
 									pinova-model="forms.loginByOtp.inputs.code.value"
 									type="text"
 									inputmode="numeric"
@@ -303,6 +330,7 @@ echo $custom_styles;
 									placeholder="کد تایید را وارد کنید"
 								>
 								<div
+									id="<?php echo esc_attr( $partial_id . '-login-code-error' ); ?>" role="alert" aria-atomic="true"
 									pinova-show="forms.loginByOtp.inputs.code.errorMsg"
 									pinova-text="forms.loginByOtp.inputs.code.errorMsg"
 									class="text-error-500 md:text-sm text-xs pt-1.5 empty:!pt-0"
@@ -310,17 +338,16 @@ echo $custom_styles;
 								</div>
 							</div>
 							<div class="mb-5">
-								<button
+								<button type="button"
 									pinova-on:click="changeStep('loginByPassword'); forms.loginByPassword.inputs.password.value = ''"
 									class="flex items-center gap-1.5 font-semibold mb-3 text-primary-500"
-									type="button"
 								>
 									<span>ورود با رمز عبور</span>
 									<?php echo wp_kses( $nav_arrow_left, $allowed_navigation_svg ); ?>
 								</button>
 							</div>
 							<div class="mb-5">
-								<button
+								<button type="button"
 										pinova-on:click="authenticate({force_otp : '1'})"
 										pinova-bind:disabled="!time.btnResendIsActive"
 										class="flex w-full items-center justify-center border border-gray-300 rounded-[8px] text-gray-700 font-semibold hover:bg-gray-100 disabled:hover:bg-transparent py-2.5 px-4"
@@ -345,10 +372,9 @@ echo $custom_styles;
 								</span>
 								</button>
 							</div>
-							<button
+							<button type="button"
 								pinova-on:click="submit()"
 								class="block w-full p-2.5 <?php echo esc_attr( $submit_button_classes ); ?>"
-								type="button"
 							>
 								تایید
 							</button>
@@ -356,17 +382,20 @@ echo $custom_styles;
 					</template>
 
 					<template pinova-if="stepName === 'forgotPassword'">
-						<div id="forgotPassword" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
+						<div id="forgotPassword" data-pinova-step="forgotPassword" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
+							<h2 class="screen-reader-text" data-pinova-step-heading tabindex="-1">کد بازیابی رمز عبور</h2>
 							<div class="md:mb-5 mb-4">
-								<label pinova-html="forms.forgotPassword.msg" class="md:mb-5 mb-4"></label>
+								<p pinova-text="forms.forgotPassword.msg" class="md:mb-5 mb-4"></p>
 							</div>
 							<div class="mb-5">
+								<label for="<?php echo esc_attr( $partial_id . '-forgot-code' ); ?>">کد بازیابی رمز عبور</label>
 								<input
+									id="<?php echo esc_attr( $partial_id . '-forgot-code' ); ?>"
+									aria-describedby="<?php echo esc_attr( $partial_id . '-forgot-code-error' ); ?>"
+									pinova-bind:aria-invalid="Boolean(forms.forgotPassword.inputs.code.errorMsg)"
+									required
 									pinova-on:keyup.enter="submit()"
-									pinova-on:input="
-										forms.forgotPassword.inputs.code.value = pinovaCleanNumericInput(forms.forgotPassword.inputs.code.value);
-										if (forms.forgotPassword.inputs.code.value.length === codeLength) submit();
-									"
+									pinova-on:input="handleOtpInput('forgotPassword')"
 									pinova-model="forms.forgotPassword.inputs.code.value"
 									type="text"
 									inputmode="numeric"
@@ -378,6 +407,7 @@ echo $custom_styles;
 									pinova-bind:class="{'!border-error-300' : forms.forgotPassword.inputs.code.errorMsg}"
 								>
 								<div
+									id="<?php echo esc_attr( $partial_id . '-forgot-code-error' ); ?>" role="alert" aria-atomic="true"
 									pinova-show="forms.forgotPassword.inputs.code.errorMsg"
 									pinova-text="forms.forgotPassword.inputs.code.errorMsg"
 									class="text-error-500 md:text-sm text-xs pt-1.5 empty:!pt-0"
@@ -385,7 +415,7 @@ echo $custom_styles;
 								</div>
 							</div>
 							<div class="mb-5">
-								<button
+								<button type="button"
 										pinova-on:click="authenticate({forget : '1', force_otp : '1'}, 'forgotPassword')"
 										pinova-bind:disabled="!time.btnResendIsActive"
 										class="flex w-full items-center justify-center border border-gray-300 rounded-[8px] text-gray-700 font-semibold hover:bg-gray-100 disabled:hover:bg-transparent py-2.5 px-4"
@@ -410,10 +440,9 @@ echo $custom_styles;
 								</span>
 								</button>
 							</div>
-							<button
+							<button type="button"
 								pinova-on:click="submit()"
 								class="block w-full p-2.5 <?php echo esc_attr( $submit_button_classes ); ?>"
-								type="button"
 							>
 								تایید
 							</button>
@@ -421,10 +450,11 @@ echo $custom_styles;
 					</template>
 
 					<template pinova-if="stepName === 'changePassword'">
-						<div id="changePassword" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
+						<div id="changePassword" data-pinova-step="changePassword" class="<?php echo esc_attr( $form_wrapper_classes ); ?>">
+							<h2 class="screen-reader-text" data-pinova-step-heading tabindex="-1">تعیین رمز عبور جدید</h2>
 							<div class="mb-5">
 								<div class="mb-5">
-									<label class="block mb-2">
+									<label class="block mb-2" for="<?php echo esc_attr( $partial_id . '-password-new' ); ?>">
 										رمز عبور جدید
 									</label>
 									<div
@@ -432,28 +462,34 @@ echo $custom_styles;
 										class="relative"
 									>
 										<input
+									id="<?php echo esc_attr( $partial_id . '-password-new' ); ?>"
+									aria-describedby="<?php echo esc_attr( $partial_id . '-password-new-error' ); ?>"
+									pinova-bind:aria-invalid="Boolean(forms.changePassword.inputs.password_1.errorMsg)"
+									required
+									autocomplete="new-password"
 											pinova-model="forms.changePassword.inputs.password_1.value"
 											pinova-bind:type="`${typeIsPassword ? 'password' : 'text'}`"
 											class="block w-full text-sm border border-gray-300 focus:border-primary-500 rounded-[8px] shadow-[0_1px_2px_0_#1018280D] py-2.5 px-3 pl-10"
 											pinova-bind:class="{'!border-error-300' : forms.changePassword.inputs.password_1.errorMsg}"
 										>
-										<div
+										<button type="button" aria-label="نمایش رمز عبور"
 											pinova-show="typeIsPassword"
 											pinova-on:click="typeIsPassword = false"
 											class="absolute left-0 top-0 h-full flex items-center cursor-pointer pl-3"
 										>
-											<img class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye.svg">
-										</div>
-										<div
+											<img alt="" aria-hidden="true" class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye.svg">
+										</button>
+										<button type="button" aria-label="پنهان کردن رمز عبور"
 											pinova-show="!typeIsPassword"
 											pinova-on:click="typeIsPassword = true"
 											class="absolute left-0 top-0 h-full flex items-center cursor-pointer pl-3"
 										>
-											<img class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye-off.svg">
-										</div>
+											<img alt="" aria-hidden="true" class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye-off.svg">
+										</button>
 									</div>
 									<div
-										pinova-show="forms.changePassword.inputs.password_1.errorMsg"
+										id="<?php echo esc_attr( $partial_id . '-password-new-error' ); ?>" role="alert" aria-atomic="true"
+									pinova-show="forms.changePassword.inputs.password_1.errorMsg"
 										pinova-text="forms.changePassword.inputs.password_1.errorMsg"
 										class="text-error-500 md:text-sm text-xs pt-1.5 empty:!pt-0"
 									>
@@ -513,7 +549,7 @@ echo $custom_styles;
 									</div>
 								</div>
 								<div class="mb-5">
-									<label class="block mb-2">
+									<label class="block mb-2" for="<?php echo esc_attr( $partial_id . '-password-confirm' ); ?>">
 										تکرار رمز عبور
 									</label>
 									<div
@@ -521,45 +557,51 @@ echo $custom_styles;
 										class="relative"
 									>
 										<input
+									id="<?php echo esc_attr( $partial_id . '-password-confirm' ); ?>"
+									aria-describedby="<?php echo esc_attr( $partial_id . '-password-confirm-error' ); ?>"
+									pinova-bind:aria-invalid="Boolean(forms.changePassword.inputs.password_2.errorMsg)"
+									required
+									autocomplete="new-password"
 											pinova-on:keyup.enter="submit()"
 											pinova-model="forms.changePassword.inputs.password_2.value"
 											pinova-bind:type="`${typeIsPassword ? 'password' : 'text'}`"
 											class="block w-full py-2.5 px-3 pl-10"
 											pinova-bind:class="{'!border-error-300' : forms.changePassword.inputs.password_2.errorMsg}"
 										>
-										<div
+										<button type="button" aria-label="نمایش رمز عبور"
 											pinova-show="typeIsPassword"
 											pinova-on:click="typeIsPassword = false"
 											class="absolute left-0 top-0 h-full flex items-center cursor-pointer pl-3"
 										>
-											<img class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye.svg">
-										</div>
-										<div
+											<img alt="" aria-hidden="true" class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye.svg">
+										</button>
+										<button type="button" aria-label="پنهان کردن رمز عبور"
 											pinova-show="!typeIsPassword"
 											pinova-on:click="typeIsPassword = true"
 											class="absolute left-0 top-0 h-full flex items-center cursor-pointer pl-3"
 										>
-											<img class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye-off.svg">
-										</div>
+											<img alt="" aria-hidden="true" class="w-5" src="<?php echo esc_url( PINOVA_URL ); ?>assets/images/icons/eye-off.svg">
+										</button>
 									</div>
 									<div
-										pinova-show="forms.changePassword.inputs.password_2.errorMsg"
+										id="<?php echo esc_attr( $partial_id . '-password-confirm-error' ); ?>" role="alert" aria-atomic="true"
+									pinova-show="forms.changePassword.inputs.password_2.errorMsg"
 										pinova-text="forms.changePassword.inputs.password_2.errorMsg"
 										class="text-error-500 md:text-sm text-xs pt-1.5 empty:!pt-0"
 									>
 									</div>
 								</div>
 							</div>
-							<button
+							<button type="button"
 								pinova-on:click="submit()"
 								class="block w-full p-2.5 mt-8 <?php echo esc_attr( $submit_button_classes ); ?>"
-								type="button"
 							>
 								تایید
 							</button>
 						</div>
 					</template>
 
+					</div>
 				</div>
 			</div>
 		</div>

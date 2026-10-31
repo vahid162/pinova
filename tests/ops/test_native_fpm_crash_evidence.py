@@ -98,6 +98,71 @@ def core_collection_fixture(*, malformed_environment=False, core_pid=123):
 
 
 class NativeCrashEvidenceTest(unittest.TestCase):
+    def test_preflight_allows_optional_shape_unknown_only_after_critical_identity_is_verified(self):
+        with tempfile.TemporaryDirectory() as temp:
+            campaign, arm, base = Path(temp), Path(temp) / 'arm', Path(temp) / 'capture'
+            (arm / 'private').mkdir(parents=True)
+            base.mkdir()
+            (arm / 'fixture-owned').write_text('123:1\n')
+            native = arm / 'private/native-environment.json'
+            with (mock.patch.object(capture, 'state_load', return_value={'owner': '123:1'}),
+                  mock.patch.object(capture, 'mount_matches', return_value=True),
+                  mock.patch.object(capture, 'run') as commands,
+                  mock.patch.object(capture, 'process_identity') as processes,
+                  mock.patch.object(capture, 'core_identity') as cores,
+                  mock.patch.object(os, 'pidfd_open') as opened,
+                  mock.patch.object(capture.signal, 'pidfd_send_signal') as signals,
+                  mock.patch.object(os.path, 'ismount') as mounts):
+                # Critical evidence cannot be replaced by an optional-schema limit.
+                for label in ('malformed_json', 'missing_file', 'wrong_version', 'wrong_sapi'):
+                    with self.subTest(critical=label):
+                        value = environment()
+                        if label == 'wrong_version':
+                            value['php_version'] = '8.4.28'
+                        elif label == 'wrong_sapi':
+                            value['sapi'] = 'cli'
+                        native.write_text('{"extensions":[' if label == 'malformed_json' else json.dumps(value))
+                        if label == 'missing_file':
+                            native.unlink()
+                        with self.assertRaises(capture.CaptureError):
+                            capture.preflight(campaign, arm, base)
+
+                for field, reason in [('extension_name', 'extension_name_invalid'), ('extension_version', 'extension_version_invalid'),
+                                      ('settings_keys', 'settings_keys_invalid'), ('settings_value', 'settings_value_invalid'),
+                                      ('zend_version', 'zend_version_invalid')]:
+                    with self.subTest(optional=field):
+                        value = environment()
+                        rejected = 'SECRET /private/?otp=123456'
+                        if field == 'extension_name':
+                            value['extensions'][rejected] = '1.0'
+                        elif field == 'extension_version':
+                            value['extensions']['curl'] = rejected
+                        elif field == 'settings_keys':
+                            value['settings'][rejected] = '1'
+                        elif field == 'settings_value':
+                            value['settings']['opcache.jit'] = rejected
+                        else:
+                            value['zend_version'] = rejected
+                        native.write_text(json.dumps(value))
+                        failure, result = None, None
+                        try:
+                            result = capture.preflight(campaign, arm, base)
+                        except capture.CaptureError as error:
+                            failure = error.code
+                        self.assertIsNone(failure, 'Verified critical identity must permit diagnosis despite an optional metadata-shape limit.')
+                        self.assertEqual(result['state'], 'version_recorded')
+                        self.assertEqual(result['identity'], {'php_version': '8.4.27', 'sapi': 'fpm-fcgi'})
+                        self.assertFalse(result['resource_acceptance'])
+                        self.assertEqual(result['inventory_status']['state'], 'needs_review')
+                        self.assertEqual(result['inventory_status']['reason'], reason)
+                        self.assertIsNone(result['inventory'])
+                        published = json.dumps(result)
+                        self.assertNotIn('SECRET', published)
+                        self.assertNotIn('/private/', published)
+                        self.assertNotIn('otp=123456', published)
+                for operation in (commands, processes, cores, opened, signals, mounts):
+                    operation.assert_not_called()
+
     def test_mysqlnd_named_version_prefix_is_accepted_only_for_matching_extension_and_php(self):
         value = environment()
         value['extensions']['mysqlnd'] = 'mysqlnd 8.4.27'

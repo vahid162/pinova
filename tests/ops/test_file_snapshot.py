@@ -33,6 +33,19 @@ S = load("snapshot_source_assurance", ROOT / "tools/monitoring/source_assurance.
 PINS = {key: value * 64 for key, value in (("adapter", "a"), ("cursor", "b"), ("assurance", "c"), ("lsof", "d"))}
 CAP = {"receipt_sha256": "e" * 64, "scope_identity": "f" * 64}
 SOURCE = {"writer": "1" * 64, "rotation_inventory": "2" * 64, "configuration": "3" * 64}
+NATIVE_FAILURE_REASONS = {
+    "native_root_visibility_required", "native_threaded_controller", "native_source_shape", "native_output_shape",
+    "native_access_flags_unknown", "native_nonappend_writer", "native_output_bound", "native_read_bound",
+    "native_writer_churn", "native_scan_incomplete", "native_scan_timeout", "native_child_not_reaped",
+    "native_code_pin_changed", "native_scope_changed", "native_scope_unavailable", "native_read_failed",
+    "isolated_root_ci_required", "native_fixture_child_failed", "cross_uid_writer_not_observed",
+    "nonappend_writer_not_rejected", "late_generation_not_preserved", "retired_writer_not_drained",
+    "native_fixture_failed",
+}
+NATIVE_PHASES = {
+    "not_started", "root_guard", "adapter_setup", "fixture_setup", "writer_ready", "cross_uid_scan",
+    "nonappend_scan", "rotation_late_write", "late_scan", "writer_drain", "drained_scan",
+}
 
 
 def output(records):
@@ -253,10 +266,13 @@ class SnapshotTests(unittest.TestCase):
                 kill_pid.assert_not_called(); kill_group.assert_not_called()
 
 
-def native_characterization():
+def native_characterization(progress=None):
     """Explicit isolated-root fixture; ordinary unittest never invokes this."""
+    progress = {} if progress is None else progress
+    progress["phase"] = "root_guard"
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.geteuid() != 0:
         raise M.NativeFailure("isolated_root_ci_required")
+    progress["phase"] = "adapter_setup"
     digest = lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
     pins = {"adapter": digest(ROOT / "tools/monitoring/file_snapshot.py"),
             "cursor": digest(ROOT / "tools/monitoring/log_cursor.py"),
@@ -265,6 +281,7 @@ def native_characterization():
     # This fixture creates its own controlled cross-UID witness, not production permission.
     capability = {"scope_identity": scope, "receipt_sha256": hashlib.sha256(b"isolated-cross-uid-fixture-v1").hexdigest()}
     snapshot = M.NativeFileSnapshot(pins=pins, capability=capability)
+    progress["phase"] = "fixture_setup"
     with tempfile.TemporaryDirectory() as directory:
         os.chmod(directory, 0o755)
         path = Path(directory) / "synthetic.log"; path.write_bytes(b"before\n"); os.chmod(path, 0o666)
@@ -283,6 +300,7 @@ with open(sys.argv[1], 'ab', buffering=0) as writer:
                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, preexec_fn=unprivileged)
         cursor = None
         try:
+            progress["phase"] = "writer_ready"
             if not select.select([child.stdout], [], [], 5)[0] or child.stdout.read(1) != b"r":
                 raise M.NativeFailure("native_fixture_child_failed")
             cursor = L.LogCursor(path)
@@ -290,24 +308,39 @@ with open(sys.argv[1], 'ab', buffering=0) as writer:
                 adapter_sha256=pins["adapter"], producer_identity="5" * 64, boot_identity=boot,
                 max_witness_age_seconds=30)
             sources, assurances = {"synthetic": cursor}, {"synthetic": assurance}
+            progress["phase"] = "cross_uid_scan"
             first = snapshot.observe_sources(sources, assurances, 1)
-            if first["state"] != "observed" or not any(x["process"][0] == child.pid for x in first["witnesses"]["synthetic"]["writer_refs"]):
+            if first["state"] != "observed":
+                raise M.NativeFailure(first.get("reason", "native_read_failed"))
+            if not any(x["process"][0] == child.pid for x in first["witnesses"]["synthetic"]["writer_refs"]):
                 raise M.NativeFailure("cross_uid_writer_not_observed")
+            progress["phase"] = "nonappend_scan"
             with path.open("r+b"):
-                if snapshot.capture(sources, assurances, 2).get("reason") != "native_nonappend_writer":
+                nonappend = snapshot.capture(sources, assurances, 2)
+                if nonappend.get("reason") != "native_nonappend_writer":
+                    if nonappend.get("state") == "failed":
+                        raise M.NativeFailure(nonappend.get("reason", "native_read_failed"))
                     raise M.NativeFailure("nonappend_writer_not_rejected")
+            progress["phase"] = "rotation_late_write"
             rotated = path.with_suffix(".old"); path.rename(rotated); path.write_bytes(b"current\n"); os.chmod(path, 0o666)
             child.stdin.write(b"w"); child.stdin.flush()
             if not select.select([child.stdout], [], [], 5)[0] or child.stdout.read(1) != b"a":
                 raise M.NativeFailure("native_fixture_child_failed")
             rotated.unlink()
+            progress["phase"] = "late_scan"
             late = snapshot.capture(sources, assurances, 3)
-            if (late["state"] != "observed" or late["readers"]["synthetic"]["totals"]["php_warning"] != 1
+            if late["state"] != "observed":
+                raise M.NativeFailure(late.get("reason", "native_read_failed"))
+            if (late["readers"]["synthetic"]["totals"]["php_warning"] != 1
                     or len(late["witnesses"]["synthetic"]["retained"]) != 2):
                 raise M.NativeFailure("late_generation_not_preserved")
+            progress["phase"] = "writer_drain"
             child.stdin.close(); child.wait(timeout=5)
+            progress["phase"] = "drained_scan"
             drained = snapshot.capture(sources, assurances, 4)
-            if drained["state"] != "observed" or drained["witnesses"]["synthetic"]["writer_refs"]:
+            if drained["state"] != "observed":
+                raise M.NativeFailure(drained.get("reason", "native_read_failed"))
+            if drained["witnesses"]["synthetic"]["writer_refs"]:
                 raise M.NativeFailure("retired_writer_not_drained")
             return {"schema": "pinova.native-file-fixture.v1", "state": "passed", "source_history_24h_verified": False,
                     "checks": ["all-source-inode-selection", "cross-uid-append", "nonappend-rejection",
@@ -322,10 +355,15 @@ with open(sys.argv[1], 'ab', buffering=0) as writer:
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--native-characterization"]:
+        progress = {"phase": "not_started"}
         try:
-            print(json.dumps(native_characterization(), sort_keys=True))
-        except BaseException:
-            print(json.dumps({"schema": "pinova.native-file-fixture.v1", "state": "failed"}))
+            print(json.dumps(native_characterization(progress), sort_keys=True))
+        except BaseException as error:
+            reason = error.args[0] if (isinstance(error, M.NativeFailure) and len(error.args) == 1
+                and type(error.args[0]) is str and error.args[0] in NATIVE_FAILURE_REASONS) else "native_fixture_failed"
+            phase = progress.get("phase")
+            print(json.dumps({"schema": "pinova.native-file-fixture.v1", "state": "failed", "reason": reason,
+                "phase": phase if phase in NATIVE_PHASES else "not_reported", "cleanup_state": "not_reported"}, sort_keys=True))
             raise SystemExit(1)
     else:
         unittest.main()

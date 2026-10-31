@@ -140,30 +140,39 @@ def native_module(path):
     return name if re.fullmatch(r"(?:php-fpm8\.4|[A-Za-z0-9_+.-]{1,96}\.so(?:\.[0-9.]{1,24})?)", name) else "unknown"
 
 
-def finite_environment(value):
+OPTIONAL_METADATA_REASONS = frozenset(('extensions_shape_invalid', 'extension_name_invalid', 'extension_version_invalid',
+                                     'settings_keys_invalid', 'settings_value_invalid', 'zend_version_invalid'))
+
+
+def native_identity(value):
     require(isinstance(value, dict) and value.get("php_version") == "8.4.27" and value.get("sapi") == "fpm-fcgi", "native_version_mismatch")
+    return {'php_version': '8.4.27', 'sapi': 'fpm-fcgi'}
+
+
+def finite_environment(value):
+    native_identity(value)
     extensions = value.get("extensions")
-    require(isinstance(extensions, dict) and len(extensions) <= 128, "inventory_bound")
+    require(isinstance(extensions, dict) and len(extensions) <= 128, "extensions_shape_invalid")
     clean = {}
     for name, version in extensions.items():
-        require(isinstance(name, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_ ]{0,63}", name), "inventory_invalid")
+        require(isinstance(name, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_ ]{0,63}", name), "extension_name_invalid")
         require(version is None or isinstance(version, str) and (re.fullmatch(r"[0-9][A-Za-z0-9.+_-]{0,47}", version)
-                or name == 'mysqlnd' and version == 'mysqlnd ' + value['php_version']), "inventory_invalid")
+                or name == 'mysqlnd' and version == 'mysqlnd ' + value['php_version']), "extension_version_invalid")
         clean[name] = version
     settings = value.get("settings")
     keys = ("opcache.enable", "opcache.enable_cli", "opcache.optimization_level", "opcache.jit", "opcache.jit_buffer_size",
             "opcache.protect_memory", "opcache.validate_timestamps", "opcache.file_update_protection", "opcache.revalidate_freq")
-    require(isinstance(settings, dict) and set(settings) == set(keys), "inventory_invalid")
-    require(all(isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_xX.+-]{0,48}", v) for v in settings.values()), "inventory_invalid")
+    require(isinstance(settings, dict) and set(settings) == set(keys), "settings_keys_invalid")
+    require(all(isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_xX.+-]{0,48}", v) for v in settings.values()), "settings_value_invalid")
     zend = value.get("zend_version")
-    require(isinstance(zend, str) and re.fullmatch(r"[0-9][A-Za-z0-9.+_-]{0,47}", zend), "inventory_invalid")
+    require(isinstance(zend, str) and re.fullmatch(r"[0-9][A-Za-z0-9.+_-]{0,47}", zend), "zend_version_invalid")
     return {"php_version": "8.4.27", "sapi": "fpm-fcgi", "zend_version": zend, "extensions": clean, "settings": settings,
             "resource_acceptance": False}
 
 
-def read_native_environment(arm_root):
+def read_native_environment_payload(arm_root):
     try:
-        return finite_environment(json.loads(read_bytes(arm_root / 'private/native-environment.json', 32768)))
+        return json.loads(read_bytes(arm_root / 'private/native-environment.json', 32768))
     except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
         raise CaptureError('inventory_invalid') from None
     except FileNotFoundError:
@@ -172,11 +181,25 @@ def read_native_environment(arm_root):
         raise CaptureError('inventory_unavailable') from None
 
 
+def read_native_environment(arm_root):
+    return finite_environment(read_native_environment_payload(arm_root))
+
+
 def preflight(campaign, arm_root, base):
     state = state_load(base)
     require(mount_matches(base, state), 'mount_identity_mismatch')
     require(arm_root.resolve() == arm_root and read_bytes(arm_root / 'fixture-owned', 128).decode().strip() == state['owner'])
-    return {'state': 'recorded', 'resource_acceptance': False, 'inventory': read_native_environment(arm_root)}
+    value = read_native_environment_payload(arm_root)
+    identity = native_identity(value)
+    try:
+        inventory = finite_environment(value)
+    except CaptureError as error:
+        if error.code not in OPTIONAL_METADATA_REASONS:
+            raise
+        return {'state': 'version_recorded', 'resource_acceptance': False, 'identity': identity, 'inventory': None,
+                'inventory_status': {'state': 'needs_review', 'reason': error.code}}
+    return {'state': 'recorded', 'resource_acceptance': False, 'identity': identity, 'inventory': inventory,
+            'inventory_status': {'state': 'recorded', 'reason': None}}
 
 
 def context():

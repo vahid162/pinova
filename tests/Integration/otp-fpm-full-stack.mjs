@@ -583,10 +583,20 @@ try {
                 reason: checked.error?.code === 'ETIMEDOUT' ? 'preflight_timeout' : 'preflight_receipt_unavailable' };
             try {
                 const value = JSON.parse(checked.stdout);
-                if (['recorded', 'needs_review'].includes(value.state) && value.resource_acceptance === false) metadata = value;
+                const identity = value.identity;
+                const verified = identity?.php_version === '8.4.27' && identity?.sapi === 'fpm-fcgi' && Object.keys(identity).length === 2;
+                const full = value.state === 'recorded' && value.inventory_status?.state === 'recorded' &&
+                    value.inventory?.php_version === '8.4.27' && value.inventory?.sapi === 'fpm-fcgi';
+                const limited = value.state === 'version_recorded' && value.inventory === null &&
+                    value.inventory_status?.state === 'needs_review' && ['extensions_shape_invalid', 'extension_name_invalid',
+                        'extension_version_invalid', 'settings_keys_invalid', 'settings_value_invalid', 'zend_version_invalid'].includes(value.inventory_status.reason);
+                if (checked.status === 0 && value.resource_acceptance === false && verified && (full || limited)) metadata = value;
+                else if (value.state === 'needs_review' && value.resource_acceptance === false) metadata.reason =
+                    ['native_version_mismatch', 'inventory_invalid', 'inventory_missing', 'inventory_unavailable', 'input_bound',
+                        'ownership_unavailable', 'mount_identity_mismatch'].includes(value.reason) ? value.reason : 'preflight_receipt_unavailable';
             } catch { /* Never publish helper stderr, exception or raw output. */ }
             receipt.native_inventory_preflight = metadata;
-            ensure(checked.status === 0 && metadata.state === 'recorded', 'Native diagnostic metadata preflight failed.');
+            ensure(checked.status === 0 && ['recorded', 'version_recorded'].includes(metadata.state), 'Native diagnostic metadata preflight failed.');
         }
         ensure(warm.every(response => matchesPhp(response.headers['x-pinova-fixture-php'])),
             'Actual full-stack FPM request is not running the selected native PHP runtime.');

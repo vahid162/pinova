@@ -116,15 +116,30 @@ def core_identity(path, expected_pid, expected_signal, executable):
     statuses = [desc for name, kind, desc in notes if name == b"CORE" and kind == 1]
     require(any(len(desc) >= 36 and struct.unpack_from("<i", desc, 32)[0] == expected_pid
                 and struct.unpack_from("<h", desc, 12)[0] == expected_signal for desc in statuses), "core_pid_signal_mismatch")
-    paths = []
+    paths, ranges = [], []
     for name, kind, desc in notes:
         if name != b"CORE" or kind != 0x46494C45:
             continue
         require(len(desc) >= 16, "elf_truncated")
         count = struct.unpack_from("<Q", desc)[0]
         require(count <= 4096 and 16 + count * 24 <= len(desc), "elf_bound")
-        paths.extend(desc[16 + count * 24:].split(b"\0"))
+        names = desc[16 + count * 24:].split(b"\0")
+        require(len(names) == count + 1 and names[-1] == b'', 'core_mapping_invalid')
+        paths.extend(names[:-1])
+        for index, name in enumerate(names[:-1]):
+            if name == os.fsencode(executable):
+                start, end, unused_offset = struct.unpack_from('<QQQ', desc, 16 + index * 24)
+                ranges.append([start, end])
     require(os.fsencode(executable) in paths, "core_executable_mismatch")
+    require(valid_main_ranges(ranges), 'core_mapping_invalid')
+    return ranges
+
+
+def valid_main_ranges(value):
+    return (isinstance(value, list) and 0 < len(value) <= 64
+            and all(isinstance(row, list) and len(row) == 2
+                    and all(type(bound) is int for bound in row) and 0 <= row[0] < row[1] < 2 ** 64 for row in value)
+            and all(left[1] <= right[0] for left, right in zip(value, value[1:])))
 
 
 def core_has_missing_loads(path):
@@ -512,13 +527,15 @@ def gdb_extract():
     data = json.loads(read_bytes(base / "gdb-input.json", 16384))
     output = {"state": "needs_review", "reason": "gdb_unavailable", "frames": [], "resource_acceptance": False,
               'pid': None, 'signal': None, 'partial_core': data.get('partial_core') is True,
-              'stack_complete': False, 'frame_bound': False}
+              'stack_complete': False, 'frame_bound': False, 'debug_objfile_attached': None}
     try:
         exe, core = data["executable"], data["core"]
         require(exe == "/usr/sbin/php-fpm8.4" and Path(core).parent == base / "cores" and re.fullmatch(r"core\.[0-9]+\.(?:6|7|11)\.[0-9]+", Path(core).name))
         require(isinstance(data.get('pid'), int) and 1 < data['pid'] < 2147483648 and data.get('signal') in (6, 7, 11),
                 'core_pid_signal_mismatch')
         output.update({'pid': data['pid'], 'signal': data['signal']})
+        ranges = data.get('main_ranges')
+        require(valid_main_ranges(ranges), 'core_mapping_invalid')
         expected = data.get('build_id')
         require(build_id(exe) == expected, 'debug_build_identity_mismatch')
         canonical = campaign / 'private/debug-symbols/usr/lib/debug'
@@ -530,9 +547,22 @@ def gdb_extract():
         gdb.execute("file " + exe, to_string=True)
         gdb.execute("core-file " + core, to_string=True)
         require(gdb.selected_inferior().pid == data["pid"], "core_pid_signal_mismatch")
+        try:
+            objects = list(gdb.objfiles())
+            require(len(objects) <= 256, 'gdb_objfile_bound')
+            main_loaded = any(obj.filename == exe and obj.build_id == expected and obj.owner is None for obj in objects)
+            output['debug_objfile_attached'] = main_loaded and any(
+                obj.filename == str(target) and obj.build_id == expected and obj.owner is not None
+                and obj.owner.filename == exe and obj.owner.build_id == expected and obj.owner.owner is None
+                for obj in objects)
+        except BaseException:
+            output['debug_objfile_attached'] = None
         frame = gdb.newest_frame()
         while frame is not None and len(output["frames"]) < FRAME_LIMIT:
-            module_path = gdb.solib_name(frame.pc()) or exe
+            pc = frame.pc()
+            module_path = gdb.solib_name(pc)
+            if module_path is None and any(start <= pc < end for start, end in ranges):
+                module_path = exe
             module = native_module(module_path)
             identity = None
             if module != "unknown":
@@ -540,12 +570,19 @@ def gdb_extract():
                     identity = build_id(str(Path(module_path).resolve()))
                 except (CaptureError, OSError):
                     pass
-            output["frames"].append({"index": len(output["frames"]), "symbol": native_symbol(frame.name()),
+            try:
+                name = frame.name()
+                symbol = native_symbol(name)
+                name_status = 'missing' if name is None else 'resolved' if symbol != 'unknown' else 'filtered'
+            except BaseException:
+                symbol, name_status = 'unknown', 'unavailable'
+            output["frames"].append({"index": len(output["frames"]), "symbol": symbol, 'name_status': name_status,
                                       "module": module, "build_id": identity})
             frame = frame.older()
-        known = bool(output['frames']) and output['frames'][0]['symbol'] != 'unknown'
+        known = bool(output['frames']) and all(row['symbol'] != 'unknown' and row['module'] != 'unknown' for row in output['frames'])
+        unknown_reason = 'module_unknown' if any(row['module'] == 'unknown' for row in output['frames']) else 'symbol_unknown'
         output.update({"state": "captured" if known and not output['partial_core'] else "needs_review",
-                       "reason": 'partial_core' if output['partial_core'] else "bounded_frames" if frame is not None else "symbol_unknown" if not known else None,
+                       "reason": 'partial_core' if output['partial_core'] else "bounded_frames" if frame is not None else unknown_reason if not known else None,
                        "frame_bound": frame is not None, 'stack_complete': known and frame is None and not output['partial_core']})
     except CaptureError as error:
         output.update({'state': 'needs_review', 'reason': error.code, 'stack_complete': False})
@@ -652,12 +689,13 @@ def collect(campaign, arm_root, base):
         if len(result["cores"]) < 2:
             try:
                 verify_core_timing(facts, timing, drained, observed)
-                core_identity(item, pid, signum, exe)
+                main_ranges = core_identity(item, pid, signum, exe)
                 partial = item.stat().st_size >= CORE_LIMIT or core_has_missing_loads(item)
                 directory = campaign / 'private/debug-symbols/usr/lib/debug'
                 target = directory / '.build-id' / facts['build_id'][:2] / (facts['build_id'][2:] + '.debug')
                 write_json(base / "gdb-input.json", {"core": str(item), "executable": exe, "pid": pid, "signal": signum,
-                    'build_id': facts['build_id'], 'partial_core': partial, 'debug_directory': str(directory), 'debug_file': str(target)})
+                    'build_id': facts['build_id'], 'partial_core': partial, 'debug_directory': str(directory), 'debug_file': str(target),
+                    'main_ranges': main_ranges})
                 (base / "gdb-output.json").unlink(missing_ok=True)
                 command = ["gdb", "-q", "-nx", "-nh", "--batch", "-iex", "set auto-load off", "-iex", "set debuginfod enabled off",
                            "-ex", "python import gdb", "-ex", "source " + str(Path(__file__).resolve())]

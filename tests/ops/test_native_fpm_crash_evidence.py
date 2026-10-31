@@ -165,7 +165,8 @@ def gdb_entry_fixture(*, unwind_failure=False, debug_case=None):
         (campaign / 'private/debug-symbols').chmod(0o700)
         debug_file.write_bytes(elf(note(b'GNU', 3, bytes.fromhex(identity)), 3))
         debug_file.chmod(0o644)
-        data = {'executable': executable, 'core': str(core), 'pid': 123, 'signal': 11, 'build_id': identity}
+        data = {'executable': executable, 'core': str(core), 'pid': 123, 'signal': 11, 'build_id': identity,
+                'main_ranges': [[0x400000, 0x401000]]}
         if debug_case is not None:
             data.update({'debug_directory': str(directory), 'debug_file': str(debug_file)})
             if debug_case == 'outside':
@@ -231,6 +232,90 @@ def gdb_entry_fixture(*, unwind_failure=False, debug_case=None):
 
 
 class NativeCrashEvidenceTest(unittest.TestCase):
+    def test_gdb_symbol_status_distinguishes_missing_filtered_and_attached_debug(self):
+        for case in ('missing', 'filtered_safe', 'filtered_payload', 'resolved', 'name_error',
+                     'debug_missing', 'debug_orphan', 'debug_wrong_owner', 'debug_wrong_build',
+                     'debug_wrong_path', 'objfiles_error'):
+            with self.subTest(symbol_case=case), gdb_entry_fixture(debug_case='matching') as (base, debugger, written, directory, debug_file):
+                frame = debugger.newest_frame.return_value
+                frame.name.return_value = 'zend_execute' if case == 'resolved' else '_emalloc' if case == 'filtered_safe' else \
+                    'SECRET /private/?otp=123456' if case == 'filtered_payload' else None
+                if case == 'name_error':
+                    frame.name.side_effect = RuntimeError('SECRET /private/?otp=123456')
+                main, debug = debugger.objfiles.return_value
+                if case == 'debug_missing':
+                    debugger.objfiles.return_value = [main]
+                elif case == 'debug_orphan':
+                    debug.owner = None
+                elif case == 'debug_wrong_owner':
+                    debug.owner = types.SimpleNamespace(filename='/usr/sbin/other-fpm8.4', build_id=main.build_id, owner=None)
+                elif case == 'debug_wrong_build':
+                    debug.build_id = 'ffeeddccbbaa9988'
+                elif case == 'debug_wrong_path':
+                    debug.filename = '/private/SECRET.debug'
+                elif case == 'objfiles_error':
+                    debugger.objfiles.side_effect = RuntimeError('SECRET /private/?otp=123456')
+                capture.gdb_extract()
+                written.assert_called_once()
+                result = written.call_args.args[1]
+                self.assertTrue(result.get('frames'), 'The existing extraction seam must retain finite frame observability.')
+                row = result['frames'][0]
+                expected_status = 'resolved' if case == 'resolved' else 'filtered' if case.startswith('filtered_') else \
+                    'unavailable' if case == 'name_error' else 'missing'
+                self.assertEqual(row.get('name_status'), expected_status)
+                self.assertEqual(row['symbol'], 'zend_execute' if case == 'resolved' else 'unknown')
+                expected_attachment = None if case == 'objfiles_error' else not case.startswith('debug_')
+                self.assertIn('debug_objfile_attached', result)
+                self.assertIs(result['debug_objfile_attached'], expected_attachment)
+                self.assertEqual(result['state'], 'captured' if case == 'resolved' else 'needs_review')
+                self.assertFalse(result['resource_acceptance'])
+                encoded = json.dumps(result)
+                for rejected in ('SECRET', '/private/', '123456', '_emalloc', str(debug_file)):
+                    self.assertNotIn(rejected, encoded)
+
+    def test_gdb_module_attribution_requires_solib_or_verified_main_mapping(self):
+        cases = (('shared', 0x500100, [[0x400000, 0x401000]], 'opcache.so'),
+                 ('main_inside', 0x400100, [[0x400000, 0x401000]], 'php-fpm8.4'),
+                 ('main_lower', 0x400000, [[0x400000, 0x401000]], 'php-fpm8.4'),
+                 ('main_last', 0x400fff, [[0x400000, 0x401000]], 'php-fpm8.4'),
+                 ('main_upper', 0x401000, [[0x400000, 0x401000]], 'unknown'),
+                 ('before_main', 0x3fffff, [[0x400000, 0x401000]], 'unknown'),
+                 ('anonymous', 0x500100, [[0x400000, 0x401000]], 'unknown'),
+                 ('missing_ranges', 0x400100, None, 'unknown'),
+                 ('reversed', 0x400100, [[0x401000, 0x400000]], 'unknown'),
+                 ('empty', 0x400100, [[0x400000, 0x400000]], 'unknown'),
+                 ('negative', 0x400100, [[-1, 0x401000]], 'unknown'),
+                 ('boolean', 0x400100, [[True, 0x401000]], 'unknown'),
+                 ('hostile', 0x400100, [['SECRET /private/?otp=123456', 0x401000]], 'unknown'),
+                 ('range_bound', 0x400100, [[0x400000, 0x401000]] * 65, 'unknown'))
+        for case, pc, ranges, expected_module in cases:
+            with self.subTest(mapping_case=case), gdb_entry_fixture(debug_case='matching') as (base, debugger, written, directory, debug_file):
+                data = json.loads(capture.read_bytes.return_value)
+                data['main_ranges'] = ranges
+                capture.read_bytes.return_value = json.dumps(data).encode()
+                debugger.newest_frame.return_value.pc.return_value = pc
+                debugger.solib_name.return_value = '/usr/lib/php/20240924/opcache.so' if case == 'shared' else None
+                capture.gdb_extract()
+                written.assert_called_once()
+                result = written.call_args.args[1]
+                if expected_module != 'unknown':
+                    self.assertTrue(result.get('frames'))
+                if result.get('frames'):
+                    row = result['frames'][0]
+                    self.assertEqual(row['module'], expected_module)
+                    self.assertEqual(row['build_id'], '0011223344556677' if expected_module == 'php-fpm8.4' else None)
+                    self.assertNotIn('pc', row)
+                if expected_module == 'unknown':
+                    self.assertEqual(result['state'], 'needs_review')
+                self.assertFalse(result['resource_acceptance'])
+                encoded = json.dumps(result)
+                for rejected in ('main_ranges', 'SECRET', '/private/', '123456', str(pc)):
+                    self.assertNotIn(rejected, encoded)
+        with core_collection_fixture() as (base, arm, core, debugger):
+            self.assertEqual(capture.core_identity(core, 123, 11, '/usr/sbin/php-fpm8.4'), [[0, 1]],
+                             'Main mappings must come from the same bounded PID/signal/executable-verified ELF notes.')
+            debugger.assert_not_called()
+
     def test_inventory_records_owned_master_and_paired_prewarm_clocks(self):
         with core_collection_fixture() as (base, arm, core, debugger):
             (arm / 'fixture-owned').write_text('123:1\n')
@@ -523,7 +608,7 @@ class NativeCrashEvidenceTest(unittest.TestCase):
             capture.gdb_extract()
             written.assert_called_once()
             result = written.call_args.args[1]
-            self.assertEqual(result['frames'][0], {'index': 0, 'symbol': 'zend_execute', 'module': 'php-fpm8.4', 'build_id': '0011223344556677'})
+            self.assertEqual(result['frames'][0], {'index': 0, 'symbol': 'zend_execute', 'name_status': 'resolved', 'module': 'php-fpm8.4', 'build_id': '0011223344556677'})
             self.assertEqual((result.get('pid'), result.get('signal')), (123, 11))
             self.assertEqual(result['state'], 'needs_review')
             self.assertEqual(result['reason'], 'gdb_unwind_incomplete')

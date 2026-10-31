@@ -2,7 +2,7 @@ name: Quality
 
 on:
   push:
-    branches-ignore: ['proof/diagnostics-native-crash-drain']
+    branches-ignore: ['proof/diagnostics-native-symbol-load']
   pull_request:
   workflow_dispatch:
 

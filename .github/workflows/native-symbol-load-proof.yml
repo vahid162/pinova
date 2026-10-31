@@ -1,0 +1,439 @@
+name: Native symbol loading metadata only
+
+on:
+  push:
+    branches: ['proof/diagnostics-native-symbol-load']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-symbol-load-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: One coreless FPM and OPcache symbol-loading preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PINOVA_SYMBOL_ROOT: /tmp/pinova-native-symbol-load-${{ github.run_id }}-${{ github.run_attempt }}
+      EXPECTED_PHP_PACKAGE_VERSION: 8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        id: php_setup
+        with:
+          php-version: '8.4.27'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, pdo_mysql, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: none
+      - name: Reproduce the existing exact native PHP packages without an OPcache override
+        id: provision
+        run: |
+          set -euo pipefail
+          sudo add-apt-repository --yes --no-update --component main --component main/debug --ppa ppa:ondrej/php
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            "php8.4-fpm=${EXPECTED_PHP_PACKAGE_VERSION}" "php8.4-cli=${EXPECTED_PHP_PACKAGE_VERSION}" \
+            "php8.4-common=${EXPECTED_PHP_PACKAGE_VERSION}" "php8.4-curl=${EXPECTED_PHP_PACKAGE_VERSION}" \
+            "php8.4-gd=${EXPECTED_PHP_PACKAGE_VERSION}" "php8.4-mbstring=${EXPECTED_PHP_PACKAGE_VERSION}" \
+            "php8.4-mysql=${EXPECTED_PHP_PACKAGE_VERSION}" "php8.4-xml=${EXPECTED_PHP_PACKAGE_VERSION}" \
+            "php8.4-zip=${EXPECTED_PHP_PACKAGE_VERSION}" gdb
+          [[ "$(/usr/bin/php8.4 -r 'echo PHP_VERSION;')" == 8.4.27 ]]
+          /usr/sbin/php-fpm8.4 -v | head -n 1 | grep -E '^PHP 8\.4\.27 '
+      - name: Observe installed identities and actual coreless symbol loading
+        if: always()
+        id: observe
+        env:
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          PHP_SETUP_OUTCOME: ${{ steps.php_setup.outcome }}
+          PROVISION_OUTCOME: ${{ steps.provision.outcome }}
+        run: |
+          set -euo pipefail
+          sudo env GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_SHA="$GITHUB_SHA" \
+            PINOVA_SYMBOL_ROOT="$PINOVA_SYMBOL_ROOT" CHECKOUT_OUTCOME="$CHECKOUT_OUTCOME" \
+            PHP_SETUP_OUTCOME="$PHP_SETUP_OUTCOME" PROVISION_OUTCOME="$PROVISION_OUTCOME" python3 - <<'PYTHON'
+          import hashlib, importlib.util, json, os, re, resource, shutil, signal, stat, subprocess, sys, tempfile
+          from pathlib import Path
+
+          os.umask(0o077)
+          expected_version = '8.4.27-1+ubuntu24.04.1+deb.sury.org+1'
+          expected_ids = {'fpm': '6d4f4250c0d4b32619cc09e3bafc6f1d0d37059b',
+              'opcache': '18a699d7e9ff4bd386ec9837fb11d37f3e1fcaf4'}
+          expected_helper = 'a85614985b59cbe8cdbfe1664e606f591ea510f7b2a078ee545d25c8ee0caf3e'
+          phase, root, private, reader = 'namespace', None, None, None
+          receipt = {'schema': 'pinova.native-symbol-load.v1', 'state': 'needs_review', 'phase': phase,
+              'namespace': {}, 'guards': {}, 'installed': {}, 'debug_packages': {}, 'gdb': {},
+              'cli_using_fpm_ini': {'state': 'not_reached'}, 'failure_code': None,
+              'resource_acceptance': False, 'production_coverage_acceptance': False,
+              'cohort_executed': False, 'core_capture_started': False, 'inferior_started': False,
+              'engine_or_module_installation_changed_by_observation': False,
+              'configuration_changed': False, 'kernel_or_mount_changed': False}
+          guards = receipt['guards']
+
+          class Refusal(Exception):
+              pass
+
+          def require(name, condition):
+              guards[name] = bool(condition)
+              if not condition:
+                  raise Refusal(name)
+
+          def digest(path):
+              result = hashlib.sha256()
+              with path.open('rb') as stream:
+                  for chunk in iter(lambda: stream.read(131072), b''):
+                      result.update(chunk)
+              return result.hexdigest()
+
+          def safe_file(path, bound):
+              info = path.lstat()
+              return stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022 and info.st_size <= bound and path.resolve() == path
+
+          def limits():
+              resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+              resource.setrlimit(resource.RLIMIT_CPU, (20, 20))
+              resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 1024, 1024 * 1024 * 1024))
+              resource.setrlimit(resource.RLIMIT_FSIZE, (128 * 1024 * 1024, 128 * 1024 * 1024))
+
+          def bounded(args, timeout=15, cwd=None, env=None):
+              with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+                  child = subprocess.Popen(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                      stdout=out, stderr=err, start_new_session=True, preexec_fn=limits)
+                  timed_out = False
+                  try:
+                      child.wait(timeout=timeout)
+                  except subprocess.TimeoutExpired:
+                      timed_out = True
+                      os.killpg(child.pid, signal.SIGKILL)
+                      child.wait(timeout=5)
+                  sizes = (os.fstat(out.fileno()).st_size, os.fstat(err.fileno()).st_size)
+                  observation = {'exit_code': child.returncode, 'timed_out': timed_out,
+                      'stdout_bytes': sizes[0], 'stderr_bytes': sizes[1],
+                      'output_bounded': max(sizes) <= 131072}
+                  data = os.pread(out.fileno(), sizes[0], 0) if observation['output_bounded'] else b''
+                  return observation, data
+
+          def tool(args, timeout=30, cwd=None):
+              observation, data = bounded(args, timeout=timeout, cwd=cwd)
+              if observation['exit_code'] != 0 or observation['timed_out'] or not observation['output_bounded']:
+                  raise Refusal('native_tool_unavailable')
+              return data
+
+          php_code = r'''
+          $out = ['state'=>'observed','scope'=>'cli_using_fixed_fpm_ini_only','php_version'=>null,
+            'sapi_is_cli'=>PHP_SAPI==='cli','builtin_cgi_module_parity_claimed'=>false,
+            'fpm_ini_loaded'=>php_ini_loaded_file()==='/etc/php/8.4/fpm/php.ini',
+            'fpm_scan_directory_only'=>false,
+            'extension_directory_matches_fixed_module'=>ini_get('extension_dir')==='/usr/lib/php/20240924',
+            'extensions'=>[],'settings'=>[],'invalid_extension_name_count'=>0];
+          $scanned=php_ini_scanned_files();
+          if (is_string($scanned) && strlen($scanned)<=16384) {
+            $scans=array_values(array_filter(array_map('trim',explode(',',$scanned))));
+            $out['fpm_scan_directory_only']=count($scans)>0 && count($scans)<=128;
+            foreach ($scans as $entry) if (!str_starts_with($entry,'/etc/php/8.4/fpm/conf.d/')) $out['fpm_scan_directory_only']=false;
+          }
+          if (preg_match('/\A[0-9]+\.[0-9]+\.[0-9]+\z/D', PHP_VERSION)) $out['php_version']=PHP_VERSION;
+          $names=array_values(array_unique(array_merge(get_loaded_extensions(false),get_loaded_extensions(true))));
+          if (count($names)>128) { $out['state']='needs_review'; $out['reason']='extensions_bound'; $names=[]; }
+          foreach ($names as $name) {
+            if (!is_string($name) || !(preg_match('/\A[A-Za-z][A-Za-z0-9_ ]{0,63}\z/D',$name) || $name==='cgi-fcgi')) {
+              $out['invalid_extension_name_count']++; continue;
+            }
+            $v=phpversion($name);
+            $row=['name'=>$name,'type'=>get_debug_type($v),'length'=>is_string($v)?strlen($v):null,
+              'empty'=>is_string($v)?$v==='':null,'pattern_category'=>'other','normalized_version'=>null];
+            if ($v===false) $row['pattern_category']='unavailable_boolean';
+            elseif ($v===null) $row['pattern_category']='null';
+            elseif (is_string($v) && $v==='') $row['pattern_category']='empty';
+            elseif (is_string($v) && strlen($v)<=48 && preg_match('/\A[0-9]+(?:\.[0-9]+){1,3}\z/D',$v)) {
+              $row['pattern_category']='strict_numeric'; $row['normalized_version']=$v;
+            } elseif ($name==='mysqlnd' && is_string($v) && $v==='mysqlnd '.PHP_VERSION && $out['php_version']!==null) {
+              $row['pattern_category']='known_mysqlnd_prefix'; $row['normalized_version']=$out['php_version'];
+            } elseif (is_string($v) && preg_match('/\A[0-9][A-Za-z0-9.+_-]{0,47}\z/D',$v)) {
+              $row['pattern_category']='finite_non_numeric';
+            }
+            $row['collector_version_shape_accepted']=$v===false || $v===null || (is_string($v) &&
+              (preg_match('/\A[0-9][A-Za-z0-9.+_-]{0,47}\z/D',$v) || ($name==='mysqlnd' && $v==='mysqlnd '.PHP_VERSION)));
+            $out['extensions'][]=$row;
+          }
+          foreach (['opcache.enable','opcache.enable_cli','opcache.optimization_level','opcache.jit',
+              'opcache.jit_buffer_size','opcache.protect_memory','opcache.validate_timestamps',
+              'opcache.file_update_protection','opcache.revalidate_freq'] as $key) {
+            $v=ini_get($key);
+            $row=['key'=>$key,'type'=>get_debug_type($v),'length'=>is_string($v)?strlen($v):null,
+              'empty'=>is_string($v)?$v==='':null,'state'=>'unavailable','value'=>null];
+            if (is_string($v) && preg_match('/\A[A-Za-z0-9_xX.+-]{0,48}\z/D',$v)) {
+              $row['state']='observed'; $row['value']=$v;
+            }
+            $out['settings'][]=$row;
+          }
+          echo json_encode($out,JSON_THROW_ON_ERROR),"\n";
+          '''
+
+          gdb_program = r'''
+          import gdb, json, os, re
+          from pathlib import Path
+          data = json.loads(Path(INPUT).read_text())
+          result = {'schema':'pinova.gdb-symbol-load.v1','state':'needs_review','phase':'configuration',
+              'automatic':{},'explicit_attachment':{},'failure_code':None,'inferior_started':False}
+          roles = data['roles']
+          expected_ids = data['expected_ids']
+          def role(obj):
+              if obj is None or not obj.is_valid(): return 'none'
+              name = os.path.realpath(obj.filename) if obj.filename else ''
+              return next((label for label,path in roles.items() if name==path),'other')
+          def execute(command):
+              gdb.execute(command,to_string=True)
+          def snapshot():
+              objects = list(gdb.objfiles())
+              if len(objects)>16: raise RuntimeError()
+              rows=[]
+              for obj in objects:
+                  bid=obj.build_id
+                  rows.append({'role':role(obj),'owner_role':role(obj.owner),
+                      'build_id':bid if isinstance(bid,str) and re.fullmatch('[a-f0-9]{8,128}',bid) else None})
+              probes={}
+              for name,allowed,expected in (
+                  ('php_execute_script',('fpm_binary','fpm_debug'),expected_ids['fpm']),
+                  ('main',('fpm_binary','fpm_debug'),expected_ids['fpm']),
+                  ('zend_accel_info',('opcache_binary','opcache_debug'),expected_ids['opcache'])):
+                  symbol=gdb.lookup_global_symbol(name)
+                  tab=symbol.symtab if symbol is not None else None
+                  obj=tab.objfile if tab is not None else None
+                  probes[name]={'found':symbol is not None,'is_function':bool(symbol is not None and symbol.is_function),
+                      'has_symtab':tab is not None,'objfile_role':role(obj),
+                      'objfile_build_id_matches':bool(obj is not None and obj.build_id==expected),
+                      'expected_role_matches':role(obj) in allowed}
+              debug_pairs={}
+              for prefix in ('fpm','opcache'):
+                  debug_pairs[prefix]=any(r['role']==prefix+'_debug' and r['owner_role']==prefix+'_binary'
+                      and r['build_id']==expected_ids[prefix] for r in rows)
+              no_process=all(inferior.pid==0 for inferior in gdb.inferiors())
+              valid=all(all(v[k] for k in ('found','is_function','has_symtab','objfile_build_id_matches','expected_role_matches'))
+                  for v in probes.values()) and all(debug_pairs.values()) and no_process
+              return {'objfiles':rows,'known_symbol_checks':probes,'separate_debug_pairs_verified':debug_pairs,
+                  'inferior_never_started':no_process,'verified':valid}
+          try:
+              for command in ('set auto-load off','set debuginfod enabled off','set pagination off','set confirm off'):
+                  execute(command)
+              execute('set debug-file-directory '+data['debug_directories'])
+              result['phase']='automatic_loading'
+              execute('file '+json.dumps(roles['fpm_binary']))
+              execute('add-symbol-file '+json.dumps(roles['opcache_binary'])+' 0x0')
+              result['automatic']=snapshot()
+              result['phase']='explicit_debug_attachment'
+              attachment={}
+              for prefix in ('fpm','opcache'):
+                  objects=list(gdb.objfiles())
+                  binary=next(obj for obj in objects if role(obj)==prefix+'_binary')
+                  exists=any(role(obj)==prefix+'_debug' and role(obj.owner)==prefix+'_binary' for obj in objects)
+                  if not exists:
+                      binary.add_separate_debug_file(roles[prefix+'_debug'])
+                  attachment[prefix]={'already_loaded':exists,'attachment_requested':not exists}
+              result['explicit_attachment']=snapshot()
+              result['explicit_attachment']['requests']=attachment
+              result['state']='verified' if result['automatic']['verified'] and result['explicit_attachment']['verified'] else 'needs_review'
+              result['phase']='complete'
+          except BaseException:
+              result['failure_code']='gdb_symbol_observation_unavailable'
+          result['inferior_started']=any(inferior.pid!=0 for inferior in gdb.inferiors())
+          Path(OUTPUT).write_text(json.dumps(result,sort_keys=True)+'\n')
+          '''
+
+          try:
+              run, attempt, source = (os.environ.get(k,'') for k in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA'))
+              require('namespace_ids', re.fullmatch('[0-9]{1,24}',run) and re.fullmatch('[0-9]{1,12}',attempt) and re.fullmatch('[a-f0-9]{40}',source))
+              root=Path('/tmp/pinova-native-symbol-load-'+run+'-'+attempt)
+              require('namespace_path',str(root)==os.environ.get('PINOVA_SYMBOL_ROOT') and root.resolve()==root and os.geteuid()==0)
+              root.mkdir(mode=0o755,exist_ok=True)
+              require('namespace_owned',root.lstat().st_uid==0 and stat.S_ISDIR(root.lstat().st_mode) and not root.is_symlink())
+              root.chmod(0o755)
+              private=root/'private'
+              private.mkdir(mode=0o700)
+              private.chmod(0o700)
+              receipt['namespace']={'run_id':run,'attempt':attempt,'source_commit':source,'owned':True}
+              for label in ('CHECKOUT','PHP_SETUP','PROVISION'):
+                  require(label.lower()+'_completed',os.environ.get(label+'_OUTCOME')=='success')
+              phase='collector_identity'
+              helper=Path.cwd()/'tests/Integration/native-fpm-crash-evidence.py'
+              receipt['collector_source_sha256']=digest(helper)
+              require('collector_exact',receipt['collector_source_sha256']==expected_helper)
+              spec=importlib.util.spec_from_file_location('symbol_load_elf_reader',helper)
+              reader=importlib.util.module_from_spec(spec)
+              sys.modules[spec.name]=reader
+              spec.loader.exec_module(reader)
+              phase='installed_binary_identity'
+              binaries={'fpm':Path('/usr/sbin/php-fpm8.4'),'opcache':Path('/usr/lib/php/20240924/opcache.so')}
+              versions={}
+              for label,package in (('fpm','php8.4-fpm'),('opcache','php8.4-opcache')):
+                  path=binaries[label]
+                  require(label+'_safe_binary',safe_file(path,64*1024*1024))
+                  raw=tool(['dpkg-query','-W','-f=${Package}\t${Version}\t${Architecture}\t${Status}',package]).decode('ascii').strip().split('\t')
+                  require(label+'_package_shape',len(raw)==4 and raw[0]==package and raw[2]=='amd64' and raw[3]=='install ok installed'
+                      and re.fullmatch('[A-Za-z0-9.+:~_-]{1,128}',raw[1]))
+                  owner=tool(['dpkg-query','-S',str(path)]).decode('ascii').strip().split(': ',1)
+                  require(label+'_package_owner',len(owner)==2 and owner[0] in (package,package+':amd64') and owner[1]==str(path))
+                  identity=reader.build_id(path)
+                  receipt['installed'][label]={'package':package,'version':raw[1],'architecture':'amd64',
+                      'owner_verified':True,'safe_binary':True,'binary_sha256':digest(path),'build_id':identity}
+                  versions[label]=raw[1]
+                  require(label+'_expected_build_id',identity==expected_ids[label])
+              require('fpm_exact_package_version',versions['fpm']==expected_version)
+              phase='signed_matching_debug_download'
+              require('private_disk_headroom',shutil.disk_usage(private).free>=1024*1024*1024)
+              debug={}
+              for label in ('fpm','opcache'):
+                  directory=private/label
+                  directory.mkdir(mode=0o700)
+                  package='php8.4-'+label+'-dbgsym'
+                  tool(['apt-get','-o','APT::Get::AllowUnauthenticated=false','download',package+'='+versions[label]],
+                      timeout=90,cwd=directory)
+                  archives=list(directory.glob('*.deb'))+list(directory.glob('*.ddeb'))
+                  require(label+'_one_archive',len(archives)==1)
+                  archive=archives[0]
+                  require(label+'_archive_safe',safe_file(archive,128*1024*1024))
+                  for field,expected in (('Package',package),('Version',versions[label]),('Architecture','amd64')):
+                      require(label+'_debug_'+field.lower(),tool(['dpkg-deb','-f',str(archive),field]).decode('ascii').strip()==expected)
+                  archive_sha=digest(archive)
+                  if label=='fpm':
+                      require('fpm_debug_archive_exact',archive_sha=='bcfdcfd8ad26e5f9d2fb41b843ac17e2bfcaa1d75200ebdb338cd71fc9a171dc')
+                  tool(['dpkg-deb','--extract',str(archive),str(directory)])
+                  directory.chmod(0o700)
+                  identity=expected_ids[label]
+                  debug[label]=directory/'usr/lib/debug/.build-id'/identity[:2]/(identity[2:]+'.debug')
+                  require(label+'_debug_file_safe',safe_file(debug[label],128*1024*1024))
+                  require(label+'_debug_build_id',reader.build_id(debug[label])==identity)
+                  debug_sha=digest(debug[label])
+                  if label=='fpm':
+                      require('fpm_debug_file_exact',debug_sha=='f67a78db0ed89f012952db658b1d6d91adeac817bb3ff38344ff1a3146112000')
+                  receipt['debug_packages'][label]={'package':package,'version':versions[label],'architecture':'amd64',
+                      'archive_sha256':archive_sha,'debug_file_sha256':debug_sha,'build_id':identity,
+                      'signed_apt_download':True,'installed':False}
+              phase='gdb_symbol_loading'
+              input_path,output_path,script_path=(private/name for name in ('gdb-input.json','gdb-output.json','gdb-probe.py'))
+              roles={label+'_binary':str(path) for label,path in binaries.items()}
+              roles.update({label+'_debug':str(path) for label,path in debug.items()})
+              input_path.write_text(json.dumps({'roles':roles,'expected_ids':expected_ids,
+                  'debug_directories':':'.join(str(private/label/'usr/lib/debug') for label in ('fpm','opcache'))}))
+              source_code='INPUT='+repr(str(input_path))+'\nOUTPUT='+repr(str(output_path))+'\n'+gdb_program
+              script_path.write_text(source_code)
+              observation,_=bounded(['gdb','-q','-nx','-nh','--batch','-ex',
+                  'python exec(compile(open('+repr(str(script_path))+').read(),"<symbol-preflight>","exec"))'],timeout=40)
+              receipt['gdb_process']=observation
+              if output_path.exists() and safe_file(output_path,65536):
+                  receipt['gdb']=json.loads(output_path.read_text())
+              require('gdb_process_completed',observation['exit_code']==0 and not observation['timed_out'] and observation['output_bounded'])
+              require('gdb_automatic_symbols_loaded',receipt['gdb'].get('automatic',{}).get('verified') is True)
+              require('gdb_explicit_symbols_loaded',receipt['gdb'].get('explicit_attachment',{}).get('verified') is True)
+              require('gdb_no_inferior_started',receipt['gdb'].get('inferior_started') is False)
+          except Refusal as error:
+              receipt['failure_code']=error.args[0] if error.args and re.fullmatch('[a-z_]{1,80}',str(error.args[0])) else 'metadata_guard_failed'
+          except BaseException:
+              receipt['failure_code']='metadata_observation_unavailable'
+          finally:
+              if private is not None and private.is_dir() and os.environ.get('PROVISION_OUTCOME')=='success':
+                  try:
+                      observation,data=bounded(['/usr/bin/php8.4','-c','/etc/php/8.4/fpm/php.ini','-r',php_code],
+                          timeout=15,env={'PATH':'/usr/bin:/bin','PHP_INI_SCAN_DIR':'/etc/php/8.4/fpm/conf.d'})
+                      if observation['exit_code']==0 and observation['output_bounded'] and not observation['timed_out']:
+                          receipt['cli_using_fpm_ini']=json.loads(data)
+                      else:
+                          receipt['cli_using_fpm_ini']={'state':'needs_review','reason':'cli_metadata_unavailable'}
+                      receipt['cli_metadata_process']=observation
+                  except BaseException:
+                      receipt['cli_using_fpm_ini']={'state':'needs_review','reason':'cli_metadata_unavailable'}
+              metadata=receipt['cli_using_fpm_ini']
+              guards['cli_metadata_identity']=metadata.get('php_version')=='8.4.27' and metadata.get('sapi_is_cli') is True and metadata.get('fpm_ini_loaded') is True
+              guards['cli_fixed_scan_directory']=metadata.get('fpm_scan_directory_only') is True
+              guards['cli_fixed_extension_directory']=metadata.get('extension_directory_matches_fixed_module') is True
+              receipt['optional_environment_complete']=metadata.get('state')=='observed' and metadata.get('invalid_extension_name_count')==0 and bool(metadata.get('extensions')) and all(v.get('collector_version_shape_accepted') is True for v in metadata.get('extensions',[])) and len(metadata.get('settings',[]))==9 and all(v.get('state')=='observed' for v in metadata.get('settings',[]))
+              receipt['complete_native_fpm_environment_claimed']=False
+              receipt['failed_guards']=sorted(k for k,v in guards.items() if not v)
+              receipt['state']='verified' if receipt['failure_code'] is None and guards and all(guards.values()) else 'needs_review'
+              receipt['phase']='complete' if receipt['state']=='verified' else phase
+              if root is not None and receipt['namespace']:
+                  body=(json.dumps(receipt,sort_keys=True)+'\n').encode()
+                  if len(body)>65536:
+                      receipt={'schema':receipt['schema'],'state':'needs_review','phase':'receipt','failure_code':'receipt_bound',
+                          'namespace':receipt['namespace'],'resource_acceptance':False}
+                      body=(json.dumps(receipt,sort_keys=True)+'\n').encode()
+                  try:
+                      target=root/'native-symbol-load-preflight.json'
+                      fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o644)
+                      try:
+                          os.write(fd,body)
+                          os.fchmod(fd,0o644)
+                      finally:
+                          os.close(fd)
+                  except BaseException:
+                      receipt['state']='needs_review'
+                      receipt['failure_code']='receipt_write_unavailable'
+          raise SystemExit(0 if receipt['state']=='verified' else 1)
+          PYTHON
+      - name: Always retain finite outcome and remove only owned private staging
+        if: always()
+        run: |
+          set -euo pipefail
+          sudo env GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_SHA="$GITHUB_SHA" \
+            PINOVA_SYMBOL_ROOT="$PINOVA_SYMBOL_ROOT" python3 - <<'PYTHON'
+          import json, os, re, shutil, stat
+          from pathlib import Path
+          os.umask(0o077)
+          run,attempt,source=(os.environ[k] for k in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA'))
+          assert re.fullmatch('[0-9]{1,24}',run) and re.fullmatch('[0-9]{1,12}',attempt) and re.fullmatch('[a-f0-9]{40}',source)
+          receipt={'schema':'pinova.native-symbol-load.v1','state':'needs_review','phase':'not_completed',
+              'namespace':{'run_id':run,'attempt':attempt,'source_commit':source},
+              'resource_acceptance':False,'production_coverage_acceptance':False,'cohort_executed':False,'core_capture_started':False}
+          root=Path('/tmp/pinova-native-symbol-load-'+run+'-'+attempt)
+          safe_root=False
+          cleanup='needs_review'
+          try:
+              assert str(root)==os.environ['PINOVA_SYMBOL_ROOT'] and root.resolve()==root and os.geteuid()==0
+              root.mkdir(mode=0o755,exist_ok=True)
+              assert root.lstat().st_uid==0 and stat.S_ISDIR(root.lstat().st_mode) and not root.is_symlink()
+              root.chmod(0o755)
+              safe_root=True
+              target=root/'native-symbol-load-preflight.json'
+              if target.exists():
+                  info=target.lstat()
+                  assert stat.S_ISREG(info.st_mode) and info.st_uid==0 and not info.st_mode & 0o022 and info.st_size<=65536
+                  receipt=json.loads(target.read_text())
+                  assert receipt['namespace']['source_commit']==source and receipt['namespace']['run_id']==run and receipt['namespace']['attempt']==attempt
+              private=root/'private'
+              cleanup='not_started'
+              if private.exists():
+                  info=private.lstat()
+                  assert stat.S_ISDIR(info.st_mode) and info.st_uid==0 and stat.S_IMODE(info.st_mode)==0o700 and not private.is_symlink() and private.resolve()==private
+                  shutil.rmtree(private)
+                  cleanup='complete' if not private.exists() else 'needs_review'
+          except BaseException:
+              receipt['state']='needs_review'
+              receipt['failure_code']='private_cleanup_unavailable'
+          if safe_root:
+              receipt['private_staging_cleanup']=cleanup
+              if cleanup=='needs_review': receipt['state']='needs_review'
+              try:
+                  temporary=root/'finite-receipt.tmp'
+                  fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o644)
+                  try:
+                      os.write(fd,(json.dumps(receipt,sort_keys=True)+'\n').encode())
+                      os.fchmod(fd,0o644)
+                  finally:
+                      os.close(fd)
+                  os.replace(temporary,root/'native-symbol-load-preflight.json')
+              except BaseException:
+                  raise SystemExit(1) from None
+          if not safe_root or cleanup=='needs_review': raise SystemExit(1)
+          PYTHON
+      - name: Upload only finite coreless symbol-loading metadata
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-symbol-load-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PINOVA_SYMBOL_ROOT }}/native-symbol-load-preflight.json
+          if-no-files-found: error
+          retention-days: 7

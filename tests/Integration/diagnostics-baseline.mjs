@@ -13,8 +13,12 @@ const runtimePaths = ['pinova.php', 'readme.txt', 'LICENSE', 'uninstall.php', 'c
     'composer.lock', 'assets', 'src', 'templates', 'utils'];
 const kinds = ['idle', 'normal', 'slow', 'concurrent'];
 const prefix = 'PINOVA_FULL_STACK_RESULT=';
-const ensure = (condition, message) => { if (!condition) throw new Error(message); };
+class EvidenceGuard extends Error {}
+const ensure = (condition, message) => { if (!condition) throw new EvidenceGuard(message); };
 const finite = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const genericFailure = 'RC21 baseline evidence validation failed; inspect the finite guards and private runner diagnostics.\n';
+const failureMessage = error => error instanceof EvidenceGuard
+    ? `RC21 baseline evidence validation failed: ${error.message}\n` : genericFailure;
 
 function verifyLogging(observation, profile) {
     ensure(['normal', 'diagnostic'].includes(profile), 'Unknown baseline logging profile.');
@@ -64,7 +68,7 @@ function verifySource() {
         git(['diff', '--exit-code', rc21, 'HEAD', '--', ...runtimePaths]);
         git(['diff', '--exit-code', 'HEAD', '--', ...runtimePaths]);
     } catch {
-        throw new Error('Baseline requires byte-identical tracked RC21 runtime and dependency inputs.');
+        throw new EvidenceGuard('Baseline requires byte-identical tracked RC21 runtime and dependency inputs.');
     }
     return source;
 }
@@ -83,6 +87,28 @@ function observation(text) {
 }
 
 function selfTest() {
+    // Exercise the real settings contract without booting WordPress or a DB.
+    // Its non-idempotent duration sanitizer also explains the two-step setup.
+    const durationProof = JSON.parse(execFileSync('php', ['-r', String.raw`
+        namespace Nabik\Utils\V1 { class Settings {} }
+        namespace {
+            define('DAY_IN_SECONDS', 86400);
+            function absint($value) { return abs((int) $value); }
+            require $argv[1];
+            $before = time();
+            $deadline = \Pinova\Admin\Settings::sanitize_diagnostic_window(3600);
+            echo json_encode([
+                'duration_creates_deadline' => $deadline >= $before + 3600 && $deadline <= time() + 3600,
+                'absolute_epoch_is_rejected' => 0 === \Pinova\Admin\Settings::sanitize_diagnostic_window(time() + 3600),
+                'second_sanitize_rejects_deadline' => 0 === \Pinova\Admin\Settings::sanitize_diagnostic_window($deadline),
+            ], JSON_THROW_ON_ERROR);
+        }
+    `, path.join(repo, 'src/Admin/Settings.php')], {
+        encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+    assert.equal(durationProof.duration_creates_deadline, true);
+    assert.equal(durationProof.absolute_epoch_is_rejected, true);
+    assert.equal(durationProof.second_sanitize_rejects_deadline, true);
     const good = { profile: 'normal', minimum_level: 'warning', diagnostic_window_active: false,
         debug_enabled: false, info_enabled: false, warning_enabled: true, untrusted: 'must not escape' };
     assert.equal(JSON.stringify(verifyLogging(good, 'normal')).includes('untrusted'), false);
@@ -110,7 +136,10 @@ function selfTest() {
     assert.throws(() => summarize({ ...receipt, candidate: { ...results,
         normal: { ...results.normal, resources: { ...resources, total_php_cpu_seconds: NaN } } } }, rc21));
     assert.throws(() => observation(`${prefix}{}\n${prefix}{}`));
-    process.stdout.write('Baseline evidence guards passed 14 bounded synthetic checks.\n');
+    assert.match(failureMessage(new EvidenceGuard('Synthetic finite guard.')), /Synthetic finite guard\./);
+    assert.equal(failureMessage(new Error('Synthetic private IO output.')), genericFailure);
+    assert.equal(failureMessage(new SyntaxError('Synthetic private JSON output.')), genericFailure);
+    process.stdout.write('Baseline evidence guards passed 20 bounded synthetic checks.\n');
 }
 
 try {
@@ -167,8 +196,9 @@ try {
             process.stdout.write(`RC21 ${profile} baseline evidence validated; existing safety gates passed.\n`);
         }
     }
-} catch {
+} catch (error) {
     // Never quote private CLI output, provider responses or parser exceptions.
-    process.stderr.write('RC21 baseline evidence validation failed; inspect the finite guards and private runner diagnostics.\n');
+    // Only EvidenceGuard messages are static assertions owned by this source.
+    process.stderr.write(failureMessage(error));
     process.exitCode = 1;
 }

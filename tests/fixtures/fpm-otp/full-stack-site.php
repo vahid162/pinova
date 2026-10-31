@@ -49,10 +49,14 @@ switch ( $action ) {
 		// Existing acceptance jobs retain their original info profile. Only the
 		// separate baseline workflow opts into normal or existing global debug.
 		$logging = [ 'minimum_level' => '' === $logging_profile ? 'info' : 'warning', 'retention_days' => 14 ];
-		if ( 'diagnostic' === $logging_profile ) {
-			$logging['diagnostic_until'] = time() + HOUR_IN_SECONDS;
-		}
 		update_option( 'pinova_logging', $logging );
+		if ( 'diagnostic' === $logging_profile ) {
+			// The real settings sanitizer accepts a duration, then stores its
+			// deadline. Persist the base first: add_option can sanitize twice.
+			$logging['diagnostic_until'] = HOUR_IN_SECONDS;
+			update_option( 'pinova_logging', $logging );
+		}
+		$logging_proof = '' !== $logging_profile ? $logging_observation() : null;
 		for ( $i = 1; $i <= 80; ++$i ) {
 			$id = wp_insert_user( [ 'user_login' => 'fixture_' . $i, 'user_email' => 'fixture_' . $i . '@example.test', 'user_pass' => wp_generate_password( 32 ), 'role' => 80 === $i ? 'administrator' : 'customer' ] );
 			if ( is_wp_error( $id ) ) { throw new RuntimeException( 'Synthetic account setup failed.' ); }
@@ -69,7 +73,7 @@ switch ( $action ) {
 		$result = [ 'ordinary' => get_permalink( $page ), 'shop' => get_permalink( wc_get_page_id( 'shop' ) ), 'cart' => get_permalink( wc_get_page_id( 'cart' ) ), 'wordpress' => get_bloginfo( 'version' ), 'woocommerce' => WC_VERSION,
 			'hpos_enabled' => \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled(),
 		];
-		if ( '' !== $logging_profile ) { $result['logging'] = $logging_observation(); }
+		if ( null !== $logging_proof ) { $result['logging'] = $logging_proof; }
 		break;
 	case 'inspect':
 		$token = $input['jwt'] ?? null;

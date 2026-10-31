@@ -142,8 +142,8 @@ native_global_limits='' native_pool_limits='' native_environment=''
 if [[ "${PINOVA_FPM_NATIVE_CAPTURE:-}" == 1 ]]; then
 	[[ "${php_version}" == 8.4 && "${PINOVA_FPM_LOGGING_PROFILE:-}" == normal \
 		&& -f "${PINOVA_FPM_CAMPAIGN_ROOT}/private/native-capture/state.json" ]]
-	native_global_limits='rlimit_core = 268435456'
-	native_pool_limits=$'process.dumpable = yes\nrlimit_core = 268435456'
+	native_global_limits='rlimit_core = 536870912'
+	native_pool_limits=$'process.dumpable = yes\nrlimit_core = 536870912'
 	native_environment='env[PINOVA_FPM_NATIVE_CAPTURE] = 1'
 fi
 cat > "${run_root}/fpm.conf" <<EOF

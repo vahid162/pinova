@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import struct
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -44,7 +45,7 @@ def environment():
 
 
 @contextlib.contextmanager
-def core_collection_fixture(*, malformed_environment=False, core_pid=123):
+def core_collection_fixture(*, malformed_environment=False, core_pid=123, core_signal=11, core_executable='/usr/sbin/php-fpm8.4'):
     """Tiny synthetic ELF/files; every ownership/native/process seam is mocked."""
     with tempfile.TemporaryDirectory() as temp:
         base, arm = Path(temp) / 'capture', Path(temp) / 'arm'
@@ -60,9 +61,9 @@ def core_collection_fixture(*, malformed_environment=False, core_pid=123):
         (arm / 'private/native-environment.json').write_text('{"extensions":[' if malformed_environment else json.dumps(environment()))
         (arm / 'private/fpm.log').write_text('[31-Oct-2026 14:00:00] WARNING: [pool fixture] child 123 exited on signal 11 (SIGSEGV) after 23.0 seconds from start\n')
         status = bytearray(36)
-        struct.pack_into('<h', status, 12, 11)
+        struct.pack_into('<h', status, 12, core_signal)
         struct.pack_into('<i', status, 32, core_pid)
-        files = struct.pack('<QQQQQ', 1, 4096, 0, 1, 0) + executable.encode() + b'\0'
+        files = struct.pack('<QQQQQ', 1, 4096, 0, 1, 0) + core_executable.encode() + b'\0'
         core = base / 'cores/core.123.11.1793462978'
         core.write_bytes(elf(note(b'CORE', 1, status) + note(b'CORE', 0x46494C45, files)))
         original_read, original_lstat = capture.read_bytes, Path.lstat
@@ -97,7 +98,210 @@ def core_collection_fixture(*, malformed_environment=False, core_pid=123):
             yield base, arm, core, debugger
 
 
+def declare_missing_load(core):
+    """Tiny complete notes plus a declared load beyond EOF; no large file/truncate."""
+    original = core.read_bytes()
+    header, notes = bytearray(original[:64]), original[120:]
+    struct.pack_into('<H', header, 56, 2)
+    program = bytearray(original[64:120])
+    struct.pack_into('<Q', program, 8, 176)
+    load = bytearray(56)
+    struct.pack_into('<I', load, 0, 1)
+    struct.pack_into('<Q', load, 8, 176 + len(notes) + 4096)
+    struct.pack_into('<Q', load, 32, 4096)
+    core.write_bytes(bytes(header + program + load) + notes)
+
+
+@contextlib.contextmanager
+def gdb_entry_fixture(*, unwind_failure=False, debug_case=None):
+    """Existing GDB entry, entirely fake GDB/process/module/kernel boundaries."""
+    with tempfile.TemporaryDirectory() as temp:
+        campaign = Path(temp)
+        base, arm = campaign / 'private/native-capture', campaign / 'arm'
+        (base / 'cores').mkdir(parents=True)
+        identity = '0011223344556677'
+        (campaign / 'private').chmod(0o700)
+        executable = '/usr/sbin/php-fpm8.4'
+        core = base / 'cores/core.123.11.1793462978'
+        directory = campaign / 'private/debug-symbols/usr/lib/debug'
+        debug_file = directory / '.build-id/00/11223344556677.debug'
+        debug_file.parent.mkdir(parents=True)
+        (campaign / 'private/debug-symbols').chmod(0o700)
+        debug_file.write_bytes(elf(note(b'GNU', 3, bytes.fromhex(identity)), 3))
+        debug_file.chmod(0o644)
+        data = {'executable': executable, 'core': str(core), 'pid': 123, 'signal': 11, 'build_id': identity}
+        if debug_case is not None:
+            data.update({'debug_directory': str(directory), 'debug_file': str(debug_file)})
+            if debug_case == 'outside':
+                data['debug_file'] = '/private/SECRET.debug'
+        frame = mock.Mock()
+        frame.pc.return_value = 0x400100
+        frame.name.return_value = 'zend_execute'
+        if unwind_failure:
+            frame.older.side_effect = RuntimeError('SECRET /private/?otp=123456')
+        else:
+            frame.older.return_value = None
+        fake = types.ModuleType('gdb')
+        fake.execute = mock.Mock(return_value='SECRET debugger chatter')
+        fake.selected_inferior = mock.Mock(return_value=types.SimpleNamespace(pid=123))
+        fake.newest_frame = mock.Mock(return_value=frame)
+        fake.solib_name = mock.Mock(return_value=None)
+        main_object = types.SimpleNamespace(filename=executable, build_id=identity, owner=None)
+        debug_object = types.SimpleNamespace(filename=str(debug_file), owner=main_object,
+            build_id='ffeeddccbbaa9988' if debug_case == 'mismatch' else identity)
+        fake.objfiles = mock.Mock(return_value=[main_object, debug_object] if debug_case is not None else [main_object])
+
+        def identity_of(path):
+            if str(path) == executable:
+                return identity
+            if str(path) == str(debug_file):
+                return 'ffeeddccbbaa9988' if debug_case == 'mismatch' else identity
+            raise capture.CaptureError('debug_path_invalid')
+
+        original_stat, original_lstat = Path.stat, Path.lstat
+
+        def owned_stat(path, *args, **kwargs):
+            info = original_stat(path, *args, **kwargs)
+            fields = list(info)
+            fields[4] = 0
+            return os.stat_result(fields)
+
+        def owned_lstat(path, *args, **kwargs):
+            info = original_lstat(path, *args, **kwargs)
+            fields = list(info)
+            fields[4] = 0
+            return os.stat_result(fields)
+
+        with (mock.patch.dict(capture.sys.modules, {'gdb': fake}),
+              mock.patch.object(capture, 'context', return_value=(campaign, arm, base)),
+              mock.patch.object(capture, 'read_bytes', return_value=json.dumps(data).encode()),
+              mock.patch.object(capture, 'build_id', side_effect=identity_of),
+              mock.patch.object(Path, 'resolve', lambda path, *args, **kwargs: path),
+              mock.patch.object(Path, 'stat', owned_stat), mock.patch.object(Path, 'lstat', owned_lstat),
+              mock.patch.object(capture, 'write_json') as written,
+              mock.patch.object(capture, 'run') as commands,
+              mock.patch.object(capture.subprocess, 'run') as native_commands,
+              mock.patch.object(capture, 'elf_notes') as elf_reader,
+              mock.patch.object(capture, 'core_identity') as core_reader,
+              mock.patch.object(capture, 'process_identity') as processes,
+              mock.patch.object(os, 'posix_fallocate') as allocation,
+              mock.patch.object(os, 'ftruncate') as truncation,
+              mock.patch.object(os, 'pidfd_open') as opened,
+              mock.patch.object(capture.signal, 'pidfd_send_signal') as signals,
+              mock.patch.object(os.path, 'ismount') as mounts):
+            yield base, fake, written, directory, debug_file
+            for operation in (commands, native_commands, elf_reader, core_reader, processes, allocation, truncation, opened, signals, mounts):
+                operation.assert_not_called()
+
+
 class NativeCrashEvidenceTest(unittest.TestCase):
+    def test_bounded_partial_core_retains_frames_without_complete_stack_claim(self):
+        for mode in ('at_limit', 'missing_load'):
+            with self.subTest(partial=mode), core_collection_fixture() as (base, arm, core, debugger):
+                if mode == 'missing_load':
+                    declare_missing_load(core)
+                capture.core_identity(core, 123, 11, '/usr/sbin/php-fpm8.4')
+                original_stat = Path.stat
+
+                def bounded_stat(path, *args, **kwargs):
+                    info = original_stat(path, *args, **kwargs)
+                    if mode == 'at_limit' and path == core:
+                        fields = list(info)
+                        fields[6] = capture.CORE_LIMIT
+                        return os.stat_result(fields)
+                    return info
+
+                with mock.patch.object(Path, 'stat', bounded_stat):
+                    result = capture.collect(base.parent, arm, base)
+                debugger.assert_called_once()
+                self.assertEqual(result['state'], 'needs_review')
+                self.assertFalse(result['resource_acceptance'])
+                native = result['cores'][0]
+                self.assertTrue(native.get('partial_core'))
+                self.assertIs(native.get('stack_complete'), False)
+                self.assertEqual(native['state'], 'needs_review')
+                self.assertEqual(native['frames'][0]['symbol'], 'zend_execute')
+
+    def test_partial_core_guard_mismatches_never_reach_gdb(self):
+        for fault in ('pid', 'signal', 'executable', 'build', 'lifetime'):
+            kwargs = {'core_pid': 124} if fault == 'pid' else {'core_signal': 7} if fault == 'signal' else \
+                {'core_executable': '/usr/sbin/other-fpm8.4'} if fault == 'executable' else {}
+            with self.subTest(guard=fault), core_collection_fixture(**kwargs) as (base, arm, core, debugger):
+                declare_missing_load(core)
+                if fault == 'lifetime':
+                    (arm / 'private/fpm.log').write_text('[31-Oct-2026 14:00:00] WARNING: [pool fixture] child 123 exited on signal 11 (SIGSEGV) after 100.0 seconds from start\n')
+                wrong_build = mock.patch.object(capture, 'build_id', return_value='ffeeddccbbaa9988') if fault == 'build' else contextlib.nullcontext()
+                with wrong_build:
+                    try:
+                        result = capture.collect(base.parent, arm, base)
+                    except capture.CaptureError:
+                        result = None
+                debugger.assert_not_called()
+                if result is not None:
+                    self.assertEqual(result['state'], 'needs_review')
+                    self.assertEqual(result['cores'][0]['frames'], [])
+
+    def test_gdb_unwind_failure_retains_first_frame_and_native_identity(self):
+        with gdb_entry_fixture(unwind_failure=True) as (base, debugger, written, directory, debug_file):
+            capture.gdb_extract()
+            written.assert_called_once()
+            result = written.call_args.args[1]
+            self.assertEqual(result['frames'][0], {'index': 0, 'symbol': 'zend_execute', 'module': 'php-fpm8.4', 'build_id': '0011223344556677'})
+            self.assertEqual((result.get('pid'), result.get('signal')), (123, 11))
+            self.assertEqual(result['state'], 'needs_review')
+            self.assertEqual(result['reason'], 'gdb_unwind_incomplete')
+            self.assertIs(result.get('stack_complete'), False)
+            self.assertFalse(result['resource_acceptance'])
+            self.assertNotIn('SECRET', json.dumps(result))
+            self.assertNotIn('/private/', json.dumps(result))
+
+    def test_gdb_debug_symbols_require_matching_build_and_private_path(self):
+        for case in ('matching', 'mismatch', 'outside'):
+            with self.subTest(symbols=case), gdb_entry_fixture(debug_case=case) as (base, debugger, written, directory, debug_file):
+                capture.gdb_extract()
+                written.assert_called_once()
+                result = written.call_args.args[1]
+                commands = [call.args[0] for call in debugger.execute.call_args_list]
+                if case == 'matching':
+                    setting = 'set debug-file-directory ' + str(directory)
+                    self.assertIn(setting, commands)
+                    self.assertLess(commands.index(setting), commands.index('file /usr/sbin/php-fpm8.4'))
+                    self.assertEqual(result['state'], 'captured')
+                else:
+                    self.assertFalse(any(command.startswith(('file ', 'core-file ', 'symbol-file ', 'add-symbol-file ', 'set debug-file-directory ')) for command in commands))
+                    self.assertEqual(result['state'], 'needs_review')
+                self.assertFalse(result['resource_acceptance'])
+                self.assertNotIn('SECRET', json.dumps(result))
+                self.assertNotIn(str(directory), json.dumps(result))
+
+    def test_low_disk_refuses_image_allocation_mount_and_kernel_changes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            campaign, arm, base = Path(temp), Path(temp) / 'arm', Path(temp) / 'capture'
+            fd_info = types.SimpleNamespace(st_dev=1, st_ino=2)
+            low = types.SimpleNamespace(f_bavail=1, f_frsize=4096)
+            with (mock.patch.dict(os.environ, {'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1'}),
+                  mock.patch.object(os, 'statvfs', return_value=low),
+                  mock.patch.object(os, 'open', return_value=456) as image_open,
+                  mock.patch.object(os, 'posix_fallocate') as allocation,
+                  mock.patch.object(os, 'ftruncate') as truncation,
+                  mock.patch.object(os, 'fstat', return_value=fd_info), mock.patch.object(os, 'close'),
+                  mock.patch.object(capture, 'run') as commands,
+                  mock.patch.object(capture.subprocess, 'run') as native_commands,
+                  mock.patch.object(capture, 'mount_matches', return_value=True) as mounts,
+                  mock.patch.object(capture, 'write_json') as saved,
+                  mock.patch.object(os, 'chmod'), mock.patch.object(Path, 'rmdir'),
+                  mock.patch.object(Path, 'read_text', return_value='original-core-pattern\n'),
+                  mock.patch.object(Path, 'write_text') as kernel_write):
+                failure = None
+                try:
+                    capture.setup(campaign, arm, base)
+                except capture.CaptureError as error:
+                    failure = error.code
+                self.assertIsNotNone(failure)
+                for operation in (image_open, allocation, truncation, commands, native_commands, mounts, saved, kernel_write):
+                    operation.assert_not_called()
+                self.assertEqual(failure, 'disk_headroom_unavailable')
+
     def test_preflight_allows_optional_shape_unknown_only_after_critical_identity_is_verified(self):
         with tempfile.TemporaryDirectory() as temp:
             campaign, arm, base = Path(temp), Path(temp) / 'arm', Path(temp) / 'capture'
@@ -180,6 +384,24 @@ class NativeCrashEvidenceTest(unittest.TestCase):
             invalid['extensions'][name] = version
             with self.assertRaises(capture.CaptureError):
                 capture.finite_environment(invalid)
+
+    def test_native_cgi_fcgi_module_name_is_accepted_only_as_known_literal(self):
+        value = environment()
+        value['extensions']['cgi-fcgi'] = '8.4.27'
+        failure, clean = None, None
+        try:
+            clean = capture.finite_environment(value)
+        except capture.CaptureError as error:
+            failure = error.code
+        self.assertIsNone(failure, 'The native PHP8.4.27 FPM module name cgi-fcgi must be accepted as an exact known literal.')
+        self.assertEqual(clean['extensions']['cgi-fcgi'], '8.4.27')
+        self.assertFalse(clean['resource_acceptance'])
+        for name in ('other-module', 'cgi-fcgi-extra', 'cgi-fcgi SECRET', 'cgi-fcgi\nOTP=123456', '/private/cgi-fcgi'):
+            with self.subTest(rejected_name=name):
+                invalid = environment()
+                invalid['extensions'][name] = '8.4.27'
+                with self.assertRaises(capture.CaptureError):
+                    capture.finite_environment(invalid)
 
     def test_malformed_optional_inventory_does_not_suppress_verified_synthetic_core(self):
         with core_collection_fixture(malformed_environment=True) as (base, arm, core, debugger):

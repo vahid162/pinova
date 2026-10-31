@@ -52,7 +52,7 @@ jobs:
         run: python3 -m unittest discover -s tests/ops -p test_native_fpm_crash_evidence.py
       - name: Provision disposable native tools
         run: |
-          sudo add-apt-repository --yes ppa:ondrej/php
+          sudo add-apt-repository --yes --no-update --component main --component main/debug --ppa ppa:ondrej/php
           sudo apt-get update -qq
           native_pkg_version="$(apt-cache madison php8.4-fpm | awk '$3 ~ /^8[.]4[.]27-/ { print $3; exit }')"
           [[ "${native_pkg_version}" =~ ^8\.4\.27-[A-Za-z0-9.+:~_-]+$ ]]
@@ -64,6 +64,82 @@ jobs:
           sudo install -m 0600 /dev/null "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}"
           printf '[client]\nuser=root\npassword=root\n' | sudo tee "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}" > /dev/null
           echo "PINOVA_FPM_WP_CLI=$(command -v wp)" >> "${GITHUB_ENV}"
+      - name: Prepare matching private debug metadata without installing an engine
+        run: |
+          sudo env GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_SHA="$GITHUB_SHA" \
+            PINOVA_FPM_CAMPAIGN_ROOT="$PINOVA_FPM_CAMPAIGN_ROOT" python3 - <<'PYTHON'
+          import hashlib, importlib.util, json, os, re, stat, subprocess, sys
+          from pathlib import Path
+          phase = 'namespace'
+          try:
+              run, attempt, source = (os.environ[key] for key in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA'))
+              assert re.fullmatch(r'[0-9]+', run) and re.fullmatch(r'[0-9]+', attempt) and re.fullmatch(r'[a-f0-9]{40}', source)
+              root = Path('/tmp/pinova-fpm-revisions-' + run + '-' + attempt)
+              assert str(root) == os.environ['PINOVA_FPM_CAMPAIGN_ROOT'] and root.resolve() == root and os.geteuid() == 0
+              destination = root / 'debug-symbols-staged'
+              destination.mkdir(mode=0o700)
+              phase = 'installed_version'
+              details = subprocess.check_output(['dpkg-query', '-s', 'php8.4-fpm'], timeout=10, text=True)
+              versions = [line.removeprefix('Version: ') for line in details.splitlines() if line.startswith('Version: ')]
+              assert versions == ['8.4.27-1+ubuntu24.04.1+deb.sury.org+1']
+              version = versions[0]
+              phase = 'signed_apt_download'
+              subprocess.run(['apt-get', 'download', 'php8.4-fpm-dbgsym=' + version], cwd=destination,
+                  timeout=90, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              archives = list(destination.glob('*.ddeb')) + list(destination.glob('*.deb'))
+              assert len(archives) == 1
+              archive = archives[0]
+              phase = 'package_identity'
+              for field, expected in (('Package', 'php8.4-fpm-dbgsym'), ('Version', version), ('Architecture', 'amd64')):
+                  actual = subprocess.check_output(['dpkg-deb', '-f', str(archive), field], timeout=10, text=True).strip()
+                  assert actual == expected
+              phase = 'private_extraction'
+              subprocess.run(['dpkg-deb', '--extract', str(archive), str(destination)], timeout=30, check=True,
+                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              destination.chmod(0o700)
+              phase = 'build_identity'
+              def build_id(path):
+                  result = subprocess.run(['readelf', '-n', str(path)], timeout=10, check=True,
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                  assert len(result.stdout) <= 65536 and not result.stderr
+                  ids = re.findall(rb'Build ID:\s*([a-f0-9]{40})', result.stdout)
+                  assert len(ids) == 1
+                  return ids[0].decode()
+              identity = build_id('/usr/sbin/php-fpm8.4')
+              assert identity == '6d4f4250c0d4b32619cc09e3bafc6f1d0d37059b'
+              symbol = destination / 'usr/lib/debug/.build-id' / identity[:2] / (identity[2:] + '.debug')
+              info = symbol.lstat()
+              assert stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
+              assert info.st_size <= 128 * 1024 * 1024 and symbol.resolve() == symbol
+              assert build_id(symbol) == identity
+              phase = 'collector_elf_reader'
+              helper = Path.cwd() / 'tests/Integration/native-fpm-crash-evidence.py'
+              spec = importlib.util.spec_from_file_location('symbol_identity_reader', helper)
+              reader = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(reader)
+              assert reader.build_id('/usr/sbin/php-fpm8.4') == identity and reader.build_id(symbol) == identity
+              def digest(path):
+                  value = hashlib.sha256()
+                  with path.open('rb') as stream:
+                      for block in iter(lambda: stream.read(131072), b''):
+                          value.update(block)
+                  return value.hexdigest()
+              phase = 'receipt'
+              value = {'schema':'pinova.native-debug-symbols.v1', 'state':'verified', 'source_commit':source,
+                  'run_id':run, 'attempt':attempt, 'package_version':version, 'architecture':'amd64',
+                  'executable_build_id':identity, 'debug_file_sha256':digest(symbol),
+                  'archive_sha256':digest(archive), 'engine_installed_by_this_step':False, 'resource_acceptance':False}
+              target = root / 'native-debug-symbols-preparation.json'
+              with target.open('x') as stream:
+                  json.dump(value, stream, sort_keys=True)
+                  stream.write('\n')
+              target.chmod(0o644)
+              print(json.dumps(value, sort_keys=True))
+          except BaseException:
+              print(json.dumps({'schema':'pinova.native-debug-symbols.v1','state':'needs_review',
+                  'phase':phase,'resource_acceptance':False}, sort_keys=True))
+              raise SystemExit(1)
+          PYTHON
       - name: Prepare one normalized dependency inventory and verified profile
         run: |
           composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
@@ -127,6 +203,8 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-crash-diagnostic-php-${{ matrix.php }}-${{ matrix.logging }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.PINOVA_FPM_CAMPAIGN_ROOT }}/receipt
+          path: |
+            ${{ env.PINOVA_FPM_CAMPAIGN_ROOT }}/receipt/*.json
+            ${{ env.PINOVA_FPM_CAMPAIGN_ROOT }}/native-debug-symbols-preparation.json
           if-no-files-found: error
           retention-days: 7

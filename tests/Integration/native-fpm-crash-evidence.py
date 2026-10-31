@@ -12,8 +12,8 @@ import subprocess
 import sys
 import time
 
-BUDGET = 512 * 1024 * 1024
-CORE_LIMIT = 256 * 1024 * 1024
+BUDGET = 1024 * 1024 * 1024
+CORE_LIMIT = 512 * 1024 * 1024
 FRAME_LIMIT = 64
 ARMS = ("a1", "b1", "b2", "a2", "a3", "b3")
 
@@ -126,6 +126,49 @@ def core_identity(path, expected_pid, expected_signal, executable):
     require(os.fsencode(executable) in paths, "core_executable_mismatch")
 
 
+def core_has_missing_loads(path):
+    """Identity notes must already be complete; absent load bytes mean partial evidence."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        header = os.pread(fd, 64, 0)
+        require(len(header) == 64 and header[:6] == b'\x7fELF\x02\x01', 'elf_unavailable')
+        require(struct.unpack_from('<HH', header, 16) == (4, 62), 'elf_identity_mismatch')
+        offset = struct.unpack_from('<Q', header, 32)[0]
+        size, count = struct.unpack_from('<HH', header, 54)
+        require(size == 56 and 0 < count <= 4096 and offset + size * count <= info.st_size, 'elf_bound')
+        for index in range(count):
+            entry = os.pread(fd, 56, offset + index * size)
+            require(len(entry) == 56, 'elf_truncated')
+            if struct.unpack_from('<I', entry)[0] == 1:
+                start = struct.unpack_from('<Q', entry, 8)[0]
+                length = struct.unpack_from('<Q', entry, 32)[0]
+                if start + length > info.st_size:
+                    return True
+        return False
+    finally:
+        os.close(fd)
+
+
+def verified_debug_symbols(campaign, expected, *, staged=False):
+    require(isinstance(expected, str) and re.fullmatch(r'[a-f0-9]{8,128}', expected) and len(expected) % 2 == 0,
+            'debug_build_identity_mismatch')
+    private = campaign / 'private'
+    root = campaign / 'debug-symbols-staged' if staged else private / 'debug-symbols'
+    directory = root / 'usr/lib/debug'
+    target = directory / '.build-id' / expected[:2] / (expected[2:] + '.debug')
+    for parent in (private, root):
+        info = parent.lstat()
+        require(parent.resolve() == parent and stat.S_ISDIR(info.st_mode) and info.st_uid == 0
+                and stat.S_IMODE(info.st_mode) & 0o077 == 0, 'debug_path_invalid')
+    require(directory.resolve() == directory and target.resolve() == target, 'debug_path_invalid')
+    info = target.lstat()
+    require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not stat.S_IMODE(info.st_mode) & 0o022,
+            'debug_path_invalid')
+    require(build_id(target) == expected, 'debug_build_identity_mismatch')
+    return directory, target
+
+
 def native_symbol(value):
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$:@~<>-]{0,159}", value):
         return "unknown"
@@ -155,7 +198,7 @@ def finite_environment(value):
     require(isinstance(extensions, dict) and len(extensions) <= 128, "extensions_shape_invalid")
     clean = {}
     for name, version in extensions.items():
-        require(isinstance(name, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_ ]{0,63}", name), "extension_name_invalid")
+        require(isinstance(name, str) and (re.fullmatch(r"[A-Za-z][A-Za-z0-9_ ]{0,63}", name) or name == 'cgi-fcgi'), "extension_name_invalid")
         require(version is None or isinstance(version, str) and (re.fullmatch(r"[0-9][A-Za-z0-9.+_-]{0,47}", version)
                 or name == 'mysqlnd' and version == 'mysqlnd ' + value['php_version']), "extension_version_invalid")
         clean[name] = version
@@ -251,6 +294,16 @@ def mount_matches(base, state):
 
 def setup(campaign, arm_root, base):
     require(not base.exists(), "capture_already_owned")
+    available = os.statvfs(campaign / 'private')
+    require(available.f_bavail * available.f_frsize >= 2 * 1024 * 1024 * 1024, 'disk_headroom_unavailable')
+    executable = '/usr/sbin/php-fpm8.4'
+    expected_build = build_id(executable)
+    stage, destination = campaign / 'debug-symbols-staged', campaign / 'private/debug-symbols'
+    require(not os.path.lexists(destination), 'debug_path_invalid')
+    verified_debug_symbols(campaign, expected_build, staged=True)
+    require(stage.stat().st_dev == destination.parent.stat().st_dev, 'debug_path_invalid')
+    os.rename(stage, destination)
+    verified_debug_symbols(campaign, expected_build)
     base.mkdir(mode=0o700)
     (base / "cores").mkdir(mode=0o700)
     image = base / "cores.img"
@@ -275,7 +328,8 @@ def setup(campaign, arm_root, base):
     (base / "cores/lost+found").rmdir()
     pattern_file.write_text(pattern + "\n")
     require(pattern_file.read_text().rstrip("\n") == pattern, "core_route_unavailable")
-    return {"state": "ready", "resource_acceptance": False, "storage_budget_bytes": BUDGET, "per_core_limit_bytes": CORE_LIMIT}
+    return {"state": "ready", "resource_acceptance": False, "storage_budget_bytes": BUDGET,
+            "per_core_limit_bytes": CORE_LIMIT, 'debug_build_id': expected_build}
 
 
 def process_identity(pid, executable):
@@ -321,10 +375,23 @@ def gdb_extract():
     import gdb
     campaign, arm_root, base = context()
     data = json.loads(read_bytes(base / "gdb-input.json", 16384))
-    output = {"state": "needs_review", "reason": "gdb_unavailable", "frames": [], "resource_acceptance": False}
+    output = {"state": "needs_review", "reason": "gdb_unavailable", "frames": [], "resource_acceptance": False,
+              'pid': None, 'signal': None, 'partial_core': data.get('partial_core') is True,
+              'stack_complete': False, 'frame_bound': False}
     try:
         exe, core = data["executable"], data["core"]
         require(exe == "/usr/sbin/php-fpm8.4" and Path(core).parent == base / "cores" and re.fullmatch(r"core\.[0-9]+\.(?:6|7|11)\.[0-9]+", Path(core).name))
+        require(isinstance(data.get('pid'), int) and 1 < data['pid'] < 2147483648 and data.get('signal') in (6, 7, 11),
+                'core_pid_signal_mismatch')
+        output.update({'pid': data['pid'], 'signal': data['signal']})
+        expected = data.get('build_id')
+        require(build_id(exe) == expected, 'debug_build_identity_mismatch')
+        canonical = campaign / 'private/debug-symbols/usr/lib/debug'
+        target = canonical / '.build-id' / str(expected)[:2] / (str(expected)[2:] + '.debug')
+        require(data.get('debug_directory', str(canonical)) == str(canonical) and data.get('debug_file', str(target)) == str(target),
+                'debug_path_invalid')
+        directory, target = verified_debug_symbols(campaign, expected)
+        gdb.execute('set debug-file-directory ' + str(directory), to_string=True)
         gdb.execute("file " + exe, to_string=True)
         gdb.execute("core-file " + core, to_string=True)
         require(gdb.selected_inferior().pid == data["pid"], "core_pid_signal_mismatch")
@@ -341,11 +408,15 @@ def gdb_extract():
             output["frames"].append({"index": len(output["frames"]), "symbol": native_symbol(frame.name()),
                                       "module": module, "build_id": identity})
             frame = frame.older()
-        output.update({"state": "captured" if output["frames"] and output["frames"][0]["symbol"] != "unknown" else "needs_review",
-                       "reason": "bounded_frames" if frame is not None else "symbol_unknown" if not output["frames"] or output["frames"][0]["symbol"] == "unknown" else None,
-                       "frame_bound": frame is not None, "pid": data["pid"], "signal": data["signal"]})
+        known = bool(output['frames']) and output['frames'][0]['symbol'] != 'unknown'
+        output.update({"state": "captured" if known and not output['partial_core'] else "needs_review",
+                       "reason": 'partial_core' if output['partial_core'] else "bounded_frames" if frame is not None else "symbol_unknown" if not known else None,
+                       "frame_bound": frame is not None, 'stack_complete': known and frame is None and not output['partial_core']})
+    except CaptureError as error:
+        output.update({'state': 'needs_review', 'reason': error.code, 'stack_complete': False})
     except BaseException:
-        output.update({"state": "needs_review", "reason": "gdb_unwind_incomplete"})
+        output.update({"state": "needs_review", "reason": "gdb_unwind_incomplete", 'stack_complete': False,
+                       'frame_bound': len(output['frames']) >= FRAME_LIMIT})
     write_json(base / "gdb-output.json", output)
 
 
@@ -388,17 +459,25 @@ def collect(campaign, arm_root, base):
                                + r' \([^\r\n)]{1,64}\) after ([0-9]+(?:\.[0-9]+)?) seconds from start', tail)
         require(len(lifetimes) == 1 and abs(at - (workers[pid]['started_epoch'] + float(lifetimes[0]))) <= 3,
                 'core_process_lifetime_mismatch')
-        receipt = {"pid": pid, "signal": signal, "state": "needs_review", "reason": "core_bound", "frames": [], "resource_acceptance": False}
+        receipt = {"pid": pid, "signal": signal, "state": "needs_review", "reason": "core_bound", "frames": [], "resource_acceptance": False,
+                   'partial_core': item.stat().st_size >= CORE_LIMIT, 'stack_complete': False}
         if len(result["cores"]) < 2:
             try:
-                require(item.stat().st_size < CORE_LIMIT, "core_truncated_or_bound")
                 core_identity(item, pid, signal, exe)
-                write_json(base / "gdb-input.json", {"core": str(item), "executable": exe, "pid": pid, "signal": signal})
+                partial = item.stat().st_size >= CORE_LIMIT or core_has_missing_loads(item)
+                directory = campaign / 'private/debug-symbols/usr/lib/debug'
+                target = directory / '.build-id' / facts['build_id'][:2] / (facts['build_id'][2:] + '.debug')
+                write_json(base / "gdb-input.json", {"core": str(item), "executable": exe, "pid": pid, "signal": signal,
+                    'build_id': facts['build_id'], 'partial_core': partial, 'debug_directory': str(directory), 'debug_file': str(target)})
                 (base / "gdb-output.json").unlink(missing_ok=True)
                 command = ["gdb", "-q", "-nx", "-nh", "--batch", "-iex", "set auto-load off", "-iex", "set debuginfod enabled off",
                            "-ex", "python import gdb", "-ex", "source " + str(Path(__file__).resolve())]
                 run(command, 30)
                 receipt = json.loads(read_bytes(base / "gdb-output.json", 32768))
+                receipt['partial_core'] = partial
+                receipt['stack_complete'] = receipt.get('stack_complete') is True and not partial
+                if partial:
+                    receipt.update({'state': 'needs_review', 'reason': 'partial_core', 'stack_complete': False})
             except CaptureError as error:
                 receipt["reason"] = error.code
         result["cores"].append(receipt)
@@ -417,7 +496,7 @@ def collect(campaign, arm_root, base):
             result["cleanup_workers_alive"] = alive
             break
         time.sleep(0.05)
-    result["state"] = "needs_review" if alive or result["inventory"] is None or any(row["state"] != "captured" or row.get('frame_bound') for row in result["cores"]) else "crash_captured" if cores else "no_crash_observed"
+    result["state"] = "needs_review" if alive or result["inventory"] is None or any(row["state"] != "captured" or row.get('frame_bound') or row.get('partial_core') or row.get('stack_complete') is not True for row in result["cores"]) else "crash_captured" if cores else "no_crash_observed"
     return result
 
 

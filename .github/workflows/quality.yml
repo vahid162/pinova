@@ -2,7 +2,7 @@ name: Quality
 
 on:
   push:
-    branches-ignore: ['proof/diagnostics-native-crash-observer-probe']
+    branches-ignore: ['proof/diagnostics-native-crash-symbols']
   pull_request:
   workflow_dispatch:
 

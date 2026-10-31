@@ -232,6 +232,92 @@ def gdb_entry_fixture(*, unwind_failure=False, debug_case=None):
 
 
 class NativeCrashEvidenceTest(unittest.TestCase):
+    def test_preflight_preserves_strict_partial_settings_from_one_native_snapshot(self):
+        for case in ('extension_version', 'extensions_shape', 'zend_version', 'extra_key', 'missing_key', 'hostile_value'):
+            with self.subTest(settings_case=case), core_collection_fixture() as (base, arm, core, debugger):
+                value = environment()
+                value['settings'].update({'opcache.jit': '1235', 'opcache.jit_buffer_size': '256M'})
+                expected = value['settings'].copy()
+                value['extensions']['zmq'] = 'SECRET /private/?otp=123456'
+                inventory_reason, settings_reason = 'extension_version_invalid', None
+                if case == 'extensions_shape':
+                    value['extensions'] = []
+                    inventory_reason = 'extensions_shape_invalid'
+                elif case == 'zend_version':
+                    value['extensions'] = environment()['extensions']
+                    value['zend_version'] = 'SECRET /private/?otp=123456'
+                    inventory_reason = 'zend_version_invalid'
+                elif case == 'extra_key':
+                    value['settings']['SECRET /private/?otp=123456'] = '1'
+                    settings_reason = 'settings_keys_invalid'
+                elif case == 'missing_key':
+                    del value['settings']['opcache.jit']
+                    settings_reason = 'settings_keys_invalid'
+                elif case == 'hostile_value':
+                    value['settings']['opcache.jit'] = 'SECRET /private/?otp=123456'
+                    settings_reason = 'settings_value_invalid'
+                (arm / 'private/native-environment.json').write_text(json.dumps(value))
+                (arm / 'fixture-owned').write_text('123:1\n')
+                with (mock.patch.object(capture, 'state_load', return_value={'owner': '123:1'}),
+                      mock.patch.object(capture, 'read_native_environment_payload', wraps=capture.read_native_environment_payload) as snapshot,
+                      mock.patch.object(capture.time, 'sleep') as sleeping):
+                    result = capture.preflight(base.parent, arm, base)
+                    self.assertEqual(result.get('actual_settings'), expected if settings_reason is None else None)
+                    self.assertEqual(result.get('actual_settings_status'),
+                                     {'state': 'recorded' if settings_reason is None else 'needs_review', 'reason': settings_reason})
+                    self.assertEqual(result['state'], 'version_recorded')
+                    self.assertIsNone(result['inventory'])
+                    self.assertEqual(result['inventory_status'], {'state': 'needs_review', 'reason': inventory_reason})
+                    self.assertFalse(result['resource_acceptance'])
+                    snapshot.assert_called_once_with(arm)
+                    sleeping.assert_not_called()
+                    debugger.assert_not_called()
+                    for rejected in ('SECRET', '/private/', '123456'):
+                        self.assertNotIn(rejected, json.dumps(result))
+
+    def test_collection_keeps_settings_independent_without_promoting_inventory_or_identity(self):
+        for case in ('extension_version', 'extra_key', 'hostile_value', 'malformed_json', 'wrong_version', 'wrong_sapi'):
+            with self.subTest(settings_case=case), core_collection_fixture() as (base, arm, core, debugger):
+                value = environment()
+                value['settings'].update({'opcache.jit': '1235', 'opcache.jit_buffer_size': '256M'})
+                expected = value['settings'].copy()
+                value['extensions']['zmq'] = 'SECRET /private/?otp=123456'
+                reason = None
+                if case == 'extra_key':
+                    value['settings']['SECRET /private/?otp=123456'] = '1'
+                    reason = 'settings_keys_invalid'
+                elif case == 'hostile_value':
+                    value['settings']['opcache.jit'] = 'SECRET /private/?otp=123456'
+                    reason = 'settings_value_invalid'
+                elif case == 'wrong_version':
+                    value['php_version'] = '8.4.28'
+                    reason = 'native_version_mismatch'
+                elif case == 'wrong_sapi':
+                    value['sapi'] = 'cli'
+                    reason = 'native_version_mismatch'
+                elif case == 'malformed_json':
+                    reason = 'inventory_invalid'
+                (arm / 'private/native-environment.json').write_text('{"settings":[' if case == 'malformed_json' else json.dumps(value))
+                with (mock.patch.object(capture, 'read_native_environment_payload', wraps=capture.read_native_environment_payload) as snapshot,
+                      mock.patch.object(capture.time, 'sleep') as sleeping):
+                    result = capture.collect(base.parent, arm, base)
+                    self.assertEqual(result.get('actual_settings'), expected if reason is None else None)
+                    self.assertEqual(result.get('actual_settings_status'),
+                                     {'state': 'recorded' if reason is None else 'needs_review', 'reason': reason})
+                    self.assertEqual(result['state'], 'needs_review')
+                    self.assertIsNone(result['inventory'])
+                    self.assertEqual(result['inventory_status']['state'], 'needs_review')
+                    if case in ('extension_version', 'extra_key', 'hostile_value'):
+                        self.assertEqual(result['inventory_status']['reason'], 'extension_version_invalid')
+                    self.assertEqual(result['cores'][0]['state'], 'captured')
+                    self.assertEqual(result['cores'][0]['frames'][0]['symbol'], 'zend_execute')
+                    self.assertFalse(result['resource_acceptance'])
+                    snapshot.assert_called_once_with(arm)
+                    sleeping.assert_not_called()
+                    debugger.assert_called_once()
+                    for rejected in ('SECRET', '/private/', '123456'):
+                        self.assertNotIn(rejected, json.dumps(result))
+
     def test_gdb_symbol_status_distinguishes_missing_filtered_and_attached_debug(self):
         for case in ('missing', 'filtered_safe', 'filtered_payload', 'resolved', 'name_error',
                      'debug_missing', 'debug_orphan', 'debug_wrong_owner', 'debug_wrong_build',

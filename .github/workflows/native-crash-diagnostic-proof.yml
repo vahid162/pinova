@@ -64,74 +64,195 @@ jobs:
           sudo install -m 0600 /dev/null "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}"
           printf '[client]\nuser=root\npassword=root\n' | sudo tee "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}" > /dev/null
           echo "PINOVA_FPM_WP_CLI=$(command -v wp)" >> "${GITHUB_ENV}"
-      - name: Prepare matching private debug metadata without installing an engine
+      - name: Prepare both matching debug packages and verify automatic symbol loading
         run: |
           sudo env GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_SHA="$GITHUB_SHA" \
             PINOVA_FPM_CAMPAIGN_ROOT="$PINOVA_FPM_CAMPAIGN_ROOT" python3 - <<'PYTHON'
-          import hashlib, importlib.util, json, os, re, stat, subprocess, sys
+          import hashlib, importlib.util, json, os, re, resource, signal, stat, subprocess, sys, tempfile
           from pathlib import Path
-          phase = 'namespace'
+          
+          os.umask(0o077)
+          phase, root, owned = 'namespace', None, False
+          version = '8.4.27-1+ubuntu24.04.1+deb.sury.org+1'
+          ids = {'fpm':'6d4f4250c0d4b32619cc09e3bafc6f1d0d37059b',
+              'opcache':'18a699d7e9ff4bd386ec9837fb11d37f3e1fcaf4'}
+          archive_ids = {'fpm':'bcfdcfd8ad26e5f9d2fb41b843ac17e2bfcaa1d75200ebdb338cd71fc9a171dc',
+              'opcache':'5275c314e79d274c8ed014d2648ce9c9f7c86bad52fb156d364bf51eb2e87894'}
+          debug_ids = {'fpm':'f67a78db0ed89f012952db658b1d6d91adeac817bb3ff38344ff1a3146112000',
+              'opcache':'7de0711857bb8e21b89458ff7abc7bc42cda676e00bc6003113f8692d1d7bb1a'}
+          value = {'schema':'pinova.native-debug-symbols.v1','state':'needs_review','phase':phase,
+              'packages':{},'symbol_loading':{},'engine_installed_by_this_step':False,
+              'module_installed_by_this_step':False,'resource_acceptance':False,'coreless_preflight':True}
+          temporary_paths = []
+          
+          def digest(path):
+              result = hashlib.sha256()
+              with path.open('rb') as stream:
+                  for chunk in iter(lambda:stream.read(131072),b''):
+                      result.update(chunk)
+              return result.hexdigest()
+          
+          def safe_file(path, bound):
+              info = path.lstat()
+              return stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022 and info.st_size <= bound and path.resolve() == path
+          
+          gdb_program = r'''
+          import gdb, json, os, re
+          from pathlib import Path
+          data = json.loads(Path(INPUT).read_text())
+          roles, ids = data['roles'], data['ids']
+          result = {'verified':False,'phase':'configuration','inferior_never_started':False,
+              'fpm_debug_owner_match':False,'opcache_debug_owner_match':False,
+              'fpm_php_execute_script':False,'fpm_main':False,'opcache_zend_accel_info':False}
+          def role(obj):
+              if obj is None or not obj.is_valid(): return 'none'
+              filename = os.path.realpath(obj.filename) if obj.filename else ''
+              return next((label for label,path in roles.items() if filename == path),'other')
+          def execute(command):
+              gdb.execute(command,to_string=True)
           try:
-              run, attempt, source = (os.environ[key] for key in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA'))
-              assert re.fullmatch(r'[0-9]+', run) and re.fullmatch(r'[0-9]+', attempt) and re.fullmatch(r'[a-f0-9]{40}', source)
-              root = Path('/tmp/pinova-fpm-revisions-' + run + '-' + attempt)
-              assert str(root) == os.environ['PINOVA_FPM_CAMPAIGN_ROOT'] and root.resolve() == root and os.geteuid() == 0
-              destination = root / 'debug-symbols-staged'
+              for command in ('set auto-load off','set debuginfod enabled off','set pagination off','set confirm off'):
+                  execute(command)
+              execute('set debug-file-directory '+data['directory'])
+              result['phase']='automatic_binary_loading'
+              execute('file '+json.dumps(roles['fpm_binary']))
+              execute('add-symbol-file '+json.dumps(roles['opcache_binary'])+' 0x0')
+              objects=list(gdb.objfiles())
+              if len(objects)>16: raise RuntimeError()
+              for prefix in ('fpm','opcache'):
+                  result[prefix+'_debug_owner_match']=any(role(obj)==prefix+'_debug'
+                      and role(obj.owner)==prefix+'_binary' and obj.build_id==ids[prefix] for obj in objects)
+              result['phase']='known_symbol_bindings'
+              for key,name,prefix in (('fpm_php_execute_script','php_execute_script','fpm'),
+                  ('fpm_main','main','fpm'),('opcache_zend_accel_info','zend_accel_info','opcache')):
+                  symbol=gdb.lookup_global_symbol(name)
+                  tab=symbol.symtab if symbol is not None else None
+                  obj=tab.objfile if tab is not None else None
+                  result[key]=bool(symbol is not None and symbol.is_function and tab is not None and obj is not None
+                      and obj.build_id==ids[prefix] and role(obj) in (prefix+'_binary',prefix+'_debug'))
+              result['inferior_never_started']=all(inferior.pid==0 for inferior in gdb.inferiors())
+              result['verified']=all(result[key] for key in ('fpm_debug_owner_match','opcache_debug_owner_match',
+                  'fpm_php_execute_script','fpm_main','opcache_zend_accel_info','inferior_never_started'))
+              result['phase']='complete'
+          except BaseException:
+              pass
+          Path(OUTPUT).write_text(json.dumps(result,sort_keys=True)+'\n')
+          '''
+          
+          try:
+              run, attempt, source = (os.environ[key] for key in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA'))
+              assert re.fullmatch('[0-9]{1,24}',run) and re.fullmatch('[0-9]{1,12}',attempt) and re.fullmatch('[a-f0-9]{40}',source)
+              root = Path('/tmp/pinova-fpm-revisions-'+run+'-'+attempt)
+              assert str(root)==os.environ['PINOVA_FPM_CAMPAIGN_ROOT'] and root.resolve()==root and os.geteuid()==0
+              assert root.lstat().st_uid==0 and stat.S_ISDIR(root.lstat().st_mode) and not root.is_symlink()
+              root.chmod(0o755)
+              owned = True
+              value.update({'source_commit':source,'run_id':run,'attempt':attempt,'package_version':version,'architecture':'amd64'})
+              assert not os.path.lexists(root/'private') and not os.path.lexists(root/'receipt')
+              destination = root/'debug-symbols-staged'
               destination.mkdir(mode=0o700)
-              phase = 'installed_version'
-              details = subprocess.check_output(['dpkg-query', '-s', 'php8.4-fpm'], timeout=10, text=True)
-              versions = [line.removeprefix('Version: ') for line in details.splitlines() if line.startswith('Version: ')]
-              assert versions == ['8.4.27-1+ubuntu24.04.1+deb.sury.org+1']
-              version = versions[0]
-              phase = 'signed_apt_download'
-              subprocess.run(['apt-get', 'download', 'php8.4-fpm-dbgsym=' + version], cwd=destination,
-                  timeout=90, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-              archives = list(destination.glob('*.ddeb')) + list(destination.glob('*.deb'))
-              assert len(archives) == 1
-              archive = archives[0]
-              phase = 'package_identity'
-              for field, expected in (('Package', 'php8.4-fpm-dbgsym'), ('Version', version), ('Architecture', 'amd64')):
-                  actual = subprocess.check_output(['dpkg-deb', '-f', str(archive), field], timeout=10, text=True).strip()
-                  assert actual == expected
-              phase = 'private_extraction'
-              subprocess.run(['dpkg-deb', '--extract', str(archive), str(destination)], timeout=30, check=True,
-                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
               destination.chmod(0o700)
               phase = 'collector_elf_reader'
-              helper = Path.cwd() / 'tests/Integration/native-fpm-crash-evidence.py'
-              spec = importlib.util.spec_from_file_location('symbol_identity_reader', helper)
+              helper = Path.cwd()/'tests/Integration/native-fpm-crash-evidence.py'
+              value['collector_source_sha256'] = digest(helper)
+              spec = importlib.util.spec_from_file_location('matching_symbol_elf_reader',helper)
               reader = importlib.util.module_from_spec(spec)
               sys.modules[spec.name] = reader
               spec.loader.exec_module(reader)
-              identity = reader.build_id('/usr/sbin/php-fpm8.4')
-              assert identity == '6d4f4250c0d4b32619cc09e3bafc6f1d0d37059b'
-              symbol = destination / 'usr/lib/debug/.build-id' / identity[:2] / (identity[2:] + '.debug')
-              info = symbol.lstat()
-              assert stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
-              assert info.st_size <= 128 * 1024 * 1024 and symbol.resolve() == symbol
-              assert reader.build_id(symbol) == identity
-              def digest(path):
-                  value = hashlib.sha256()
-                  with path.open('rb') as stream:
-                      for block in iter(lambda: stream.read(131072), b''):
-                          value.update(block)
-                  return value.hexdigest()
-              phase = 'receipt'
-              value = {'schema':'pinova.native-debug-symbols.v1', 'state':'verified', 'source_commit':source,
-                  'run_id':run, 'attempt':attempt, 'package_version':version, 'architecture':'amd64',
-                  'executable_build_id':identity, 'debug_file_sha256':digest(symbol),
-                  'archive_sha256':digest(archive), 'identity_reader':'bounded_elf_notes',
-                  'collector_source_sha256':digest(helper), 'engine_installed_by_this_step':False, 'resource_acceptance':False}
-              target = root / 'native-debug-symbols-preparation.json'
-              with target.open('x') as stream:
-                  json.dump(value, stream, sort_keys=True)
-                  stream.write('\n')
-              target.chmod(0o644)
-              print(json.dumps(value, sort_keys=True))
+              value['identity_reader'] = 'bounded_elf_notes'
+              binaries = {'fpm':Path('/usr/sbin/php-fpm8.4'),'opcache':Path('/usr/lib/php/20240924/opcache.so')}
+              debug = {}
+              for label in ('fpm','opcache'):
+                  phase = label+'_installed_identity'
+                  package = 'php8.4-'+label
+                  path = binaries[label]
+                  assert safe_file(path,64*1024*1024)
+                  assert subprocess.check_output(['dpkg-query','-W','-f=${Version}',package],timeout=10,stderr=subprocess.DEVNULL)==version.encode()
+                  owner = subprocess.check_output(['dpkg-query','-S',str(path)],timeout=10,text=True,stderr=subprocess.DEVNULL).strip().split(': ',1)
+                  assert len(owner)==2 and owner[0] in (package,package+':amd64') and owner[1]==str(path)
+                  assert reader.build_id(path)==ids[label]
+                  value['packages'][label] = {'package':package,'version':version,'owner_verified':True,
+                      'binary_sha256':digest(path),'build_id':ids[label]}
+                  phase = label+'_signed_debug_download'
+                  before = set(destination.glob('*.deb'))|set(destination.glob('*.ddeb'))
+                  subprocess.run(['apt-get','-o','APT::Get::AllowUnauthenticated=false','download',package+'-dbgsym='+version],
+                      cwd=destination,timeout=90,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                  archives = (set(destination.glob('*.deb'))|set(destination.glob('*.ddeb')))-before
+                  assert len(archives)==1
+                  archive = archives.pop()
+                  assert safe_file(archive,128*1024*1024) and digest(archive)==archive_ids[label]
+                  for field,expected in (('Package',package+'-dbgsym'),('Version',version),('Architecture','amd64')):
+                      assert subprocess.check_output(['dpkg-deb','-f',str(archive),field],timeout=10,text=True,stderr=subprocess.DEVNULL).strip()==expected
+                  phase = label+'_private_extraction'
+                  subprocess.run(['dpkg-deb','--extract',str(archive),str(destination)],timeout=30,check=True,
+                      stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                  destination.chmod(0o700)
+                  debug[label] = destination/'usr/lib/debug/.build-id'/ids[label][:2]/(ids[label][2:]+'.debug')
+                  assert safe_file(debug[label],128*1024*1024) and reader.build_id(debug[label])==ids[label]
+                  assert digest(debug[label])==debug_ids[label]
+                  value['packages'][label].update({'debug_package':package+'-dbgsym','archive_sha256':archive_ids[label],
+                      'debug_file_sha256':debug_ids[label],'signed_apt_download':True,'debug_package_installed':False})
+              phase = 'merged_debug_identity'
+              for label in ('fpm','opcache'):
+                  assert safe_file(debug[label],128*1024*1024) and reader.build_id(debug[label])==ids[label]
+                  assert digest(debug[label])==debug_ids[label]
+              assert destination.stat().st_uid==0 and stat.S_IMODE(destination.stat().st_mode)==0o700
+              assert not os.path.lexists(root/'private') and not os.path.lexists(root/'receipt')
+              value.update({'executable_build_id':ids['fpm'],'debug_file_sha256':debug_ids['fpm'],'archive_sha256':archive_ids['fpm'],
+                  'fpm_debug_unchanged_after_merge':True})
+              phase = 'automatic_coreless_symbol_loading'
+              input_path, output_path, script_path = (destination/name for name in ('load-input.json','load-output.json','load-probe.py'))
+              temporary_paths = [input_path,output_path,script_path]
+              roles = {label+'_binary':str(path) for label,path in binaries.items()}
+              roles.update({label+'_debug':str(path) for label,path in debug.items()})
+              input_path.write_text(json.dumps({'roles':roles,'ids':ids,'directory':str(destination/'usr/lib/debug')}))
+              script_path.write_text('INPUT='+repr(str(input_path))+'\nOUTPUT='+repr(str(output_path))+'\n'+gdb_program)
+              def limits():
+                  resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+                  resource.setrlimit(resource.RLIMIT_CPU,(20,20))
+                  resource.setrlimit(resource.RLIMIT_AS,(1024*1024*1024,1024*1024*1024))
+                  resource.setrlimit(resource.RLIMIT_FSIZE,(131073,131073))
+              with tempfile.TemporaryFile() as out,tempfile.TemporaryFile() as err:
+                  child = subprocess.Popen(['gdb','-q','-nx','-nh','--batch','-ex',
+                      'python exec(compile(open('+repr(str(script_path))+').read(),"<symbol-preflight>","exec"))'],
+                      stdin=subprocess.DEVNULL,stdout=out,stderr=err,start_new_session=True,preexec_fn=limits)
+                  try:
+                      child.wait(timeout=40)
+                  except subprocess.TimeoutExpired:
+                      os.killpg(child.pid,signal.SIGKILL)
+                      child.wait(timeout=5)
+                      raise
+                  assert child.returncode==0 and max(os.fstat(out.fileno()).st_size,os.fstat(err.fileno()).st_size)<=131072
+              assert safe_file(output_path,16384)
+              value['symbol_loading'] = json.loads(output_path.read_text())
+              assert value['symbol_loading']['verified'] is True
+              assert not os.path.lexists(root/'private') and not os.path.lexists(root/'receipt')
+              value.update({'state':'verified','phase':'complete','raw_debugger_output_published':False,
+                  'driver_directories_precreated':False})
           except BaseException:
-              print(json.dumps({'schema':'pinova.native-debug-symbols.v1','state':'needs_review',
-                  'phase':phase,'resource_acceptance':False}, sort_keys=True))
-              raise SystemExit(1)
+              value.update({'state':'needs_review','phase':phase})
+          finally:
+              for path in temporary_paths:
+                  try:
+                      path.unlink(missing_ok=True)
+                  except BaseException:
+                      value.update({'state':'needs_review','phase':'preflight_temporary_cleanup'})
+              if owned:
+                  try:
+                      body = (json.dumps(value,sort_keys=True)+'\n').encode()
+                      assert len(body)<=16384
+                      target = root/'native-debug-symbols-preparation.json'
+                      fd = os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o644)
+                      try:
+                          os.write(fd,body)
+                          os.fchmod(fd,0o644)
+                      finally:
+                          os.close(fd)
+                  except BaseException:
+                      value.update({'state':'needs_review','phase':'receipt'})
+              else:
+                  print(json.dumps({'schema':value['schema'],'state':'needs_review','phase':'namespace','resource_acceptance':False}))
+          raise SystemExit(0 if value['state']=='verified' else 1)
           PYTHON
       - name: Prepare one normalized dependency inventory and verified profile
         run: |

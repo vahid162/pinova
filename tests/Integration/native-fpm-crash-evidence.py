@@ -208,6 +208,23 @@ def native_identity(value):
     return {'php_version': '8.4.27', 'sapi': 'fpm-fcgi'}
 
 
+def finite_settings(value):
+    native_identity(value)
+    settings = value.get('settings')
+    keys = ("opcache.enable", "opcache.enable_cli", "opcache.optimization_level", "opcache.jit", "opcache.jit_buffer_size",
+            "opcache.protect_memory", "opcache.validate_timestamps", "opcache.file_update_protection", "opcache.revalidate_freq")
+    require(isinstance(settings, dict) and set(settings) == set(keys), "settings_keys_invalid")
+    require(all(isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_xX.+-]{0,48}", v) for v in settings.values()), "settings_value_invalid")
+    return {key: settings[key] for key in keys}
+
+
+def settings_observation(value):
+    try:
+        return {'actual_settings': finite_settings(value), 'actual_settings_status': {'state': 'recorded', 'reason': None}}
+    except CaptureError as error:
+        return {'actual_settings': None, 'actual_settings_status': {'state': 'needs_review', 'reason': error.code}}
+
+
 def finite_environment(value):
     native_identity(value)
     extensions = value.get("extensions")
@@ -218,11 +235,7 @@ def finite_environment(value):
         require(version is None or isinstance(version, str) and (re.fullmatch(r"[0-9][A-Za-z0-9.+_-]{0,47}", version)
                 or name == 'mysqlnd' and version == 'mysqlnd ' + value['php_version']), "extension_version_invalid")
         clean[name] = version
-    settings = value.get("settings")
-    keys = ("opcache.enable", "opcache.enable_cli", "opcache.optimization_level", "opcache.jit", "opcache.jit_buffer_size",
-            "opcache.protect_memory", "opcache.validate_timestamps", "opcache.file_update_protection", "opcache.revalidate_freq")
-    require(isinstance(settings, dict) and set(settings) == set(keys), "settings_keys_invalid")
-    require(all(isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_xX.+-]{0,48}", v) for v in settings.values()), "settings_value_invalid")
+    settings = finite_settings(value)
     zend = value.get("zend_version")
     require(isinstance(zend, str) and re.fullmatch(r"[0-9][A-Za-z0-9.+_-]{0,47}", zend), "zend_version_invalid")
     return {"php_version": "8.4.27", "sapi": "fpm-fcgi", "zend_version": zend, "extensions": clean, "settings": settings,
@@ -240,25 +253,22 @@ def read_native_environment_payload(arm_root):
         raise CaptureError('inventory_unavailable') from None
 
 
-def read_native_environment(arm_root):
-    return finite_environment(read_native_environment_payload(arm_root))
-
-
 def preflight(campaign, arm_root, base):
     state = state_load(base)
     require(mount_matches(base, state), 'mount_identity_mismatch')
     require(arm_root.resolve() == arm_root and read_bytes(arm_root / 'fixture-owned', 128).decode().strip() == state['owner'])
     value = read_native_environment_payload(arm_root)
     identity = native_identity(value)
+    partial = settings_observation(value)
     try:
         inventory = finite_environment(value)
     except CaptureError as error:
         if error.code not in OPTIONAL_METADATA_REASONS:
             raise
         return {'state': 'version_recorded', 'resource_acceptance': False, 'identity': identity, 'inventory': None,
-                'inventory_status': {'state': 'needs_review', 'reason': error.code}}
+                'inventory_status': {'state': 'needs_review', 'reason': error.code}, **partial}
     return {'state': 'recorded', 'resource_acceptance': False, 'identity': identity, 'inventory': inventory,
-            'inventory_status': {'state': 'recorded', 'reason': None}}
+            'inventory_status': {'state': 'recorded', 'reason': None}, **partial}
 
 
 def context():
@@ -657,13 +667,21 @@ def collect(campaign, arm_root, base):
     result = {"state": "no_crash_observed", "resource_acceptance": False, "cores": [], "core_count": len(cores),
               "worker_inventory": [{k: row[k] for k in ("pid", "start_ticks", "pool")} for row in facts["workers"]],
               "executable_build_id": facts["build_id"], "inventory": None, "cleanup_workers_alive": [],
-              "inventory_status": {'state': 'needs_review', 'reason': 'inventory_missing'}}
+              "inventory_status": {'state': 'needs_review', 'reason': 'inventory_missing'},
+              'actual_settings': None, 'actual_settings_status': {'state': 'needs_review', 'reason': 'inventory_missing'}}
     try:
-        result['inventory'] = read_native_environment(arm_root)
-        result['inventory_status'] = {'state': 'recorded', 'reason': None}
+        value = read_native_environment_payload(arm_root)
     except CaptureError as error:
-        # Optional metadata cannot suppress independently verified native cores.
         result['inventory_status'] = {'state': 'needs_review', 'reason': error.code}
+        result['actual_settings_status'] = {'state': 'needs_review', 'reason': error.code}
+    else:
+        result.update(settings_observation(value))
+        try:
+            result['inventory'] = finite_environment(value)
+            result['inventory_status'] = {'state': 'recorded', 'reason': None}
+        except CaptureError as error:
+            # Optional metadata cannot suppress independently verified native cores.
+            result['inventory_status'] = {'state': 'needs_review', 'reason': error.code}
     try:
         tail = log_tail(arm_root)
         result['exit_log_status'] = 'read'

@@ -1,0 +1,59 @@
+name: Native file observer diagnostic
+
+on:
+  push:
+    branches: ['proof/diagnostics-file-observer-details']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-file-diagnostic-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  files:
+    name: Isolated native file observer diagnosis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Lint diagnostic workflows
+        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: -color
+      - name: Verify file parser and mocked lifecycle controls
+        run: python3 -I -B tests/ops/test_file_snapshot.py
+      - name: Provision native file observer
+        run: |
+          if [ ! -x /usr/bin/lsof ]; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y lsof
+          fi
+      - name: Record finite isolated visibility prerequisites
+        run: |
+          sudo python3 -I -B - <<'PY'
+          import json, os, pathlib, re
+          status = pathlib.Path('/proc/self/status').read_text()
+          found = re.search(r'^CapEff:\s*([0-9a-fA-F]+)$', status, re.M)
+          caps = int(found.group(1), 16) if found else 0
+          def same(kind):
+              own, init = os.stat('/proc/self/ns/' + kind), os.stat('/proc/1/ns/' + kind)
+              return (own.st_dev, own.st_ino) == (init.st_dev, init.st_ino)
+          print(json.dumps({'schema':'pinova.isolated-visibility-prerequisites.v1', 'euid0':os.geteuid()==0,
+              'same_init_pid_namespace':same('pid'), 'same_init_user_namespace':same('user'),
+              'CAP_DAC_OVERRIDE':bool(caps & (1<<1)), 'CAP_DAC_READ_SEARCH':bool(caps & (1<<2)),
+              'CAP_SYS_PTRACE':bool(caps & (1<<19)), 'production_visibility_verified':False}, sort_keys=True))
+          PY
+      - name: Characterize cross-UID and retained-generation behavior once
+        run: |
+          set -o pipefail
+          sudo --preserve-env=GITHUB_ACTIONS python3 -I -B tests/ops/test_file_snapshot.py --native-characterization | tee "$RUNNER_TEMP/native-file-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+      - name: Retain finite diagnostic outcome
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-file-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-file-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}.json
+          if-no-files-found: error
+          retention-days: 7

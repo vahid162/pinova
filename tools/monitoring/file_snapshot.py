@@ -221,6 +221,11 @@ class NativeFileSnapshot:
             if out_size >= limit or err_size >= limit:
                 raise NativeFailure("native_output_bound")
             if process.returncode != 0 or err_size:
+                prefix = os.pread(stderr.fileno(), min(err_size, 4096), 0).lower()
+                if b"status error on " in prefix:
+                    raise NativeFailure("native_file_argument_error")
+                if b"permission denied" in prefix:
+                    raise NativeFailure("native_visibility_denied")
                 raise NativeFailure("native_scan_incomplete")
             stdout.seek(0)
             return stdout.read(limit + 1)
@@ -331,7 +336,8 @@ class NativeFileSnapshot:
             allowed = {"native_root_visibility_required", "native_threaded_controller", "native_source_shape", "native_output_shape",
                 "native_access_flags_unknown", "native_nonappend_writer", "native_output_bound",
                 "native_read_bound", "native_writer_churn", "native_scan_incomplete", "native_scan_timeout",
-                "native_child_not_reaped", "native_code_pin_changed", "native_scope_changed"}
+                "native_child_not_reaped", "native_code_pin_changed", "native_scope_changed",
+                "native_file_argument_error", "native_visibility_denied"}
             code = reason.args[0] if (isinstance(reason, NativeFailure) and reason.args
                                      and isinstance(reason.args[0], str) and reason.args[0] in allowed) else "native_read_failed"
             return {"state": "failed", "reason": code, "readers": readers}

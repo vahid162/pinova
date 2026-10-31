@@ -914,6 +914,152 @@ final class OTPDiagnosticsIntegrationTest extends WP_UnitTestCase {
 		return [ [ 'release_throw' ], [ 'read_throw' ], [ 'release_zero' ], [ 'release_null' ], [ 'read_error' ] ];
 	}
 
+	public function test_reentrant_acknowledgement_cannot_flush_diagnostics_inside_fast_slot_acquisition(): void {
+		update_option( 'pinova_messengers', [] );
+		$database = new DiagnosticClaimDatabase( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$this->with_flow( '+989120000143', function ( string $flow, int $deadline, DiagnosticClaimDatabase $database ): void {
+			$this->with_diagnostics( function () use ( $flow, $deadline, $database ): void {
+				[ $inner ] = RateLimitService::decoy_flow( 'fast-slot-diagnostic-ack@example.test', 'authenticate', '192.0.2.243', null, true );
+				$name = 'pinova_otp_fast_' . substr( hash( 'sha256', DB_NAME . ':' . $database->prefix ), 0, 24 ) . '_0';
+				$reentered = false;
+				try {
+					$observed = $this->observe_fast_slot_diagnostics( $database, $name, function ( callable $held ) use ( $database, $name, &$reentered, $inner, $flow, $deadline ): void {
+						$database->watched_flow = substr( $name, strlen( 'pinova_otp_' ) );
+						$database->after_acquire = static function () use ( &$reentered, $inner, $held ): void {
+							$reentered = true;
+							self::assertTrue( $held(), 'An independent connection must witness the acquired fast slot before the callback returns.' );
+							self::assertTrue( RateLimitService::acknowledge_queued_otp( $inner ) );
+						};
+						$this->dispatch( $flow, new DiagnosticContext( $flow, $deadline ) );
+					} );
+					self::assertTrue( $reentered );
+					self::assertCount( 1, $this->http_calls );
+					foreach ( $observed as $kind => $facts ) {
+						self::assertNotEmpty( $facts, 'Diagnostic ' . $kind . ' must execute after the real fast slot releases.' );
+						self::assertNotContains( true, $facts, 'Diagnostic ' . $kind . ' must not run inside native fast-slot acquisition.' );
+					}
+					self::assertCount( 1, $this->diagnostic_rows( $database, $inner ) );
+				} finally {
+					$database->after_acquire = null;
+					RateLimitService::delete_queued_for_identifiers( [ 'fast-slot-diagnostic-ack@example.test' ] );
+					$database->delete( $database->prefix . 'pinova_logs', [ 'flow_id' => $inner ] );
+				}
+			} );
+		}, $database );
+	}
+
+	/** @dataProvider fast_slot_acquisition_faults */
+	public function test_unknown_fast_slot_acquisition_keeps_diagnostics_buffered_until_positive_release( string $fault ): void {
+		$database = new DiagnosticClaimDatabase( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$this->with_flow( '+989120000144', function ( string $flow, int $deadline, DiagnosticClaimDatabase $database ) use ( $fault ): void {
+			$this->with_diagnostics( function () use ( $flow, $deadline, $database, $fault ): void {
+				$name = 'pinova_otp_fast_' . substr( hash( 'sha256', DB_NAME . ':' . $database->prefix ), 0, 24 ) . '_0';
+				$connection = (string) $database->get_var( 'SELECT CONNECTION_ID()' );
+				$acquired = false;
+				$failed_reads = 0;
+				$rows_while_held = null;
+				$previous_errors = $database->suppress_errors( true );
+				$observed = $this->observe_fast_slot_diagnostics( $database, $name, function ( callable $held ) use ( $flow, $deadline, $database, $fault, $name, $connection, &$acquired, &$failed_reads, &$rows_while_held ): void {
+					$database->watched_flow = substr( $name, strlen( 'pinova_otp_' ) );
+					$database->after_acquire = static function () use ( &$acquired, $held, $database, $fault ): void {
+						$acquired = true;
+						self::assertTrue( $held(), 'The original database connection must really own the native fast slot.' );
+						if ( 'acquire_throw' === $fault ) {
+							throw new \RuntimeException( 'Synthetic post-acquisition failure.' );
+						}
+						if ( 'acquire_error' === $fault ) {
+							$database->last_error = 'Synthetic unknown acquisition result.';
+						}
+					};
+					$fail = static function ( string $query ) use ( $name, $fault, &$failed_reads ): string {
+						if ( str_starts_with( $fault, 'ownership_' ) && str_contains( $query, $name ) && str_contains( $query, 'AS holder' ) ) {
+							++$failed_reads;
+							if ( 'ownership_throw' === $fault ) {
+								throw new \RuntimeException( 'Synthetic ownership observation failure.' );
+							}
+							return 'SELECT `pinova_missing_fast_slot_column`';
+						}
+						return $query;
+					};
+					add_filter( 'query', $fail );
+					try {
+						try {
+							$this->dispatch( $flow, new DiagnosticContext( $flow, $deadline ) );
+						} catch ( \RuntimeException $exception ) {
+							self::assertStringContainsString( 'throw', $fault );
+						}
+						self::assertTrue( $acquired );
+						self::assertTrue( $held(), 'An unknown probe must not be mistaken for native release.' );
+						$late = new DiagnosticContext( $flow, $deadline );
+						$late->observe( 'immediate_admission', [ 'result' => 'deferred', 'error_code' => 'operation_failed' ] );
+						OTPService::retain_diagnostic( $late );
+						OTPService::flush_diagnostics();
+						$rows_while_held = count( $this->diagnostic_rows( $database, $flow ) );
+						self::assertCount( 0, $this->http_calls, 'A diagnostic acquisition witness must never authorize a provider handoff.' );
+						self::assertStringStartsWith( 'ready:', $this->queue_row( $database, $flow )['payload'], 'The unattempted reservation must stay available to cron.' );
+					} finally {
+						remove_filter( 'query', $fail );
+						$database->after_acquire = null;
+						self::assertTrue( OTPQueueStore::release_immediate_slot_observed( [ 'name' => $name, 'connection' => $connection ] ) );
+						self::assertFalse( $held(), 'Cleanup must positively release the actual native slot before flushing.' );
+						OTPService::flush_diagnostics();
+					}
+				} );
+				$database->suppress_errors( $previous_errors );
+				if ( str_starts_with( $fault, 'ownership_' ) ) {
+					self::assertGreaterThanOrEqual( 'ownership_error' === $fault ? 2 : 1, $failed_reads, 'Both the successful-acquisition ownership probe and its release observation must really fail.' );
+				}
+				foreach ( $observed as $kind => $facts ) {
+					self::assertNotEmpty( $facts, 'Diagnostic ' . $kind . ' must execute after positive release.' );
+					self::assertNotContains( true, $facts, 'Diagnostic ' . $kind . ' must remain buffered beneath an uncertain fast lease.' );
+				}
+				self::assertSame( 0, $rows_while_held );
+				self::assertNotEmpty( $this->diagnostic_rows( $database, $flow ) );
+			} );
+		}, $database );
+	}
+
+	public static function fast_slot_acquisition_faults(): array {
+		return [ [ 'ownership_error' ], [ 'ownership_throw' ], [ 'acquire_error' ], [ 'acquire_throw' ] ];
+	}
+
+	/** @return array<string,bool[]> */
+	private function observe_fast_slot_diagnostics( \wpdb $database, string $name, callable $operation ): array {
+		$observer = new \wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$connection = (string) $database->get_var( 'SELECT CONNECTION_ID()' );
+		self::assertNotSame( $connection, (string) $observer->get_var( 'SELECT CONNECTION_ID()' ) );
+		$held = static fn(): bool => $connection === (string) $observer->get_var( $observer->prepare( 'SELECT IS_USED_LOCK(%s)', $name ) );
+		$observed = [ 'configuration' => [], 'budget' => [], 'handler' => [] ];
+		$inspect_sql = static function ( string $query ) use ( &$observed, $held ): string {
+			if ( str_starts_with( $query, 'UPDATE ' ) && str_contains( $query, EventThrottle::diagnostic_bucket_key() ) ) {
+				$observed['budget'][] = $held();
+			}
+			if ( str_starts_with( $query, 'INSERT INTO ' ) && str_contains( $query, 'otp.diagnostic' ) ) {
+				$observed['handler'][] = $held();
+			}
+			return $query;
+		};
+		$inspect_config = static function ( $value ) use ( &$observed, $held ) {
+			foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 32 ) as $frame ) {
+				if ( \Pinova\Logging\Logger::class === ( $frame['class'] ?? '' ) && 'diagnostic' === ( $frame['function'] ?? '' ) ) {
+					$observed['configuration'][] = $held();
+					break;
+				}
+			}
+			return $value;
+		};
+		add_filter( 'query', $inspect_sql );
+		add_filter( 'pre_option_pinova_logging', $inspect_config, 9 );
+		try {
+			$operation( $held );
+		} finally {
+			remove_filter( 'query', $inspect_sql );
+			remove_filter( 'pre_option_pinova_logging', $inspect_config, 9 );
+			$observer->close();
+		}
+		return $observed;
+	}
+
 	private function release_fault( string $name, string $fault, bool &$failed ): \Closure {
 		return static function ( string $query ) use ( $name, $fault, &$failed ): string {
 			$release = str_contains( $query, 'SELECT RELEASE_LOCK(' );

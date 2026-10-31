@@ -1,0 +1,535 @@
+{
+  "schema": "pinova.u1.validated-baselines.v1",
+  "run": 41191669782,
+  "source": "12f3320d98c0247a0e21958969899084a6f794b7",
+  "profiles": [
+    {
+      "profile": "diagnostic",
+      "artifact_id": 13039810073,
+      "artifact_sha256": "0e30a64a4f11f585cc0107efc3289a31d927866595e9dc0416f764f80a3f8c42",
+      "evidence": {
+        "schema": "pinova.diagnostics-baseline.v1",
+        "state": "passed",
+        "rc21_runtime_commit": "96386b9fdd803086e9ecfe2af421034976dc185d",
+        "harness_commit": "12f3320d98c0247a0e21958969899084a6f794b7",
+        "logging": {
+          "profile": "diagnostic",
+          "minimum_level": "warning",
+          "diagnostic_window_active": true,
+          "debug_enabled": true,
+          "info_enabled": true,
+          "warning_enabled": true
+        },
+        "logging_observation_process": "WP-CLI reads the same disposable options used by real FPM requests",
+        "workload_observations": {
+          "immediate_off": {
+            "idle": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 537.5090110000019,
+              "total_php_cpu_seconds": 7.370000000000001,
+              "peak_sampled_worker_rss_kib": 172936,
+              "peak_sampled_worker_pss_kib": 43478,
+              "retained_worker_pss_kib": 402834,
+              "wall_seconds": 20.014999866485596,
+              "process_samples": 499,
+              "status_samples": 158
+            },
+            "normal": {
+              "ordinary_responses": 10,
+              "ordinary_p95_ms": 566.1162350000086,
+              "total_php_cpu_seconds": 23.370000000000005,
+              "peak_sampled_worker_rss_kib": 182148,
+              "peak_sampled_worker_pss_kib": 52710,
+              "retained_worker_pss_kib": 442981,
+              "wall_seconds": 29.72499990463257,
+              "process_samples": 742,
+              "status_samples": 235
+            },
+            "slow": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 611.2816579999926,
+              "total_php_cpu_seconds": 8.18,
+              "peak_sampled_worker_rss_kib": 180180,
+              "peak_sampled_worker_pss_kib": 50739,
+              "retained_worker_pss_kib": 426362,
+              "wall_seconds": 24.014999866485596,
+              "process_samples": 598,
+              "status_samples": 190
+            },
+            "concurrent": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 599.9360759999836,
+              "total_php_cpu_seconds": 10.439999999999998,
+              "peak_sampled_worker_rss_kib": 178044,
+              "peak_sampled_worker_pss_kib": 48420,
+              "retained_worker_pss_kib": 420694,
+              "wall_seconds": 32.02800011634827,
+              "process_samples": 797,
+              "status_samples": 253
+            }
+          },
+          "immediate_on": {
+            "idle": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 606.235216000001,
+              "total_php_cpu_seconds": 7.490000000000002,
+              "peak_sampled_worker_rss_kib": 178132,
+              "peak_sampled_worker_pss_kib": 48691,
+              "retained_worker_pss_kib": 419670,
+              "wall_seconds": 20.01699995994568,
+              "process_samples": 498,
+              "status_samples": 158
+            },
+            "normal": {
+              "ordinary_responses": 10,
+              "ordinary_p95_ms": 592.4707700000145,
+              "total_php_cpu_seconds": 23.450000000000003,
+              "peak_sampled_worker_rss_kib": 184488,
+              "peak_sampled_worker_pss_kib": 53968,
+              "retained_worker_pss_kib": 438614,
+              "wall_seconds": 26.85700011253357,
+              "process_samples": 671,
+              "status_samples": 212
+            },
+            "slow": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 575.0500419999589,
+              "total_php_cpu_seconds": 8.080000000000002,
+              "peak_sampled_worker_rss_kib": 183724,
+              "peak_sampled_worker_pss_kib": 53138,
+              "retained_worker_pss_kib": 437156,
+              "wall_seconds": 24.028000116348267,
+              "process_samples": 597,
+              "status_samples": 189
+            },
+            "concurrent": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 670.5269079999998,
+              "total_php_cpu_seconds": 10.48,
+              "peak_sampled_worker_rss_kib": 181248,
+              "peak_sampled_worker_pss_kib": 50697,
+              "retained_worker_pss_kib": 427784,
+              "wall_seconds": 32.015000104904175,
+              "process_samples": 798,
+              "status_samples": 253
+            }
+          }
+        },
+        "log_storage_snapshots": [
+          {
+            "rows": 10,
+            "context_bytes": 530
+          },
+          {
+            "rows": 16,
+            "context_bytes": 1543
+          },
+          {
+            "rows": 22,
+            "context_bytes": 2557
+          },
+          {
+            "rows": 28,
+            "context_bytes": 3571
+          },
+          {
+            "rows": 30,
+            "context_bytes": 3909
+          },
+          {
+            "rows": 130,
+            "context_bytes": 16829
+          },
+          {
+            "rows": 130,
+            "context_bytes": 16829
+          },
+          {
+            "rows": 130,
+            "context_bytes": 16829
+          },
+          {
+            "rows": 130,
+            "context_bytes": 16829
+          },
+          {
+            "rows": 130,
+            "context_bytes": 16829
+          },
+          {
+            "rows": 160,
+            "context_bytes": 20729
+          },
+          {
+            "rows": 260,
+            "context_bytes": 33649
+          },
+          {
+            "rows": 260,
+            "context_bytes": 33649
+          },
+          {
+            "rows": 263,
+            "context_bytes": 34039
+          },
+          {
+            "rows": 273,
+            "context_bytes": 35331
+          },
+          {
+            "rows": 273,
+            "context_bytes": 35331
+          },
+          {
+            "rows": 282,
+            "context_bytes": 36504
+          },
+          {
+            "rows": 312,
+            "context_bytes": 40380
+          },
+          {
+            "rows": 312,
+            "context_bytes": 40380
+          },
+          {
+            "rows": 312,
+            "context_bytes": 40380
+          },
+          {
+            "rows": 312,
+            "context_bytes": 40380
+          },
+          {
+            "rows": 312,
+            "context_bytes": 40380
+          },
+          {
+            "rows": 342,
+            "context_bytes": 44280
+          },
+          {
+            "rows": 442,
+            "context_bytes": 57200
+          },
+          {
+            "rows": 442,
+            "context_bytes": 57200
+          },
+          {
+            "rows": 446,
+            "context_bytes": 57673
+          },
+          {
+            "rows": 456,
+            "context_bytes": 58965
+          },
+          {
+            "rows": 456,
+            "context_bytes": 58965
+          },
+          {
+            "rows": 467,
+            "context_bytes": 60301
+          },
+          {
+            "rows": 534,
+            "context_bytes": 68835
+          },
+          {
+            "rows": 534,
+            "context_bytes": 68835
+          },
+          {
+            "rows": 534,
+            "context_bytes": 68835
+          },
+          {
+            "rows": 536,
+            "context_bytes": 68941
+          },
+          {
+            "rows": 537,
+            "context_bytes": 69072
+          }
+        ],
+        "evidence": [
+          "full-stack-result.json",
+          "frozen-resource-gates.json"
+        ],
+        "limitations": [
+          "Both modes run RC21: immediate OFF/ON is not an RC21/candidate revision comparison.",
+          "Logging snapshots are whole-fixture aggregate rows/context bytes, not per-flow counters or disk allocation.",
+          "Peak PSS is per sampled FPM worker; retained PSS is an aggregate. Neither is peak aggregate PHP PSS.",
+          "CPU is measured PHP FPM plus CLI work, not host or database CPU; existing DB deltas include harness observations.",
+          "U6 still requires three paired revision runs, 100 ordinary responses per arm, valid aggregate PHP PSS coverage and rotation acceptance.",
+          "Global diagnostic mode is the existing RC21 window, not the future scoped diagnostic contract."
+        ]
+      }
+    },
+    {
+      "profile": "normal",
+      "artifact_id": 13039111797,
+      "artifact_sha256": "752517f3405ed5dd22db0a602917a5c20cebe273c6a706e6f8acf535587f828b",
+      "evidence": {
+        "schema": "pinova.diagnostics-baseline.v1",
+        "state": "passed",
+        "rc21_runtime_commit": "96386b9fdd803086e9ecfe2af421034976dc185d",
+        "harness_commit": "12f3320d98c0247a0e21958969899084a6f794b7",
+        "logging": {
+          "profile": "normal",
+          "minimum_level": "warning",
+          "diagnostic_window_active": false,
+          "debug_enabled": false,
+          "info_enabled": false,
+          "warning_enabled": true
+        },
+        "logging_observation_process": "WP-CLI reads the same disposable options used by real FPM requests",
+        "workload_observations": {
+          "immediate_off": {
+            "idle": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 986.8850410000014,
+              "total_php_cpu_seconds": 9.869999999999997,
+              "peak_sampled_worker_rss_kib": 175884,
+              "peak_sampled_worker_pss_kib": 46608,
+              "retained_worker_pss_kib": 399633,
+              "wall_seconds": 20.05299997329712,
+              "process_samples": 496,
+              "status_samples": 146
+            },
+            "normal": {
+              "ordinary_responses": 10,
+              "ordinary_p95_ms": 725.3099410000141,
+              "total_php_cpu_seconds": 29.08,
+              "peak_sampled_worker_rss_kib": 178636,
+              "peak_sampled_worker_pss_kib": 49534,
+              "retained_worker_pss_kib": 440190,
+              "wall_seconds": 35.86800003051758,
+              "process_samples": 893,
+              "status_samples": 257
+            },
+            "slow": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 929.4235039999767,
+              "total_php_cpu_seconds": 10.969999999999999,
+              "peak_sampled_worker_rss_kib": 179972,
+              "peak_sampled_worker_pss_kib": 50696,
+              "retained_worker_pss_kib": 428625,
+              "wall_seconds": 24.03600001335144,
+              "process_samples": 594,
+              "status_samples": 172
+            },
+            "concurrent": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 778.5425499999837,
+              "total_php_cpu_seconds": 13.889999999999999,
+              "peak_sampled_worker_rss_kib": 177996,
+              "peak_sampled_worker_pss_kib": 48889,
+              "retained_worker_pss_kib": 420593,
+              "wall_seconds": 32.05799984931946,
+              "process_samples": 792,
+              "status_samples": 229
+            }
+          },
+          "immediate_on": {
+            "idle": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 879.0544229999941,
+              "total_php_cpu_seconds": 9.840000000000005,
+              "peak_sampled_worker_rss_kib": 175948,
+              "peak_sampled_worker_pss_kib": 46844,
+              "retained_worker_pss_kib": 420045,
+              "wall_seconds": 20.06599998474121,
+              "process_samples": 496,
+              "status_samples": 144
+            },
+            "normal": {
+              "ordinary_responses": 10,
+              "ordinary_p95_ms": 763.461118999985,
+              "total_php_cpu_seconds": 29.21,
+              "peak_sampled_worker_rss_kib": 182104,
+              "peak_sampled_worker_pss_kib": 51989,
+              "retained_worker_pss_kib": 442897,
+              "wall_seconds": 33.026000022888184,
+              "process_samples": 819,
+              "status_samples": 235
+            },
+            "slow": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 946.2717239999911,
+              "total_php_cpu_seconds": 10.729999999999999,
+              "peak_sampled_worker_rss_kib": 181460,
+              "peak_sampled_worker_pss_kib": 51280,
+              "retained_worker_pss_kib": 444721,
+              "wall_seconds": 24.05400013923645,
+              "process_samples": 593,
+              "status_samples": 170
+            },
+            "concurrent": {
+              "ordinary_responses": 12,
+              "ordinary_p95_ms": 962.4363020000164,
+              "total_php_cpu_seconds": 13.819999999999993,
+              "peak_sampled_worker_rss_kib": 179668,
+              "peak_sampled_worker_pss_kib": 49578,
+              "retained_worker_pss_kib": 424869,
+              "wall_seconds": 32.04199981689453,
+              "process_samples": 791,
+              "status_samples": 227
+            }
+          }
+        },
+        "log_storage_snapshots": [
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 0,
+            "context_bytes": 0
+          },
+          {
+            "rows": 1,
+            "context_bytes": 83
+          },
+          {
+            "rows": 1,
+            "context_bytes": 83
+          },
+          {
+            "rows": 1,
+            "context_bytes": 83
+          },
+          {
+            "rows": 3,
+            "context_bytes": 249
+          },
+          {
+            "rows": 4,
+            "context_bytes": 500
+          },
+          {
+            "rows": 4,
+            "context_bytes": 500
+          },
+          {
+            "rows": 4,
+            "context_bytes": 500
+          },
+          {
+            "rows": 4,
+            "context_bytes": 500
+          },
+          {
+            "rows": 5,
+            "context_bytes": 631
+          }
+        ],
+        "evidence": [
+          "full-stack-result.json",
+          "frozen-resource-gates.json"
+        ],
+        "limitations": [
+          "Both modes run RC21: immediate OFF/ON is not an RC21/candidate revision comparison.",
+          "Logging snapshots are whole-fixture aggregate rows/context bytes, not per-flow counters or disk allocation.",
+          "Peak PSS is per sampled FPM worker; retained PSS is an aggregate. Neither is peak aggregate PHP PSS.",
+          "CPU is measured PHP FPM plus CLI work, not host or database CPU; existing DB deltas include harness observations.",
+          "U6 still requires three paired revision runs, 100 ordinary responses per arm, valid aggregate PHP PSS coverage and rotation acceptance.",
+          "Global diagnostic mode is the existing RC21 window, not the future scoped diagnostic contract."
+        ]
+      }
+    }
+  ]
+}

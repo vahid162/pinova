@@ -1,0 +1,29 @@
+name: U4 scoped diagnostic threshold proof
+
+on:
+  push:
+    branches: ['proof/diagnostics-u4-scope']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proof-u4-scope-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scoped-threshold-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, pdo_mysql, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:2.10.3
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Prove diagnostic windows cannot lower the ordinary threshold
+        run: vendor/bin/phpunit -c phpunit.xml.dist --filter test_threshold_and_diagnostic_expiry_are_enforced

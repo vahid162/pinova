@@ -6,12 +6,69 @@ namespace Pinova\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use Pinova\Logging\BuildMetadata;
+use Pinova\Logging\EventEvidence;
 use Pinova\Logging\HandlerInterface;
 use Pinova\Logging\InvalidLogLevelException;
 use Pinova\Logging\Logger;
 use Pinova\Logging\SafeContext;
 
 final class LoggingTest extends TestCase {
+
+	public function test_diagnostic_catalogue_preserves_finite_facts_in_input_and_historical_output(): void {
+		$observed = time();
+		$facts    = [
+			'component'                 => 'otp_delivery',
+			'stage'                     => 'worker_started',
+			'source_ref'                => 'otp_service.deliver_queued',
+			'operation'                 => 'queued_otp',
+			'execution_mode'            => 'immediate',
+			'observed_at'               => $observed,
+			'request_to_worker_seconds' => 31,
+		];
+		$input    = $facts + [
+			'identifier'        => 'private@example.test',
+			'otp'               => 'private-otp',
+			'provider_response' => 'private-provider-response',
+			'exception'         => new \RuntimeException( 'private-exception-message' ),
+		];
+		$safe     = ( new SafeContext() )->sanitize( $input, 'otp.diagnostic' );
+
+		self::assertEquals( $facts, $safe );
+		$historical = EventEvidence::redact(
+			[
+				'created_at'     => gmdate( 'Y-m-d H:i:s', $observed + 2 ),
+				'event'          => 'otp.diagnostic',
+				'level'          => 'debug',
+				'correlation_id' => '12345678-1234-4234-8234-123456789abc',
+				'flow_id'        => str_repeat( 'a', 32 ),
+				'context'        => json_encode( $input ),
+			]
+		);
+
+		self::assertSame( 'otp.diagnostic', $historical['event'] );
+		self::assertEquals( $facts, $historical['context'] );
+		self::assertSame( $observed, $historical['context']['observed_at'] );
+		self::assertStringNotContainsString( 'private', (string) json_encode( $historical ) );
+	}
+
+	public function test_diagnostic_codes_are_not_accepted_merely_because_they_look_like_codes(): void {
+		$context = ( new SafeContext() )->sanitize(
+			[
+				'component'      => 'private_component',
+				'stage'          => 'private_stage',
+				'source_ref'     => 'private.source_ref',
+				'error_code'     => 'private_error_code',
+				'execution_mode' => 'private_execution_mode',
+				'operation'      => 'private_operation',
+				'result'         => 'private_result',
+				'observed_at'    => 'private_timestamp',
+			],
+			'otp.diagnostic'
+		);
+
+		self::assertSame( [], $context );
+		self::assertSame( [], ( new SafeContext() )->sanitize( [ 'stage' => 'worker_started', 'source_ref' => 'otp_service.deliver_queued' ] ) );
+	}
 
 	public function test_queue_timing_fields_are_numeric_and_secrets_remain_denied(): void {
 		$context = new SafeContext();

@@ -97,6 +97,7 @@ Adding a context key requires all of:
 | `otp.queue_recovered` | info | Reconciliation was attempted for a live acknowledged reservation after its scheduled job disappeared; emitted before claim, not successful dispatch, provider acceptance or receipt |
 | `otp.queue_deferred` | warning | A live reservation could not be claimed on this pass; fixed `claim_unavailable` reason, nonterminal and not proof of a scheduler or database defect |
 | `otp.created` | info | OTP record was created and at least one channel succeeded; queued delivery includes total elapsed time since the signed request and remaining lifetime |
+| `otp.diagnostic` | debug | An explicitly scoped, budgeted OTP stage observation; missing stages and accepted provider results never establish physical receipt |
 | `otp.delivery_failed` | error | No usable OTP delivery completed |
 | `otp.channel_send_failed` | warning | One configured channel threw or failed |
 | `otp.verify_failed` | notice/warning | Verification failed because the token, record, code, purpose, state, block, or IP was invalid; IP mismatch is warning |
@@ -130,6 +131,44 @@ Native-login arming and gate-state events are bounded control-plane records. The
 Settings audit observes successful WordPress option updates for first-party Pinova settings, including the integration switches `wpforo_enabled` and `dokan_enabled` and defined MaxSMS, MeliPayamak, and PanelChi provider fields, while a `manage_options` administrator is active. It compares persisted old and new values only to determine which allowed field names changed; those values are never handed to the logger. It skips no-ops and unauthorized/system-only writes, prevents recursion, and caps observations per request. This records a successful persistence result, not attempted or rejected settings submissions.
 
 `auth.redirect_failed` is emitted when WordPress rejects a validated safe redirect or when the header state is already committed before/while dispatch reports success. Its context is limited to the bounded operation, reason and header-state codes plus the intended HTTP fallback status. Never include the destination/return URL, query string, nonce, cookie, identifier, token, source file/line, exception message, or trace.
+
+## Scoped OTP stage detail
+
+`DiagnosticContext` owns the finite stage catalogue for `otp.diagnostic`. Its constructor accepts a server-trusted flow, the original absolute signed deadline and one operation: `queued_otp`, `verify_otp` or `verify_mobile`. Format and deadline checks are not proof of ownership: the caller must first establish the persisted queue flow/deadline or the matching token, OTP record and purpose. A freshly generated candidate flow must not replace a reused persisted flow. Invalid tokens and missing records retain their existing observations without creating a trusted diagnostic context.
+
+Construction and `observe()` perform only bounded in-memory work and pure clock checks. They must not read options, call WordPress, acquire a database connection or invoke a logger. Capture facts during delivery, then call `flush()` only after both the queue claim and any immediate-delivery lease have been released. Apply this boundary to cron/CLI as well as FPM; a cron claim is not protected by the immediate-only final HTTP guard. No diagnostic database operation belongs between a final ownership check and provider HTTP. One context buffers at most twelve observations, drains once and cannot reopen after flushing.
+
+| Stage | Component | Symbolic source reference |
+|---|---|---|
+| `queue_accepted` | `otp_queue` | `otp_queue.acknowledge_queued_otp` |
+| `immediate_admission` | `otp_immediate` | `otp_immediate.dispatch` |
+| `worker_started` | `otp_delivery` | `otp_service.deliver_queued` |
+| `provider_started`, `provider_completed` | `http_transport` | `curl.post` |
+| `channel_completed` | `otp_delivery` | `channel_service.send` |
+| `delivery_completed` | `otp_delivery` | `otp_service.deliver_queued` |
+| `verification_completed` | `otp_verification` | `otp_service.verify` |
+
+Component and source reference are derived from the stage, never copied from caller prose or file paths. `error_code`, `result`, `channel` and `execution_mode` use the finite catalogue in `DiagnosticContext`; syntax-valid but unknown codes, exceptions and arbitrary provider fields are omitted. Execution modes are `immediate`, `cron`, `cli` and `request`. `SafeContext` applies this stricter catalogue only to the diagnostic event, and `EventEvidence` uses the same catalogue for every historical output. Ordinary events retain their existing context and threshold contracts.
+
+`observed_at` is the code-captured UTC occurrence time at whole-second precision; the database `created_at` is the later flush/storage time. `flow_deadline` remains the original absolute deadline. Both are bounded UTC epochs in 2020–2099. Optional integer fields are `request_to_worker_seconds` and `remaining_seconds` (0–180), `provider_duration_ms` and `channel_duration_ms` (0–600,000), and `http_status` (100–599). Numeric strings, negative values and arbitrary adjacent fields are rejected. Producers must use the signed origin and actual precision for request age, and a same-process monotonic clock for elapsed provider/channel measurements. An absent acknowledgement witness remains unknown; `updated_at` and a delayed flush timestamp are not acknowledgement time. The legacy `queue_delay_seconds` continues to mean total elapsed time through its existing result observation.
+
+Only `Logger::diagnostic()` may emit this event. It requires an active `diagnostic_until` and exact `diagnostic_scope` object: `type=operation` with a finite matching operation, or `type=flow` with the matching validated flow. A legacy unscoped debug window does not admit new stage detail. The new path neither calls `audit()` nor relies on global DEBUG promotion. Scope/expiry are checked again after budget admission and immediately before handing the record to the existing handler; a consumed slot is never refunded or retried. True means a budgeted handler invocation completed, not durable storage. Configuration, metadata, encoding, admission and handler failures are contained. Ordinary logger calls perform no additional diagnostic-scope reads.
+
+The final encoded diagnostic context, including trusted build metadata, is limited to 2 KiB before budget work. No caller may supply build provenance. The existing viewer/export SQL caps new diagnostic contexts at 2 KiB before fetching them, while retaining the old 8 KiB limit for other events; oversized contexts are empty and explicitly marked truncated. Historical direct redaction also enforces these bounds. Calling the PSR-3 or administrative audit methods with the diagnostic event cannot bypass admission.
+
+### Shared budget and lifecycle
+
+`EventThrottle` retains the legacy event-specific budgets and separately owns one fixed `log_diagnostics` row in the existing rate-limit table. Site admissions are capped at 1,000 per 900-second window. Its versioned payload contains at most 1,024 purpose-separated HMAC slot indexes, each storing a maximum of twelve admissions and an original deadline. It contains no raw flow, identity or provider material. Active collisions share the twelve slots conservatively and retain the maximum successfully admitted deadline. Site-window rollover preserves all still-live flow counters; a flow's lifetime allowance cannot reopen at a site reset.
+
+One compare-and-swap update checks the previous site count, reset, update time and binary payload, then jointly changes both caps. Only exactly one affected row admits. A stale result, zero affected rows, reconnect/replay or unknown outcome suppresses the observation without retry or readback permission. The selected reset and original deadline must still be future at the final SQL boundary. Database UTC time is derived without session-timezone conversion; inconsistent clocks, future update times, corrupt data and unknown counters fail closed for detail alone.
+
+Payload projection is capped at 64 KiB in SQL before fetching/decoding, with strict version, type, depth, slot and deadline checks. Exhaustion persists at most one coalesced coverage bit per window; subsequent drops do not write a drop counter. Contention or a failing backend may also lose that marker, so absence of the bit cannot prove full coverage.
+
+Only an authorized first control-plane activation may call `initialize_diagnostics()`. The settings owner must preserve its server-owned `diagnostic_budget_initialized` flag; later missing or corrupt state remains unavailable rather than being repaired during emission or report reads. Initialization preserves existing counters. General rate-limit cleanup exempts exactly `EventThrottle::diagnostic_bucket_key()`, keeping this single bounded aggregate row across inactive days; other expired rows, including another key with the same scope text, retain normal cleanup behavior. It is not an identity record or an additional event store.
+
+`diagnostics_snapshot()` is read-only. Its finite output is `read_success`, `coverage` (`sampled`, `incomplete` or `unknown`), effective current-window `admitted`, `site_limit`, `flow_limit`, `window_seconds` and `active_slots`; unknown reads use null counts. These are budget observations, not persisted-event, authentication, delivery or failure counters. `DiagnosticContext::coverage()` describes its local buffer/admission only (`pending`, `sampled`, `incomplete`, `expired`, `invalid`), never complete flow history. Expired or discontinuous clocks suppress new detail without extending authentication validity or changing existing provider outcomes.
+
+New budget regressions must use independent autocommit database connections and worker processes for 11/12 and 999/1,000 races. Shared-connection query-filter tests remain useful legacy coverage but do not prove process-level atomicity. Cover rollover at the final CAS, slot collisions, fixed storage under many flows, stale replay, malformed/oversized/missing counters, coalesced drops and the exact cleanup exception.
 
 ## Operational workflow
 

@@ -7,7 +7,7 @@ use Throwable;
 
 final class LogRepository {
 
-	private const DIAGNOSTIC_SELECT = 'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `flow_id`, `user_id`, CASE WHEN OCTET_LENGTH(`context`) <= %d THEN `context` ELSE \'{}\' END AS `context`, OCTET_LENGTH(`context`) > %d AS `context_truncated` FROM %i';
+	private const DIAGNOSTIC_SELECT = 'SELECT `id`, `created_at`, `level`, `event`, `correlation_id`, `flow_id`, `user_id`, CASE WHEN OCTET_LENGTH(`context`) <= CASE WHEN `event` = \'otp.diagnostic\' THEN ' . DiagnosticContext::MAX_CONTEXT_BYTES . ' ELSE %d END THEN `context` ELSE \'{}\' END AS `context`, OCTET_LENGTH(`context`) > CASE WHEN `event` = \'otp.diagnostic\' THEN ' . DiagnosticContext::MAX_CONTEXT_BYTES . ' ELSE %d END AS `context_truncated` FROM %i';
 
 	public const DEFAULT_RETENTION_DAYS = 14;
 	private const CLEANUP_BATCH_SIZE    = 5000;
@@ -47,6 +47,7 @@ final class LogRepository {
 		'otp.queue_recovered',
 		'otp.delivery_failed',
 		'otp.delivery_skipped',
+		'otp.diagnostic',
 		'otp.verified',
 		'otp.verify_failed',
 		'security.block_added',

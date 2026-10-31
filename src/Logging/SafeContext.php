@@ -57,7 +57,10 @@ final class SafeContext {
 	 * @param array<string, mixed> $context
 	 * @return array<string, bool|int|string|string[]>
 	 */
-	public function sanitize( array $context ): array {
+	public function sanitize( array $context, string $event = '' ): array {
+		if ( DiagnosticContext::EVENT === $event ) {
+			return DiagnosticContext::sanitize( $context );
+		}
 		$safe = [];
 
 		foreach ( self::INTEGER_KEYS as $key ) {

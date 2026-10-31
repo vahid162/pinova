@@ -75,7 +75,11 @@ final class EventEvidence {
 	 * @return array<string,mixed>
 	 */
 	public static function redact( array $row ): array {
-		$stored = json_decode( (string) ( $row['context'] ?? '{}' ), true );
+		$event             = LogRepository::redact_event( $row['event'] ?? null );
+		$encoded           = isset( $row['context'] ) && is_string( $row['context'] ) ? $row['context'] : '{}';
+		$context_limit     = DiagnosticContext::EVENT === $event ? DiagnosticContext::MAX_CONTEXT_BYTES : 8192;
+		$context_truncated = ! empty( $row['context_truncated'] ) || strlen( $encoded ) > $context_limit;
+		$stored            = $context_truncated ? [] : json_decode( $encoded, true, 32 );
 		$stored = is_array( $stored ) ? $stored : [];
 		$safe   = [];
 		foreach ( [
@@ -136,16 +140,30 @@ final class EventEvidence {
 			$safe['release_tag'] = $stored['release_tag'];
 		}
 
-		$safe = array_merge( $safe, self::diagnostic_context( LogRepository::redact_event( $row['event'] ?? null ), $stored ) );
+		$safe = array_merge( $safe, self::diagnostic_context( $event, $stored ) );
+		if ( DiagnosticContext::EVENT === $event ) {
+			$metadata = array_intersect_key( $safe, array_flip( [ 'build_commit', 'package_identity', 'release_tag' ] ) );
+			$safe     = array_merge( DiagnosticContext::sanitize( $stored ), $metadata );
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- The shared redactor runs in pure unit tests too.
+			$encoded = json_encode( $safe, JSON_UNESCAPED_SLASHES );
+			if ( ! is_string( $encoded ) || strlen( $encoded ) > DiagnosticContext::MAX_CONTEXT_BYTES ) {
+				$safe              = [];
+				$context_truncated = true;
+			}
+		}
 
-		return [
+		$evidence = [
 			'created_at'     => preg_match( '/\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\z/', (string) ( $row['created_at'] ?? '' ) ) ? $row['created_at'] : '',
 			'level'          => in_array( $row['level'] ?? '', [ 'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency' ], true ) ? $row['level'] : 'unknown',
-			'event'          => LogRepository::redact_event( $row['event'] ?? null ),
+			'event'          => $event,
 			'correlation_id' => LogRepository::redact_correlation_id( $row['correlation_id'] ?? null ),
 			'flow_id'        => preg_match( '/\A[a-f0-9]{32}\z/', (string) ( $row['flow_id'] ?? '' ) ) ? $row['flow_id'] : '',
 			'user_id'        => max( 0, (int) ( $row['user_id'] ?? 0 ) ),
 			'context'        => $safe,
 		];
+		if ( DiagnosticContext::EVENT === $event && $context_truncated ) {
+			$evidence['context_truncated'] = true;
+		}
+		return $evidence;
 	}
 }

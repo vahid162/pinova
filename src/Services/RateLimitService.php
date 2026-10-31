@@ -4,6 +4,7 @@ namespace Pinova\Services;
 
 use Pinova\Exceptions\RateLimitException;
 use Pinova\Exceptions\RateLimitUnavailableException;
+use Pinova\Logging\EventThrottle;
 use Pinova\Logging\Logger;
 
 class RateLimitService {
@@ -160,6 +161,8 @@ class RateLimitService {
 		global $wpdb;
 
 		$table = $wpdb->prefix . 'pinova_rate_limits';
-		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE `reset_at` < (UTC_TIMESTAMP() - INTERVAL 1 DAY)', $table ) );
+		// Preserve one bounded diagnostic counter across inactive windows. Missing
+		// initialized state must stay unknown rather than silently resetting caps.
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE `reset_at` < (UTC_TIMESTAMP() - INTERVAL 1 DAY) AND `bucket_key` <> %s', $table, EventThrottle::diagnostic_bucket_key() ) );
 	}
 }

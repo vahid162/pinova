@@ -321,6 +321,64 @@ final class OTPDiagnosticsIntegrationTest extends WP_UnitTestCase {
 		return [ [ 'before_create', false ], [ 'before_create', true ], [ 'after_create', false ], [ 'after_create', true ] ];
 	}
 
+	/** @dataProvider channel_activity_faults */
+	public function test_unavailable_channel_loop_activity_read_preserves_unattempted_fallback( string $fault ): void {
+		update_option( 'pinova_messengers', [] );
+		$this->with_flow( '+989120000145', function ( string $flow, int $deadline, \wpdb $database ) use ( $fault ): void {
+			$before = $this->queue_row( $database, $flow );
+			$failed = false;
+			$fail = static function ( string $query ) use ( &$failed, $fault, $database ): string {
+				$functions = array_column( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 24 ), 'function' );
+				$activity_read = in_array( 'queued_otp_is_active', $functions, true ) || in_array( 'queued_claim_state', $functions, true );
+				if ( ! $failed && str_contains( $query, 'AS flow_holder' ) && $activity_read && in_array( 'send_scoped', $functions, true )
+					&& ! in_array( 'provider_timeout', $functions, true ) && ! in_array( 'guard_provider', $functions, true ) ) {
+					$failed = true;
+					if ( 'reconnect' === $fault ) {
+						$connection = (string) $database->get_var( 'SELECT CONNECTION_ID()' );
+						self::assertTrue( $database->close() );
+						self::assertTrue( $database->db_connect( false ) );
+						self::assertNotSame( $connection, (string) $database->get_var( 'SELECT CONNECTION_ID()' ) );
+					} elseif ( 'throwing_read' === $fault ) {
+						throw new \RuntimeException( 'Synthetic unavailable channel activity read.' );
+					} else {
+						return 'SELECT `pinova_missing_channel_claim_column`';
+					}
+				}
+				return $query;
+			};
+			$previous = $database->suppress_errors( true );
+			add_filter( 'query', $fail );
+			try {
+				OTPService::deliver_queued( $flow );
+			} finally {
+				remove_filter( 'query', $fail );
+				$database->suppress_errors( $previous );
+			}
+			self::assertTrue( $failed, 'The channel-loop activity read, after guard_provider and outside provider_timeout, must be reached.' );
+			self::assertCount( 0, $this->http_calls );
+			self::assertSame( 0, $this->mail_calls );
+			self::assertSame( 0, OTP::query()->where( 'flow_id', $flow )->count() );
+			$after = $this->queue_row( $database, $flow );
+			self::assertSame( $before['reset_at'], $after['reset_at'] );
+			if ( 'reconnect' === $fault ) {
+				self::assertStringStartsWith( 'processing:', (string) $after['payload'], 'A lost original lease cannot restore or consume a never-attempted reservation.' );
+				self::assertStringEndsWith( ':' . $before['payload'], $after['payload'] );
+				self::assertSame( 1, $database->update( $database->prefix . 'pinova_rate_limits', [ 'updated_at' => gmdate( 'Y-m-d H:i:s', time() - 61 ) ], [ 'scope' => $flow ] ) );
+			} else {
+				self::assertSame( $before, $after, 'A proven original owner may restore only the exact unattempted reservation.' );
+			}
+			OTPService::deliver_queued( $flow );
+			self::assertCount( 1, $this->http_calls );
+			self::assertSame( $deadline, OTP::query()->where( 'flow_id', $flow )->first()->expires_at->getTimestamp() );
+			OTPService::deliver_queued( $flow );
+			self::assertCount( 1, $this->http_calls, 'A later worker pass must not resend the recovered OTP.' );
+		} );
+	}
+
+	public static function channel_activity_faults(): array {
+		return [ [ 'reconnect' ], [ 'silent_read' ], [ 'throwing_read' ] ];
+	}
+
 	/** @dataProvider known_early_stops */
 	public function test_known_early_cancellation_or_expiry_retains_its_existing_terminal_cleanup( string $stop ): void {
 		update_option( 'pinova_messengers', [] );

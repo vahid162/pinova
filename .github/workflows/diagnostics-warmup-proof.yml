@@ -1,0 +1,94 @@
+name: Native warmup diagnostic probe
+
+on:
+  push:
+    branches: ['proof/diagnostics-u6-warmup-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: warmup-diagnostic-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    name: Warmup diagnosis / ${{ matrix.case }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {php: '8.3', logging: normal, case: 83-normal-baseline}
+          - {php: '8.4', logging: normal, case: 84-normal-candidate}
+          - {php: '8.4', logging: diagnostic, case: 84-diagnostic-candidate}
+          - {php: '8.3', logging: diagnostic, case: 83-diagnostic-control}
+    env:
+      PINOVA_TEST_PROFILE: third-party
+      PINOVA_TEST_PLUGIN_SET: deployed
+      PINOVA_FPM_FULL_STACK_ROOT: /tmp/pinova-fpm-full-${{ github.run_id }}-${{ github.run_attempt }}
+      PINOVA_FPM_CAMPAIGN_ROOT: /tmp/pinova-fpm-revisions-${{ github.run_id }}-${{ github.run_attempt }}
+      PINOVA_FPM_BIN: /usr/sbin/php-fpm${{ matrix.php }}
+      PINOVA_FPM_PHP_BIN: /usr/bin/php${{ matrix.php }}
+      PINOVA_FPM_PHP_VERSION: ${{ matrix.php }}
+      PINOVA_FPM_LOGGING_PROFILE: ${{ matrix.logging }}
+      PINOVA_FPM_PROBE_CASE: ${{ matrix.case }}
+      PINOVA_FPM_NGINX_BIN: /usr/sbin/nginx
+      PINOVA_FPM_MYSQL_SOCKET: /var/run/mysqld/mysqld.sock
+      PINOVA_FPM_MYSQL_DEFAULTS_FILE: /tmp/pinova-fpm-revisions-${{ github.run_id }}-${{ github.run_attempt }}/mysql-admin.cnf
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, pdo_mysql, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:2.10.3, wp-cli:2.12.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.21.0'
+      - name: Validate bounded diagnostic evidence and runner ordering
+        run: node --test tests/js/otp-fpm-diagnostic-evidence.test.mjs tests/js/otp-fpm-revision-workload.test.mjs
+      - name: Provision disposable native tools
+        run: |
+          sudo add-apt-repository --yes ppa:ondrej/php
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends "php${PINOVA_FPM_PHP_VERSION}-fpm" "php${PINOVA_FPM_PHP_VERSION}-curl" "php${PINOVA_FPM_PHP_VERSION}-gd" "php${PINOVA_FPM_PHP_VERSION}-mbstring" "php${PINOVA_FPM_PHP_VERSION}-mysql" "php${PINOVA_FPM_PHP_VERSION}-xml" "php${PINOVA_FPM_PHP_VERSION}-zip" nginx
+          sudo systemctl start mysql.service
+          sudo install -d -m 0755 "${PINOVA_FPM_CAMPAIGN_ROOT}"
+          sudo install -m 0600 /dev/null "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}"
+          printf '[client]\nuser=root\npassword=root\n' | sudo tee "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}" > /dev/null
+          echo "PINOVA_FPM_WP_CLI=$(command -v wp)" >> "${GITHUB_ENV}"
+      - name: Prepare one normalized dependency inventory and verified profile
+        run: |
+          composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+          npm ci --ignore-scripts
+          node tools/prepare-third-party-fixtures.mjs
+          wp_version="$(node -p "require('./tests/fixtures/third-party-baseline.json').wordpress")"
+          curl --fail --silent --show-error --location --max-time 90 "https://wordpress.org/wordpress-${wp_version}.tar.gz" \
+            | sudo tar -xz -C "${PINOVA_FPM_CAMPAIGN_ROOT}"
+          sudo "${PINOVA_FPM_PHP_BIN}" "${PINOVA_FPM_WP_CLI}" core verify-checksums --path="${PINOVA_FPM_CAMPAIGN_ROOT}/wordpress" --version="${wp_version}" --allow-root
+      - name: Run one predeclared warmup diagnostic without resource acceptance
+        run: |
+          sudo env GITHUB_ACTIONS="${GITHUB_ACTIONS}" RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT}" \
+            GITHUB_RUN_ID="${GITHUB_RUN_ID}" GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}" GITHUB_SHA="${GITHUB_SHA}" \
+            GITHUB_WORKSPACE="${GITHUB_WORKSPACE}" PATH="${PATH}" \
+            PINOVA_FPM_FULL_STACK_ROOT="${PINOVA_FPM_FULL_STACK_ROOT}" PINOVA_FPM_CAMPAIGN_ROOT="${PINOVA_FPM_CAMPAIGN_ROOT}" \
+            PINOVA_FPM_BIN="${PINOVA_FPM_BIN}" PINOVA_FPM_NGINX_BIN="${PINOVA_FPM_NGINX_BIN}" \
+            PINOVA_FPM_PHP_BIN="${PINOVA_FPM_PHP_BIN}" PINOVA_FPM_PHP_VERSION="${PINOVA_FPM_PHP_VERSION}" \
+            PINOVA_FPM_LOGGING_PROFILE="${PINOVA_FPM_LOGGING_PROFILE}" PINOVA_FPM_PROBE_CASE="${PINOVA_FPM_PROBE_CASE}" \
+            PINOVA_FPM_WP_CLI="${PINOVA_FPM_WP_CLI}" PINOVA_FPM_MYSQL_SOCKET="${PINOVA_FPM_MYSQL_SOCKET}" \
+            PINOVA_FPM_MYSQL_DEFAULTS_FILE="${PINOVA_FPM_MYSQL_DEFAULTS_FILE}" \
+            node tests/Integration/otp-fpm-revision-campaign.mjs
+      - name: Retain every bounded sanitized arm and acceptance result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: warmup-diagnostic-${{ matrix.case }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PINOVA_FPM_CAMPAIGN_ROOT }}/receipt
+          if-no-files-found: error
+          retention-days: 7

@@ -1,33 +1,51 @@
 /** One predeclared revision arm; shares the genuine isolated FPM chain. */
 export async function revisionWorkload({ ensure, root, writeFileSync, issue, ordinary, until, records, quiescent,
-    runWorker, inspect, verifyFlow, beginMeasure, endMeasure, http, base, site, receipt, headroom, events, processSample, setPhase }) {
-    receipt.revision_arm = { arm: process.env.PINOVA_FPM_REVISION_ARM, source_commit: process.env.PINOVA_FPM_REVISION_SOURCE,
+    runWorker, inspect, verifyFlow, beginMeasure, endMeasure, http, base, site, receipt, headroom, events, processSample, setPhase,
+    checkpoint = () => {}, probeCase = null }) {
+    if (!probeCase) receipt.revision_arm = { arm: process.env.PINOVA_FPM_REVISION_ARM, source_commit: process.env.PINOVA_FPM_REVISION_SOURCE,
         logging_profile: process.env.PINOVA_FPM_LOGGING_PROFILE, php_minor: process.env.PINOVA_FPM_PHP_VERSION,
         immediate_delivery: true, ordinary_count: 0, completed_stub_flows: 0, resources: null };
     setPhase('revision_warmup');
+    if (probeCase) receipt.diagnostic_probe = { case_id: probeCase.id, resource_acceptance: false, state: 'running',
+        warm_flows_completed: 0, runner_opportunities: 0, verification_workers: null };
     writeFileSync(`${root}/mode`, 'on\n');
     await headroom();
     // Identical completed warmup and empty retained CLI opportunities in both
     // revisions. Synthetic credentials never leave this process.
     const warmFlows = [];
     for (let index = 0; index < 10; index++) {
+        checkpoint('warm_issue', index + 1);
         const flow = await issue(41 + index, `revision-warm-${index + 1}`);
+        checkpoint('warm_response', index + 1);
         ensure((await ordinary(index, 'revision-warm-page')).status === 200, 'Revision warmup page failed.');
+        checkpoint('warm_runner', index + 1);
         await runWorker(`revision-warm-worker-${index + 1}`);
+        if (probeCase) receipt.diagnostic_probe.runner_opportunities++;
+        checkpoint('warm_acceptance', index + 1);
         await until(() => records.some(record => record.case === flow.label && record.accepted !== null), 'Revision warmup provider acceptance missing.');
         await quiescent();
         warmFlows.push(flow);
+        if (probeCase) receipt.diagnostic_probe.warm_flows_completed++;
     }
+    checkpoint('warm_verify');
     await Promise.all(warmFlows.map(flow => verifyFlow(flow)));
     await quiescent();
     const pool = new Set(processSample().map(worker => worker.pid));
     const warmed = new Set(events().filter(event => event.event === 'request_start' &&
         /^revision-warm-[0-9]+-verify$/.test(event.case) && pool.has(event.pid)).map(event => event.pid));
     ensure(warmed.size === receipt.limits.fpm_children, 'Revision authentication warmup did not cover the full fixed request pool.');
+    checkpoint('warm_stabilize');
     for (let round = 0; round < 2; round++) {
         const pages = await Promise.all(Array.from({ length: 10 }, (_, index) => ordinary(index, 'revision-warm-settle')));
         ensure(pages.every(page => page.status === 200), 'Revision post-authentication stabilization failed.');
         await quiescent();
+    }
+    if (probeCase) {
+        receipt.diagnostic_probe.verification_workers = warmed.size;
+        receipt.diagnostic_probe.provider_attempts_observed = records.filter(record => /^revision-warm-(?:[1-9]|10)$/.test(record.case)).length;
+        receipt.diagnostic_probe.state = 'completed';
+        checkpoint('probe_completed');
+        return;
     }
     const before = await site({ action: 'stats' });
     const logging = before.logging;

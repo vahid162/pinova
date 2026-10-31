@@ -5,6 +5,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, real
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateCampaign } from './revision-resource-gates.mjs';
+import { DIAGNOSTIC_CASES, executionEvidence, readDiagnosticEvidence } from './otp-fpm-diagnostic-evidence.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const id = process.env.GITHUB_RUN_ID;
@@ -23,6 +24,10 @@ const contract = JSON.parse(contractBytes);
 const php = process.env.PINOVA_FPM_PHP_VERSION;
 const logging = process.env.PINOVA_FPM_LOGGING_PROFILE;
 requireFact(contract.php.includes(php) && contract.logging_profiles.includes(logging), 'Invalid revision campaign profile.');
+const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
+const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
+requireFact(!probeId || (probeCase && probeCase.php === php && probeCase.logging === logging), 'Invalid focused diagnostic case.');
+const order = probeCase ? [probeCase.arm] : contract.order;
 const git = args => execFileSync('git', args, { cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 const candidate = git(['rev-parse', 'HEAD']).trim();
 requireFact(candidate === process.env.GITHUB_SHA && /^[a-f0-9]{40}$/.test(candidate), 'Candidate is not this exact workflow revision.');
@@ -41,18 +46,22 @@ chmodSync(campaignRoot, 0o755); // Traversal for sanitized receipts; config/priv
 mkdirSync(`${campaignRoot}/receipt`, { mode: 0o755 });
 mkdirSync(`${campaignRoot}/private`, { mode: 0o700 });
 const identity = { candidate, inventory, php, logging, profile: null };
-const campaign = { schema: contract.schema, state: 'running', contract, contract_sha256: hash(contractBytes),
+const campaign = { schema: probeCase ? 'pinova.warmup-diagnostic.v1' : contract.schema, state: 'running', contract, contract_sha256: hash(contractBytes),
     identity, composer_lock_sha256: hash(lock), dependency_normalization: 'both_code_revisions_use_identical_candidate_locked_production_vendor',
-    active_arm: null, arms: contract.order.map(arm => ({ arm, source: arm.startsWith('a') ? contract.baseline_source : candidate,
+    ...(probeCase ? { resource_acceptance: false, probe_case: probeCase } : {}),
+    active_arm: null, arms: order.map(arm => ({ arm, source: arm.startsWith('a') ? contract.baseline_source : candidate,
         inventory_sha256: inventory, profile_sha256: null, source_archive_sha256: null,
         state: 'unexecuted', measurement: null, failure_phase: null, cleanup_status: 'not_started' })) };
 function save() {
-    const target = `${campaignRoot}/receipt/revision-comparison.json`;
+    const target = `${campaignRoot}/receipt/${probeCase ? 'warmup-diagnostic' : 'revision-comparison'}.json`;
     writeFileSync(target, JSON.stringify(campaign, null, 2) + '\n', { mode: 0o600 }); chmodSync(target, 0o644);
 }
 save();
 let campaignPhase = 'arm_setup';
 let activeRow;
+function cleanupError(code, witness = null) {
+    const error = new Error('Owned arm cleanup is incomplete.'); error.code = code; error.witness = witness; return error;
+}
 function removeOwnedArm() {
     requireFact(realpathSync(runRoot) === runRoot && lstatSync(runRoot).uid === 0 &&
         readFileSync(`${runRoot}/fixture-owned`, 'utf8').trim() === `${id}:${attempt}`, 'Refusing cleanup of an unowned revision arm.');
@@ -60,13 +69,15 @@ function removeOwnedArm() {
         if (!existsSync(`${runRoot}/${file}`)) continue;
         const pid = Number(readFileSync(`${runRoot}/${file}`, 'utf8').trim());
         if (Number.isSafeInteger(pid) && pid > 1 && existsSync(`/proc/${pid}/cmdline`)) {
-            requireFact(!readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(runRoot), 'A revision arm process is still live.');
+            if (readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(runRoot)) {
+                throw cleanupError('owned_process_live', { pid, role: file === 'fpm.pid' ? 'fpm_master' : 'nginx' });
+            }
         }
     }
     rmSync(runRoot, { recursive: true });
 }
 try {
-    for (const arm of contract.order) {
+    for (const arm of order) {
         campaignPhase = 'arm_setup';
         activeRow = campaign.arms.find(row => row.arm === arm);
         activeRow.state = 'running'; activeRow.cleanup_status = 'pending';
@@ -87,11 +98,17 @@ try {
         mkdirSync(armDirectory, { mode: 0o755 });
         const stdout = `${campaignRoot}/private/${arm}.log`;
         campaignPhase = 'arm_execution';
+        const executionStarted = performance.now();
         const execution = spawnSync('bash', [path.join(repo, 'tests/Integration/otp-fpm-full-stack.sh')], {
             cwd: repo, env: { ...process.env, PINOVA_FPM_PLUGIN_ROOT: `${runRoot}/runtime`,
                 PINOVA_FPM_REVISION_ARM: arm, PINOVA_FPM_REVISION_SOURCE: source },
             encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 180000,
         });
+        // Persist child outcome before any receipt parsing or cleanup can fail.
+        activeRow.execution = executionEvidence(execution, performance.now() - executionStarted);
+        if (probeCase) activeRow.parent_diagnostic_evidence = { ...readDiagnosticEvidence(runRoot),
+            collection_boundary: 'after_fixture_exit_or_timeout', termination_causation_unverified: true };
+        save();
         writeFileSync(stdout, `${execution.stdout || ''}\n${execution.stderr || ''}`, { mode: 0o600 });
         let receipt;
         if (existsSync(`${runRoot}/receipt/full-stack-result.json`)) {
@@ -105,7 +122,9 @@ try {
         if (identity.profile === null && profile) identity.profile = profile;
         Object.assign(activeRow, { profile_sha256: profile,
             state: execution.status === 0 && receipt?.state === 'passed' ? 'passed' : 'failed',
-            measurement: receipt?.revision_arm || null,
+            measurement: probeCase ? null : receipt?.revision_arm || null,
+            ...(probeCase ? { diagnostic: receipt?.diagnostic_probe || null,
+                diagnostic_evidence: receipt?.diagnostic_evidence || activeRow.parent_diagnostic_evidence } : {}),
             failure_phase: receipt?.failure_phase || (execution.status === 0 ? null : 'fixture_execution'),
         });
         save();
@@ -117,21 +136,37 @@ try {
         campaign.active_arm = null; save();
     }
     campaignPhase = 'campaign_evaluation';
-    campaign.acceptance = evaluateCampaign(campaign.arms, contract, identity);
-    campaign.state = campaign.acceptance.state;
+    if (probeCase) {
+        // A focused warmup is never an input to the six-arm resource gate.
+        campaign.state = campaign.arms.every(row => row.state === 'passed' && row.cleanup_status === 'complete' &&
+            row.diagnostic?.state === 'completed' && row.diagnostic?.warm_flows_completed === 10 &&
+            row.diagnostic?.runner_opportunities === 10) ? 'diagnostic_completed' : 'needs_review';
+    } else {
+        campaign.acceptance = evaluateCampaign(campaign.arms, contract, identity);
+        campaign.state = campaign.acceptance.state;
+    }
     save();
-    process.stdout.write(`Revision comparison ${campaign.state}: ${campaign.arms.length} predeclared arms retained.\n`);
-    if (campaign.state !== 'passed') process.exitCode = 1;
-} catch {
+    process.stdout.write(`${probeCase ? 'Focused warmup diagnosis (no resource acceptance)' : 'Revision comparison'} ${campaign.state}: ${campaign.arms.length} predeclared arms retained.\n`);
+    if (!['passed', 'diagnostic_completed'].includes(campaign.state)) process.exitCode = 1;
+} catch (error) {
     campaign.state = 'needs_review';
     campaign.infrastructure_failure = 'campaign_ownership_or_execution_incomplete';
     campaign.failure_phase = campaignPhase;
+    const cleanupCodes = ['owned_process_live', 'arm_owner_mismatch', 'arm_remove_failed'];
+    if (campaignPhase === 'arm_cleanup' && activeRow) {
+        activeRow.cleanup_reason = cleanupCodes.includes(error.code) ? error.code : 'cleanup_unavailable';
+        if (error.code === 'owned_process_live') activeRow.cleanup_witness = error.witness;
+    }
     if (activeRow && campaign.active_arm !== null) {
         activeRow.state = 'failed'; activeRow.failure_phase = campaignPhase;
         try {
             if (existsSync(runRoot)) removeOwnedArm();
             activeRow.cleanup_status = 'complete';
-        } catch { activeRow.cleanup_status = 'needs_review'; }
+        } catch (cleanup) {
+            activeRow.cleanup_status = 'needs_review';
+            activeRow.cleanup_reason = cleanupCodes.includes(cleanup.code) ? cleanup.code : 'cleanup_unavailable';
+            if (cleanup.code === 'owned_process_live') activeRow.cleanup_witness = cleanup.witness;
+        }
     }
     for (const row of campaign.arms) if (row.state === 'unexecuted') row.failure_phase = 'not_reached_after_incomplete_arm';
     save();

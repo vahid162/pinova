@@ -1,11 +1,12 @@
 /** Actual WordPress/plugin/FPM acceptance. Only run through the guarded shell entrypoint. */
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer, request } from 'node:http';
-import { chmodSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { PHPProcessSampler, inspectProcess } from './php-process-sampler.mjs';
 import { revisionWorkload } from './otp-fpm-revision-workload.mjs';
+import { DIAGNOSTIC_CASES, readDiagnosticEvidence, sanitizeCheckpoint } from './otp-fpm-diagnostic-evidence.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const root = process.env.PINOVA_FPM_FULL_STACK_ROOT;
@@ -54,6 +55,22 @@ const tick = Number(execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }));
 const selectedPhp = process.env.PINOVA_FPM_PHP_VERSION || '8.3';
 ensure(['8.3', '8.4'].includes(selectedPhp), 'Unexpected selected native PHP runtime.');
 const matchesPhp = value => new RegExp(`^${selectedPhp.replace('.', '\\.')}\\.[0-9]+$`).test(value || '');
+const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
+const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
+ensure(!probeId || (probeCase && probeCase.php === selectedPhp && probeCase.logging === process.env.PINOVA_FPM_LOGGING_PROFILE &&
+    probeCase.arm === process.env.PINOVA_FPM_REVISION_ARM), 'Invalid focused diagnostic case.');
+const checkpointStarted = performance.now();
+let checkpointFailed = false;
+function checkpoint(phaseName, flowIndex = null) {
+    if (!probeCase) return;
+    const value = sanitizeCheckpoint({ phase: phaseName, flow_index: flowIndex, arm: process.env.PINOVA_FPM_REVISION_ARM,
+        at_ms: Date.now(), elapsed_ms: Math.round(performance.now() - checkpointStarted), pid: process.pid });
+    try {
+        writeFileSync(path.join(root, 'phase-checkpoint.json.tmp'), JSON.stringify(value) + '\n', { mode: 0o600 });
+        renameSync(path.join(root, 'phase-checkpoint.json.tmp'), path.join(root, 'phase-checkpoint.json'));
+    } catch { checkpointFailed = true; }
+}
+checkpoint('controller_start');
 let sequence = 0;
 let activeProvider = 0;
 let peakProvider = 0;
@@ -332,10 +349,12 @@ async function quiescent() {
 }
 async function headroom() {
     const start = performance.now();
+    checkpoint('headroom_wait');
     await until(() => {
         const match = readFileSync('/proc/meminfo', 'utf8').match(/^MemAvailable:\s+(\d+) kB$/m);
         return match && Number(match[1]) >= 1048576 && Number(readFileSync('/proc/loadavg', 'utf8').split(' ')[0]) < 3;
     }, 'Representative host did not satisfy the real runtime resource admission guard.', 180000);
+    checkpoint(phase);
     return Math.round(performance.now() - start);
 }
 
@@ -507,6 +526,7 @@ let receipt = {
 };
 try {
     phase = 'readiness';
+    checkpoint('readiness');
     await new Promise(resolve => provider.listen(providerPort, '127.0.0.1', resolve));
     await until(async () => {
         try { return (await statusSnapshot(false)).status === 200; } catch { return false; }
@@ -515,6 +535,15 @@ try {
     ensure(setupLine, 'Missing representative-profile setup receipt.');
     const pages = JSON.parse(setupLine.slice('PINOVA_FULL_STACK_RESULT='.length));
     receipt.profile.hpos_enabled = pages.hpos_enabled;
+    if (probeCase) {
+        const logging = pages.logging;
+        ensure(logging?.minimum_level === 'warning' && logging.warning_enabled === true &&
+            logging.diagnostic_window_active === (probeCase.logging === 'diagnostic'), 'Focused probe setup logging profile mismatch.');
+        receipt.diagnostic_setup_logging = { minimum_level: logging.minimum_level,
+            diagnostic_window_active: logging.diagnostic_window_active, debug_enabled: logging.debug_enabled === true,
+            diagnostic_mode: ['off', 'legacy_global', 'scoped_queued_otp'].includes(logging.diagnostic_mode) ? logging.diagnostic_mode : 'unknown',
+            scope_matches: logging.scope_matches === true, budget_initialized: logging.budget_initialized === true };
+    }
     const pagePaths = [pages.ordinary, pages.shop, pages.cart].map(value => {
         const target = new URL(value, base);
         ensure(target.origin === base && !target.username && !target.password, 'Setup page escaped the exact fixture origin.');
@@ -524,6 +553,7 @@ try {
         label, category: ['ordinary', 'shop', 'cart'][index % 3], redirects: 3,
     });
     phase = 'warmup';
+    checkpoint('ordinary_warmup');
     for (let round = 0; round < 5; round++) {
         const warm = await Promise.all(Array.from({ length: 8 }, (_, index) => ordinary(index, 'warm')));
         ensure(warm.every(response => response.status === 200), 'Representative-profile warm-up page failed.');
@@ -538,8 +568,9 @@ try {
             /^[a-f0-9]{40}$/.test(process.env.PINOVA_FPM_REVISION_SOURCE || ''), 'Invalid revision arm identity.');
         await revisionWorkload({ ensure, root, writeFileSync, issue, ordinary, until, records, quiescent,
             runWorker, inspect, verifyFlow, beginMeasure, endMeasure, http, base, site, receipt, headroom,
-            events, processSample, setPhase: name => { phase = name; } });
-        tests.push('revision_100_ordinary_10_completed_stub_flows_aggregate_php_resources');
+            events, processSample, checkpoint, probeCase, setPhase: name => { phase = name; checkpoint(name); } });
+        tests.push(probeCase ? 'focused_10_flow_warmup_diagnostic_not_resource_acceptance' :
+            'revision_100_ordinary_10_completed_stub_flows_aggregate_php_resources');
     } else {
     // Ordinary-page warmup does not load the authentication, purpose-denial,
     // native-session and plugin login-hook paths. Warm the same completed OFF
@@ -905,7 +936,8 @@ try {
     receipt.state = 'passed';
     receipt.provider = { attempts: records.length, peak_all_workers_including_cli: peakProvider,
         measured_workload_accepted: records.filter(record => /^(off|on)-/.test(record.case) && record.accepted !== null).length };
-    receipt.measurement_limits = receipt.revision_arm?.limits || [
+    receipt.measurement_limits = probeCase ? ['Focused warmup diagnosis only; resource_acceptance=false.',
+        'Ten predeclared warm flows and ten existing CLI opportunities; no resource comparison or partial acceptance.'] : receipt.revision_arm?.limits || [
         'OFF and ON have equal predetermined existing CLI opportunities: ten for normal, one each for idle, slow and concurrent; their PHP cost and all in-window observation CLI cost are included.',
         'Controlled CLI opportunities exclude the real minute scheduler phase and cadence; the unchanged live runner cadence remains a staging and canary gate.',
         'RSS/PSS and FPM status are sampled; they are not allocator-accurate peaks. Occupancy integrates native FPM status through full quiescence plus measured CLI wall time.',
@@ -949,5 +981,10 @@ try {
     await new Promise(resolve => provider.close(resolve));
     codes.clear();
     mobileCases.clear();
+    if (probeCase) {
+        receipt.resource_acceptance = false;
+        receipt.diagnostic_checkpoint_failed = checkpointFailed;
+        receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), collection_boundary: 'controller_before_fpm_teardown' };
+    }
     sanitizedReceipt('full-stack-result.json', receipt);
 }

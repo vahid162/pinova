@@ -35,26 +35,26 @@ final class Logs {
 		$level = self::request_level( $_GET );
 
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only list filters do not change state.
-		$filters          = self::request_filters( $_GET );
-		$data             = '' !== $level && ! in_array( $level, self::LEVELS, true )
+		$filters       = self::request_filters( $_GET );
+		$data          = '' !== $level && ! in_array( $level, self::LEVELS, true )
 			? [
 				'rows'  => [],
 				'total' => 0,
 			]
 			: LogRepository::paginate( $page, 50, $level, $filters );
-		$pages            = max( 1, (int) ceil( $data['total'] / 50 ) );
-		$minimum_level    = 'unavailable';
+		$pages         = max( 1, (int) ceil( $data['total'] / 50 ) );
+		$minimum_level = 'unavailable';
 		foreach ( [ 'info', 'notice', 'warning', 'error' ] as $candidate ) {
 			if ( Logger::instance()->is_enabled( $candidate ) ) {
 				$minimum_level = $candidate;
 				break;
 			}
 		}
-		$diagnostics      = Logger::diagnostics_status();
+		$diagnostics       = Logger::diagnostics_status();
 		$diagnostic_budget = EventThrottle::diagnostics_snapshot();
-		$health           = LogRepository::health();
-		$table_exists     = $health['table_exists'];
-		$pagination       = paginate_links(
+		$health            = LogRepository::health();
+		$table_exists      = $health['table_exists'];
+		$pagination        = paginate_links(
 			[
 				'base'    => add_query_arg(
 					array_merge(
@@ -112,13 +112,19 @@ final class Logs {
 				?>
 			</p>
 			<h3><?php esc_html_e( 'جزئیات تشخیصی محدود', 'pinova' ); ?></h3>
-			<p><?php echo esc_html( match ( $diagnostics['status'] ) {
-				'active' => __( 'پنجرهٔ تشخیصی فقط برای دامنهٔ انتخاب‌شده فعال است؛ سطح عادی گزارش‌ها تغییر نمی‌کند.', 'pinova' ),
-				'expired' => __( 'پنجرهٔ تشخیصی منقضی شده است.', 'pinova' ),
-				'legacy_unscoped' => __( 'پنجرهٔ قدیمی بدون دامنه وجود دارد؛ جزئیات جدید ثبت نمی‌شود. در تنظیمات، دامنهٔ مشخص انتخاب کنید.', 'pinova' ),
-				'off' => __( 'جزئیات تشخیصی خاموش است.', 'pinova' ),
-				default => __( 'وضعیت جزئیات تشخیصی نامشخص یا نامعتبر است؛ فعال‌بودن آن تأیید نشده است.', 'pinova' ),
-			} ); ?></p>
+			<p>
+				<?php
+				echo esc_html(
+					match ( $diagnostics['status'] ) {
+						'active' => __( 'پنجرهٔ تشخیصی فقط برای دامنهٔ انتخاب‌شده فعال است؛ سطح عادی گزارش‌ها تغییر نمی‌کند.', 'pinova' ),
+						'expired' => __( 'پنجرهٔ تشخیصی منقضی شده است.', 'pinova' ),
+						'legacy_unscoped' => __( 'پنجرهٔ قدیمی بدون دامنه وجود دارد؛ جزئیات جدید ثبت نمی‌شود. در تنظیمات، دامنهٔ مشخص انتخاب کنید.', 'pinova' ),
+						'off' => __( 'جزئیات تشخیصی خاموش است.', 'pinova' ),
+						default => __( 'وضعیت جزئیات تشخیصی نامشخص یا نامعتبر است؛ فعال‌بودن آن تأیید نشده است.', 'pinova' ),
+					}
+				);
+				?>
+			</p>
 			<?php if ( 'active' === $diagnostics['status'] ) : ?>
 				<p><code dir="ltr"><?php echo esc_html( $diagnostics['scope']['type'] . ':' . $diagnostics['scope']['value'] ); ?></code> — <?php echo esc_html( gmdate( 'Y-m-d H:i:s', $diagnostics['until'] ) ); ?> UTC</p>
 			<?php endif; ?>

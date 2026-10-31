@@ -191,7 +191,7 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( [ $linked, $expanded ], array_column( IssueMonitor::report( [ 'flow_id' => $flow ] )['timeline']['events'], 'id' ) );
 		// Existing raw viewer/export filters retain exact conjunction semantics.
 		$raw = LogRepository::incident_batch( [ 'flow_id' => $flow, 'correlation_id' => $correlation ] );
-		self::assertSame( [ $linked ], array_column( $raw['rows'], 'id' ) );
+		self::assertSame( [ $linked ], array_map( 'intval', array_column( $raw['rows'], 'id' ) ) );
 
 		$ambiguous = $this->insert_event();
 		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => str_repeat( 'c', 32 ) ], [ 'id' => $ambiguous ] );

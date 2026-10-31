@@ -614,7 +614,11 @@ class Settings extends \Nabik\Utils\V1\Settings {
 		}
 		$result['diagnostic_until'] = $until;
 
-		self::$logging_normalization = [ 'previous' => $previous, 'value' => $result, 'actor' => $actor ];
+		self::$logging_normalization = [
+			'previous' => $previous,
+			'value'    => $result,
+			'actor'    => $actor,
+		];
 		return $result;
 	}
 
@@ -647,10 +651,16 @@ class Settings extends \Nabik\Utils\V1\Settings {
 			return [];
 		}
 		if ( 'operation' === ( $scope['type'] ?? '' ) && in_array( $scope['value'], [ 'queued_otp', 'verify_otp', 'verify_mobile' ], true ) ) {
-			return [ 'type' => 'operation', 'value' => $scope['value'] ];
+			return [
+				'type'  => 'operation',
+				'value' => $scope['value'],
+			];
 		}
 		if ( 'flow' === ( $scope['type'] ?? '' ) && preg_match( '/\A[a-f0-9]{32}\z/D', $scope['value'] ) ) {
-			return [ 'type' => 'flow', 'value' => $scope['value'] ];
+			return [
+				'type'  => 'flow',
+				'value' => $scope['value'],
+			];
 		}
 		return [];
 	}
@@ -707,7 +717,13 @@ class Settings extends \Nabik\Utils\V1\Settings {
 		<p>
 			<label for="pinova-diagnostic-operation"><?php esc_html_e( 'عملیات', 'pinova' ); ?></label>
 			<select id="pinova-diagnostic-operation" name="<?php echo esc_attr( $prefix ); ?>[diagnostic_operation]">
-				<?php foreach ( [ 'queued_otp' => __( 'آماده‌سازی و ارسال کد', 'pinova' ), 'verify_otp' => __( 'بررسی کد ورود یا بازیابی', 'pinova' ), 'verify_mobile' => __( 'بررسی مالکیت موبایل', 'pinova' ) ] as $operation => $label ) : ?>
+				<?php
+				foreach ( [
+					'queued_otp'    => __( 'آماده‌سازی و ارسال کد', 'pinova' ),
+					'verify_otp'    => __( 'بررسی کد ورود یا بازیابی', 'pinova' ),
+					'verify_mobile' => __( 'بررسی مالکیت موبایل', 'pinova' ),
+				] as $operation => $label ) :
+					?>
 					<option value="<?php echo esc_attr( $operation ); ?>" <?php selected( 'operation' === $type ? $scope['value'] : '', $operation ); ?>><?php echo esc_html( $label ); ?></option>
 				<?php endforeach; ?>
 			</select>

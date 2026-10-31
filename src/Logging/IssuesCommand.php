@@ -35,9 +35,9 @@ final class IssuesCommand {
 		}
 		$report = IssueMonitor::report(
 			[
-				'created_from' => $assoc_args['from'] ?? '',
-				'created_to'   => $assoc_args['to'] ?? '',
-				'flow_id'      => $assoc_args['flow'] ?? '',
+				'created_from'   => $assoc_args['from'] ?? '',
+				'created_to'     => $assoc_args['to'] ?? '',
+				'flow_id'        => $assoc_args['flow'] ?? '',
 				'correlation_id' => $assoc_args['correlation'] ?? '',
 			]
 		);

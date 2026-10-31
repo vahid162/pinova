@@ -32,8 +32,11 @@ final class Issues {
 	 */
 	public static function filters( array $input ): array {
 		$result = self::dates( $input );
-		foreach ( [ 'flow_id' => 32, 'correlation_id' => 36 ] as $key => $length ) {
-			$value = isset( $input[ $key ] ) ? wp_unslash( $input[ $key ] ) : '';
+		foreach ( [
+			'flow_id'        => 32,
+			'correlation_id' => 36,
+		] as $key => $length ) {
+			$value          = isset( $input[ $key ] ) ? wp_unslash( $input[ $key ] ) : '';
 			$result[ $key ] = is_string( $value ) && $length >= strlen( $value ) ? $value : '!';
 		}
 		return $result;
@@ -160,17 +163,19 @@ final class Issues {
 			</table>
 			<h4><?php esc_html_e( 'سن و مالکیت پردازش فعلی', 'pinova' ); ?></h4>
 			<table class="widefat striped"><tbody>
-			<?php foreach ( [
-				'timing_unknown' => __( 'رکوردهای با زمان نامشخص', 'pinova' ),
-				'oldest_pending_age_seconds' => __( 'بیشترین سن انتظار از مبدأ معتبر (ثانیه)', 'pinova' ),
+			<?php
+			foreach ( [
+				'timing_unknown'                     => __( 'رکوردهای با زمان نامشخص', 'pinova' ),
+				'oldest_pending_age_seconds'         => __( 'بیشترین سن انتظار از مبدأ معتبر (ثانیه)', 'pinova' ),
 				'earliest_pending_remaining_seconds' => __( 'کمترین مهلت باقی‌ماندهٔ انتظار (ثانیه)', 'pinova' ),
-				'processing_held' => __( 'پردازش با قفل نگه‌داشته‌شده', 'pinova' ),
-				'processing_free_stale' => __( 'قفل آزاد و عمر claim دست‌کم ۶۰ ثانیه', 'pinova' ),
-				'processing_free_recent' => __( 'قفل آزاد و claim تازه', 'pinova' ),
-				'processing_lock_unknown' => __( 'مالکیت قفل نامشخص', 'pinova' ),
-				'processing_age_unknown' => __( 'قفل آزاد با عمر claim نامشخص', 'pinova' ),
-				'oldest_processing_age_seconds' => __( 'بیشترین عمر claim پردازش (ثانیه)', 'pinova' ),
-			] as $key => $label ) : ?>
+				'processing_held'                    => __( 'پردازش با قفل نگه‌داشته‌شده', 'pinova' ),
+				'processing_free_stale'              => __( 'قفل آزاد و عمر claim دست‌کم ۶۰ ثانیه', 'pinova' ),
+				'processing_free_recent'             => __( 'قفل آزاد و claim تازه', 'pinova' ),
+				'processing_lock_unknown'            => __( 'مالکیت قفل نامشخص', 'pinova' ),
+				'processing_age_unknown'             => __( 'قفل آزاد با عمر claim نامشخص', 'pinova' ),
+				'oldest_processing_age_seconds'      => __( 'بیشترین عمر claim پردازش (ثانیه)', 'pinova' ),
+			] as $key => $label ) :
+				?>
 				<tr><td><?php echo esc_html( $label ); ?></td><td><?php echo esc_html( isset( $snapshot[ $key ] ) ? (string) $snapshot[ $key ] : __( 'نامشخص', 'pinova' ) ); ?></td></tr>
 			<?php endforeach; ?>
 			</tbody></table>
@@ -192,12 +197,20 @@ final class Issues {
 		<?php if ( empty( $snapshot['read_success'] ) ) : ?>
 			<p><?php esc_html_e( 'خواندن وضعیت نگهداری انجام نشد؛ نتیجه و زمان‌بندی نامشخص است.', 'pinova' ); ?></p>
 		<?php else : ?>
-			<p><?php echo esc_html( match ( $snapshot['status'] ) {
-				'success' => __( 'آخرین پاک‌سازی موفق گزارش شده است؛ این مشاهده تضمین اجرای بعدی نیست.', 'pinova' ),
-				'failed' => __( 'آخرین پاک‌سازی ناموفق گزارش شده است.', 'pinova' ),
-				default => __( 'نتیجهٔ پاک‌سازی هنوز مشخص نیست.', 'pinova' ),
-			} ); ?></p>
-			<?php if ( 0 < $snapshot['at'] ) : ?><p><?php echo esc_html( gmdate( 'Y-m-d H:i:s', $snapshot['at'] ) ); ?> UTC</p><?php endif; ?>
+			<p>
+				<?php
+				echo esc_html(
+					match ( $snapshot['status'] ) {
+						'success' => __( 'آخرین پاک‌سازی موفق گزارش شده است؛ این مشاهده تضمین اجرای بعدی نیست.', 'pinova' ),
+						'failed' => __( 'آخرین پاک‌سازی ناموفق گزارش شده است.', 'pinova' ),
+						default => __( 'نتیجهٔ پاک‌سازی هنوز مشخص نیست.', 'pinova' ),
+					}
+				);
+				?>
+			</p>
+			<?php if ( 0 < $snapshot['at'] ) : ?>
+				<p><?php echo esc_html( gmdate( 'Y-m-d H:i:s', $snapshot['at'] ) ); ?> UTC</p>
+			<?php endif; ?>
 			<?php /* translators: 1: observed deleted count or unknown; 2: finite backlog status; 3: finite continuation status. */ ?>
 			<p><?php echo esc_html( sprintf( __( 'حذف مشاهده‌شده: %1$s؛ backlog: %2$s؛ ادامه: %3$s', 'pinova' ), null === $snapshot['deleted'] ? __( 'نامشخص', 'pinova' ) : (string) $snapshot['deleted'], $snapshot['backlog'], $snapshot['continuation'] ) ); ?></p>
 			<?php if ( ! $snapshot['cleanup_scheduled'] || $snapshot['cleanup_overdue'] || $snapshot['continuation_missing'] || $snapshot['continuation_overdue'] || 'failed' === $snapshot['continuation'] ) : ?>
@@ -219,21 +232,31 @@ final class Issues {
 		<?php else : ?>
 			<?php /* translators: 1: finite linkage status; 2: finite sampled coverage status. */ ?>
 			<p><?php echo esc_html( sprintf( __( 'پیوند شواهد: %1$s؛ پوشش: %2$s؛ دریافت گوشی: تأیید نشده', 'pinova' ), $timeline['linkage'], $timeline['coverage'] ) ); ?></p>
-			<?php if ( 'ambiguous' === $timeline['linkage'] ) : ?><p><?php esc_html_e( 'بیش از یک جریان برای این کد پیگیری دیده شد؛ گسترش خودکار انجام نشد و فقط رخدادهای همان درخواست نمایش داده می‌شوند.', 'pinova' ); ?></p><?php endif; ?>
-			<?php if ( 'sole_flow' === $timeline['linkage'] ) : ?><p><code dir="ltr"><?php echo esc_html( $timeline['expanded_flow_id'] ); ?></code></p><?php endif; ?>
+			<?php if ( 'ambiguous' === $timeline['linkage'] ) : ?>
+				<p><?php esc_html_e( 'بیش از یک جریان برای این کد پیگیری دیده شد؛ گسترش خودکار انجام نشد و فقط رخدادهای همان درخواست نمایش داده می‌شوند.', 'pinova' ); ?></p>
+			<?php endif; ?>
+			<?php if ( 'sole_flow' === $timeline['linkage'] ) : ?>
+				<p><code dir="ltr"><?php echo esc_html( $timeline['expanded_flow_id'] ); ?></code></p>
+			<?php endif; ?>
 			<?php /* translators: 1: observed finite stage names; 2: unobserved possible stage names. */ ?>
 			<p><?php echo esc_html( sprintf( __( 'مراحل مشاهده‌شده: %1$s؛ مراحل مشاهده‌نشده: %2$s', 'pinova' ), implode( ', ', $timeline['observed_stages'] ), implode( ', ', $timeline['unobserved_stages'] ) ) ); ?></p>
 			<pre dir="ltr"><?php echo esc_html( (string) wp_json_encode( $timeline['observed_facts'], JSON_UNESCAPED_SLASHES ) ); ?></pre>
-			<?php if ( empty( $timeline['events'] ) ) : ?><p><?php esc_html_e( 'رخدادی برای انتخاب حاضر در شواهد نگهداری‌شده دیده نشد؛ نتیجهٔ عملیات نامشخص است.', 'pinova' ); ?></p><?php else : ?>
-			<div style="overflow-x:auto"><table class="widefat striped">
-				<thead><tr><th><?php esc_html_e( 'شناسه و رخداد', 'pinova' ); ?></th><th><?php esc_html_e( 'زمان ذخیره UTC', 'pinova' ); ?></th><th><?php esc_html_e( 'زمان رخداد UTC', 'pinova' ); ?></th><th><?php esc_html_e( 'شواهد پالایش‌شده و مرجع کد', 'pinova' ); ?></th></tr></thead>
-				<tbody><?php foreach ( $timeline['events'] as $event ) : ?><tr>
-					<td>#<?php echo esc_html( (string) $event['id'] ); ?><br><code dir="ltr"><?php echo esc_html( $event['event'] ); ?></code></td>
-					<td><?php echo esc_html( $event['created_at'] ); ?></td>
-					<td><?php echo esc_html( isset( $event['context']['observed_at'] ) ? gmdate( 'Y-m-d H:i:s', $event['context']['observed_at'] ) : __( 'نامشخص', 'pinova' ) ); ?></td>
-					<td><code dir="ltr"><?php echo esc_html( (string) wp_json_encode( $event['context'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></td>
-				</tr><?php endforeach; ?></tbody>
-			</table></div>
+			<?php if ( empty( $timeline['events'] ) ) : ?>
+				<p><?php esc_html_e( 'رخدادی برای انتخاب حاضر در شواهد نگهداری‌شده دیده نشد؛ نتیجهٔ عملیات نامشخص است.', 'pinova' ); ?></p>
+			<?php else : ?>
+				<div style="overflow-x:auto"><table class="widefat striped">
+					<thead><tr><th><?php esc_html_e( 'شناسه و رخداد', 'pinova' ); ?></th><th><?php esc_html_e( 'زمان ذخیره UTC', 'pinova' ); ?></th><th><?php esc_html_e( 'زمان رخداد UTC', 'pinova' ); ?></th><th><?php esc_html_e( 'شواهد پالایش‌شده و مرجع کد', 'pinova' ); ?></th></tr></thead>
+					<tbody>
+					<?php foreach ( $timeline['events'] as $event ) : ?>
+						<tr>
+							<td>#<?php echo esc_html( (string) $event['id'] ); ?><br><code dir="ltr"><?php echo esc_html( $event['event'] ); ?></code></td>
+							<td><?php echo esc_html( $event['created_at'] ); ?></td>
+							<td><?php echo esc_html( isset( $event['context']['observed_at'] ) ? gmdate( 'Y-m-d H:i:s', $event['context']['observed_at'] ) : __( 'نامشخص', 'pinova' ) ); ?></td>
+							<td><code dir="ltr"><?php echo esc_html( (string) wp_json_encode( $event['context'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></td>
+						</tr>
+					<?php endforeach; ?>
+					</tbody>
+				</table></div>
 			<?php endif; ?>
 		<?php endif; ?>
 		<?php

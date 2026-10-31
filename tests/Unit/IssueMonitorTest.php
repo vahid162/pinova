@@ -251,6 +251,23 @@ final class IssueMonitorTest extends TestCase {
 		self::assertFalse( $timeline['observed_facts']['channel_accepted'] );
 		self::assertLessThanOrEqual( 2097152, strlen( json_encode( $timeline ) ) );
 		self::assertStringNotContainsString( 'private', json_encode( $timeline ) );
+
+		// Historical release tags are syntax-checked; use retained data to reach the byte cap.
+		$release_tag = 'v' . str_repeat( '1', 6000 ) . '.0.0-rc1';
+		$context = json_encode( [ 'release_tag' => $release_tag, 'identifier' => 'private-secret', 'remaining_seconds' => 100 ] );
+		self::assertLessThan( 8192, strlen( $context ) );
+		foreach ( $rows as &$row ) {
+			$row['context'] = $context;
+		}
+		unset( $row );
+		$timeline = IssueMonitor::timeline( $rows );
+		self::assertTrue( $timeline['byte_truncated'] );
+		self::assertNotEmpty( $timeline['events'] );
+		self::assertLessThan( 1000, count( $timeline['events'] ) );
+		self::assertSame( $release_tag, $timeline['events'][0]['context']['release_tag'] );
+		self::assertLessThanOrEqual( 2097152, strlen( json_encode( $timeline ) ) );
+		self::assertSame( [], $timeline['observed_stages'] );
+		self::assertStringNotContainsString( 'private-secret', json_encode( $timeline ) );
 	}
 
 	private function row( int $id, string $event, array $context = [] ): array {

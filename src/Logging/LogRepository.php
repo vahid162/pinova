@@ -405,7 +405,12 @@ final class LogRepository {
 	 */
 	public static function timeline_lookup( array $filters ): array {
 		global $wpdb;
-		$result  = [ 'success' => false, 'flows' => [], 'lookup_rows' => 0, 'snapshot_event_id' => 0 ];
+		$result  = [
+			'success'           => false,
+			'flows'             => [],
+			'lookup_rows'       => 0,
+			'snapshot_event_id' => 0,
+		];
 		$filters = self::filter_values( $filters );
 		if ( ! $filters['valid'] || ! self::table_exists() ) {
 			return $result;
@@ -418,8 +423,8 @@ final class LogRepository {
 		$result['snapshot_event_id'] = (int) $latest;
 		if ( '' !== $filters['correlation_id'] ) {
 			[ $where, $values ] = self::where_clause( $filters, '', true );
-			$values[]          = $result['snapshot_event_id'];
-			$flows             = $wpdb->get_col(
+			$values[]           = $result['snapshot_event_id'];
+			$flows              = $wpdb->get_col(
 				// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Fixed WHERE clauses and their values are assembled together.
 				$wpdb->prepare(
 					// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- WHERE contains only fixed clauses and placeholders.
@@ -463,24 +468,24 @@ final class LogRepository {
 			];
 		}
 		if ( $expand_correlation && '' !== $filters['correlation_id'] && '' !== $filters['flow_id'] ) {
-			$base = $filters;
+			$base                   = $filters;
 			$base['correlation_id'] = '';
-			$base['flow_id'] = '';
-			[ $where, $values ] = self::where_clause( $base, $level );
-			$where .= '' === $where ? ' WHERE ' : ' AND ';
-			$where .= '((`correlation_id` = %s AND BINARY `correlation_id` = BINARY %s) OR (`flow_id` = %s AND BINARY `flow_id` = BINARY %s))';
-			$values[] = $filters['correlation_id'];
-			$values[] = $filters['correlation_id'];
-			$values[] = $filters['flow_id'];
-			$values[] = $filters['flow_id'];
+			$base['flow_id']        = '';
+			[ $where, $values ]     = self::where_clause( $base, $level );
+			$where                 .= '' === $where ? ' WHERE ' : ' AND ';
+			$where                 .= '((`correlation_id` = %s AND BINARY `correlation_id` = BINARY %s) OR (`flow_id` = %s AND BINARY `flow_id` = BINARY %s))';
+			$values[]               = $filters['correlation_id'];
+			$values[]               = $filters['correlation_id'];
+			$values[]               = $filters['flow_id'];
+			$values[]               = $filters['flow_id'];
 		} else {
 			[ $where, $values ] = self::where_clause( $filters, $level, $expand_correlation );
 		}
-		$where             .= '' === $where ? ' WHERE ' : ' AND ';
-		$where             .= '`id` < %d';
-		$values[]           = $before_id > 0 ? $before_id : PHP_INT_MAX;
-		$values[]           = max( 1, min( 100, $limit ) );
-		$rows               = $wpdb->get_results(
+		$where   .= '' === $where ? ' WHERE ' : ' AND ';
+		$where   .= '`id` < %d';
+		$values[] = $before_id > 0 ? $before_id : PHP_INT_MAX;
+		$values[] = max( 1, min( 100, $limit ) );
+		$rows     = $wpdb->get_results(
 			// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Dynamic fixed-clause WHERE values are assembled together.
 			$wpdb->prepare(
 				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The WHERE fragment contains only fixed clauses and placeholders.

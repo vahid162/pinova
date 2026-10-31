@@ -9,20 +9,20 @@ use Throwable;
 /** A bounded observation report, never an authentication or repair authority. */
 final class IssueMonitor {
 
-	public const MAX_ROWS          = 1000;
+	public const MAX_ROWS            = 1000;
 	private const TIMELINE_MAX_BYTES = 1900000;
-	private const FAILURE_EVENTS   = [ 'admin.sms_test_failed', 'auth.request_failed', 'auth.redirect_failed', 'identity.mobile_conflict', 'integration.operation_failed', 'logging.write_failed', 'otp.channel_send_failed', 'otp.delivery_failed', 'user.export_failed' ];
-	private const REJECTION_EVENTS = [ 'auth.password_failed', 'auth.logout_rejected', 'auth.password_reset_failed', 'auth.session_failed', 'otp.verify_failed', 'security.rate_limited' ];
-	private const OPTION_PREFIX    = 'pinova_issue_review_';
+	private const FAILURE_EVENTS     = [ 'admin.sms_test_failed', 'auth.request_failed', 'auth.redirect_failed', 'identity.mobile_conflict', 'integration.operation_failed', 'logging.write_failed', 'otp.channel_send_failed', 'otp.delivery_failed', 'user.export_failed' ];
+	private const REJECTION_EVENTS   = [ 'auth.password_failed', 'auth.logout_rejected', 'auth.password_reset_failed', 'auth.session_failed', 'otp.verify_failed', 'security.rate_limited' ];
+	private const OPTION_PREFIX      = 'pinova_issue_review_';
 
 	/** @param array<string,mixed> $filters
 	 * @return array<string,mixed>
 	 */
 	public static function report( array $filters = [] ): array {
 		$selector = self::selector( $filters );
-		$today = gmdate( 'Y-m-d' );
-		$from  = $filters['created_from'] ?? '';
-		$to    = $filters['created_to'] ?? '';
+		$today    = gmdate( 'Y-m-d' );
+		$from     = $filters['created_from'] ?? '';
+		$to       = $filters['created_to'] ?? '';
 		if ( '' === $from && '' === $to ) {
 			$from = $today;
 			$to   = $today;
@@ -34,13 +34,13 @@ final class IssueMonitor {
 		$valid   = $selector['valid'] && LogRepository::valid_filters( $filters ) && '' !== $from && '' !== $to
 			&& strtotime( $to . ' UTC' ) - strtotime( $from . ' UTC' ) < 7 * DAY_IN_SECONDS && $to <= $today;
 		$report  = [
-			'schema'         => 'pinova.issues.v1',
-			'mode'           => 'none' === $selector['type'] ? 'summary' : 'timeline',
+			'schema'            => 'pinova.issues.v1',
+			'mode'              => 'none' === $selector['type'] ? 'summary' : 'timeline',
 			'selected_selector' => $selector,
-			'generated_at'   => gmdate( 'Y-m-d\TH:i:s\Z' ),
-			'build'          => BuildMetadata::info(),
-			'selected_range' => [ $from, $to ],
-			'coverage'       => [
+			'generated_at'      => gmdate( 'Y-m-d\TH:i:s\Z' ),
+			'build'             => BuildMetadata::info(),
+			'selected_range'    => [ $from, $to ],
+			'coverage'          => [
 				'valid_range'          => $valid,
 				'valid_selector'       => $selector['valid'],
 				'complete'             => false,
@@ -54,8 +54,8 @@ final class IssueMonitor {
 				'external_logs'        => 'not_inspected',
 				'physical_delivery'    => 'not_verified',
 			],
-			'health'         => [],
-			'queue_health'   => [
+			'health'            => [],
+			'queue_health'      => [
 				'read_success' => false,
 				'truncated'    => false,
 				'pending'      => 0,
@@ -64,12 +64,12 @@ final class IssueMonitor {
 				'processing'   => 0,
 				'legacy'       => 0,
 			],
-			'integrations'   => [],
-			'otp_cleanup'    => [],
-			'diagnostics'    => [],
+			'integrations'      => [],
+			'otp_cleanup'       => [],
+			'diagnostics'       => [],
 			'diagnostic_budget' => [],
-			'timeline'       => [],
-			'issues'         => [],
+			'timeline'          => [],
+			'issues'            => [],
 		];
 		try {
 			// Current capability health is independent of selected historical evidence.
@@ -101,15 +101,15 @@ final class IssueMonitor {
 				}
 			}
 			$report['coverage']['retention_days']   = LogRepository::retention_days();
-			$report['diagnostics']                 = Logger::diagnostics_status();
+			$report['diagnostics']                  = Logger::diagnostics_status();
 			$report['coverage']['diagnostic_until'] = $report['diagnostics']['until'];
-			$report['diagnostic_budget']           = EventThrottle::diagnostics_snapshot();
+			$report['diagnostic_budget']            = EventThrottle::diagnostics_snapshot();
 			if ( 'summary' !== $report['mode'] ) {
 				$filters[ 'flow' === $selector['type'] ? 'flow_id' : 'correlation_id' ] = $selector['value'];
 				return self::timeline_report( $report, $filters );
 			}
-			$rows                                   = [];
-			$cursor                                 = 0;
+			$rows   = [];
+			$cursor = 0;
 			do {
 				$batch = LogRepository::incident_batch( $filters, $cursor, 100 );
 				if ( ! $batch['success'] ) {
@@ -154,14 +154,22 @@ final class IssueMonitor {
 	 * @return array{valid:bool,type:string,value:string}
 	 */
 	public static function selector( array $filters ): array {
-		$flow = $filters['flow_id'] ?? '';
+		$flow        = $filters['flow_id'] ?? '';
 		$correlation = $filters['correlation_id'] ?? '';
 		if ( ! is_string( $flow ) || ! is_string( $correlation ) || ( '' !== $flow && '' !== $correlation )
 			|| ( '' !== $flow && ! preg_match( '/\A[a-f0-9]{32}\z/', $flow ) )
-			|| ( '' !== $correlation && $correlation !== LogRepository::redact_correlation_id( $correlation ) ) ) {
-			return [ 'valid' => false, 'type' => 'invalid', 'value' => '' ];
+			|| ( '' !== $correlation && LogRepository::redact_correlation_id( $correlation ) !== $correlation ) ) {
+			return [
+				'valid' => false,
+				'type'  => 'invalid',
+				'value' => '',
+			];
 		}
-		return [ 'valid' => true, 'type' => '' !== $flow ? 'flow' : ( '' !== $correlation ? 'correlation' : 'none' ), 'value' => '' !== $flow ? $flow : $correlation ];
+		return [
+			'valid' => true,
+			'type'  => '' !== $flow ? 'flow' : ( '' !== $correlation ? 'correlation' : 'none' ),
+			'value' => '' !== $flow ? $flow : $correlation,
+		];
 	}
 
 	/** @param array<string,mixed> $report
@@ -169,8 +177,8 @@ final class IssueMonitor {
 	 * @return array<string,mixed>
 	 */
 	private static function timeline_report( array $report, array $filters ): array {
-		$lookup = LogRepository::timeline_lookup( $filters );
-		$report['coverage']['lookup_rows'] = $lookup['lookup_rows'];
+		$lookup                              = LogRepository::timeline_lookup( $filters );
+		$report['coverage']['lookup_rows']   = $lookup['lookup_rows'];
 		$report['coverage']['rows_examined'] = $lookup['lookup_rows'];
 		if ( ! $lookup['success'] ) {
 			return $report;
@@ -179,15 +187,15 @@ final class IssueMonitor {
 		if ( 'correlation' === $report['selected_selector']['type'] ) {
 			if ( 1 === count( $lookup['flows'] ) ) {
 				$filters['flow_id'] = $lookup['flows'][0];
-				$linkage = 'sole_flow';
+				$linkage            = 'sole_flow';
 			} elseif ( 1 < count( $lookup['flows'] ) ) {
 				$linkage = 'ambiguous';
 			}
 		}
 		$report['coverage']['snapshot_event_id'] = $lookup['snapshot_event_id'];
-		$rows = [];
-		$cursor = $lookup['snapshot_event_id'] + 1;
-		$remaining = self::MAX_ROWS - $lookup['lookup_rows'];
+		$rows                                    = [];
+		$cursor                                  = $lookup['snapshot_event_id'] + 1;
+		$remaining                               = self::MAX_ROWS - $lookup['lookup_rows'];
 		do {
 			$limit = min( 100, $remaining );
 			$batch = LogRepository::timeline_batch( $filters, $cursor, $limit );
@@ -195,11 +203,11 @@ final class IssueMonitor {
 				break;
 			}
 			foreach ( $batch['rows'] as $row ) {
-				$cursor = (int) $row['id'];
+				$cursor                                  = (int) $row['id'];
 				$report['coverage']['context_truncated'] = $report['coverage']['context_truncated'] || ! empty( $row['context_truncated'] );
-				$rows[] = $row;
+				$rows[]                                  = $row;
 			}
-			$remaining -= count( $batch['rows'] );
+			$remaining                          -= count( $batch['rows'] );
 			$report['coverage']['rows_examined'] = count( $rows ) + $lookup['lookup_rows'];
 			if ( count( $batch['rows'] ) < $limit ) {
 				$report['coverage']['complete'] = ! $report['coverage']['context_truncated'] && 'ambiguous' !== $linkage;
@@ -211,12 +219,12 @@ final class IssueMonitor {
 				break;
 			}
 		} while ( true );
-		$report['timeline'] = self::timeline( $rows );
-		$report['timeline']['linkage'] = $linkage;
+		$report['timeline']                     = self::timeline( $rows );
+		$report['timeline']['linkage']          = $linkage;
 		$report['timeline']['expanded_flow_id'] = 'sole_flow' === $linkage ? $filters['flow_id'] : '';
 		if ( $report['timeline']['byte_truncated'] ) {
 			$report['coverage']['truncated'] = true;
-			$report['coverage']['complete'] = false;
+			$report['coverage']['complete']  = false;
 		}
 		$report['timeline']['coverage'] = $report['coverage']['complete'] ? 'sampled' : 'incomplete';
 		return $report;
@@ -230,14 +238,24 @@ final class IssueMonitor {
 		$rows = array_slice( $rows, 0, self::MAX_ROWS );
 		usort( $rows, static fn( array $a, array $b ): int => (int) ( $a['id'] ?? 0 ) <=> (int) ( $b['id'] ?? 0 ) );
 		$result = [
-			'events' => [], 'observed_stages' => [], 'unobserved_stages' => [],
+			'events'                             => [],
+			'observed_stages'                    => [],
+			'unobserved_stages'                  => [],
 			'catalogue_is_not_required_sequence' => true,
-			'physical_delivery' => 'not_verified', 'byte_truncated' => false,
-			'observed_facts' => [ 'transport_completed' => false, 'channel_accepted' => false, 'channel_rejected' => false, 'channel_outcome_unknown' => false, 'otp_verified' => false, 'session_created' => false ],
+			'physical_delivery'                  => 'not_verified',
+			'byte_truncated'                     => false,
+			'observed_facts'                     => [
+				'transport_completed'     => false,
+				'channel_accepted'        => false,
+				'channel_rejected'        => false,
+				'channel_outcome_unknown' => false,
+				'otp_verified'            => false,
+				'session_created'         => false,
+			],
 		];
-		$bytes = 0;
+		$bytes  = 0;
 		foreach ( $rows as $row ) {
-			$event = EventEvidence::redact( $row );
+			$event       = EventEvidence::redact( $row );
 			$event['id'] = max( 0, (int) ( $row['id'] ?? 0 ) );
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- This bounded projection also runs in pure unit tests.
 			$encoded = json_encode( $event, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
@@ -245,9 +263,9 @@ final class IssueMonitor {
 				$result['byte_truncated'] = true;
 				break;
 			}
-			$bytes += strlen( $encoded ) + 1;
+			$bytes             += strlen( $encoded ) + 1;
 			$result['events'][] = $event;
-			$stage = $event['context']['stage'] ?? '';
+			$stage              = $event['context']['stage'] ?? '';
 			if ( DiagnosticContext::EVENT === $event['event'] && '' !== $stage ) {
 				$result['observed_stages'][] = $stage;
 				if ( 'provider_completed' === $stage ) {
@@ -267,7 +285,7 @@ final class IssueMonitor {
 				$result['observed_facts']['session_created'] = true;
 			}
 		}
-		$result['observed_stages'] = array_values( array_unique( $result['observed_stages'] ) );
+		$result['observed_stages']   = array_values( array_unique( $result['observed_stages'] ) );
 		$result['unobserved_stages'] = array_values( array_diff( DiagnosticContext::stage_names(), $result['observed_stages'] ) );
 		return $result;
 	}

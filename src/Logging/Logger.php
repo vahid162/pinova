@@ -199,7 +199,13 @@ final class Logger extends AbstractLogger {
 	 */
 	public static function diagnostics_status(): array {
 		global $wpdb;
-		$result = [ 'read_success' => false, 'status' => 'unavailable', 'until' => 0, 'scope' => [], 'initialization_locked' => false ];
+		$result = [
+			'read_success'          => false,
+			'status'                => 'unavailable',
+			'until'                 => 0,
+			'scope'                 => [],
+			'initialization_locked' => false,
+		];
 		try {
 			$before = is_object( $wpdb ) ? (int) ( $wpdb->num_queries ?? 0 ) : 0;
 			$config = get_option( 'pinova_logging', [] );
@@ -212,13 +218,13 @@ final class Logger extends AbstractLogger {
 				return $result;
 			}
 			$result['initialization_locked'] = array_key_exists( 'diagnostic_budget_initialized', $config );
-			$until = $config['diagnostic_until'] ?? 0;
+			$until                           = $config['diagnostic_until'] ?? 0;
 			if ( ! is_int( $until ) || 0 > $until || time() + 86400 < $until ) {
 				return $result;
 			}
 			$result['until']  = self::effective_diagnostic_until( $until );
 			$result['status'] = 0 === $result['until'] ? 'off' : ( time() >= $result['until'] ? 'expired' : 'legacy_unscoped' );
-			$scope = $config['diagnostic_scope'] ?? [];
+			$scope            = $config['diagnostic_scope'] ?? [];
 			if ( [] === $scope ) {
 				return $result;
 			}
@@ -229,7 +235,10 @@ final class Logger extends AbstractLogger {
 				$result['until']  = 0;
 				return $result;
 			}
-			$result['scope'] = [ 'type' => $scope['type'], 'value' => $scope['value'] ];
+			$result['scope'] = [
+				'type'  => $scope['type'],
+				'value' => $scope['value'],
+			];
 			if ( time() < $result['until'] ) {
 				$result['status'] = 'active';
 			}
@@ -309,8 +318,8 @@ final class Logger extends AbstractLogger {
 	}
 
 	private function meets_threshold( string $level ): bool {
-		$config = call_user_func( $this->config_provider );
-		$config = is_array( $config ) ? $config : [];
+		$config  = call_user_func( $this->config_provider );
+		$config  = is_array( $config ) ? $config : [];
 		$minimum = isset( $config['minimum_level'] ) ? strtolower( (string) $config['minimum_level'] ) : LogLevel::WARNING;
 		$minimum = in_array( $minimum, [ LogLevel::INFO, LogLevel::NOTICE, LogLevel::WARNING, LogLevel::ERROR ], true )
 			? $minimum
@@ -321,13 +330,13 @@ final class Logger extends AbstractLogger {
 
 	/** @return array{minimum_level:string, diagnostic_until:int} */
 	private function wordpress_config(): array {
-		$minimum = class_exists( Pinova::class )
+		$minimum      = class_exists( Pinova::class )
 			? (string) Pinova::get_option( 'logging.minimum_level', LogLevel::WARNING )
 			: LogLevel::WARNING;
 		$stored_until = class_exists( Pinova::class )
 			? Pinova::get_option( 'logging.diagnostic_until', 0 )
 			: 0;
-		$until = is_int( $stored_until ) && 0 < $stored_until && time() + 86400 >= $stored_until ? self::effective_diagnostic_until( $stored_until ) : 0;
+		$until        = is_int( $stored_until ) && 0 < $stored_until && time() + 86400 >= $stored_until ? self::effective_diagnostic_until( $stored_until ) : 0;
 
 		if ( function_exists( 'apply_filters' ) ) {
 			$minimum = (string) apply_filters( 'pinova/logging_minimum_level', $minimum );

@@ -1,5 +1,6 @@
 """Unprivileged parser/ownership tests; never mount, dump or inspect live processes."""
 import contextlib
+from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import io
@@ -16,6 +17,37 @@ HELPER = Path(__file__).resolve().parents[1] / 'Integration/native-fpm-crash-evi
 SPEC = importlib.util.spec_from_file_location('native_crash_evidence', HELPER)
 capture = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(capture)
+NANO = 1000000000
+
+
+def clock_mapping(real, boot, *, offset=0):
+    before_ns = round(real * NANO)
+    origin_ns = round(real - boot) * NANO
+    return {'realtime_before_ns': before_ns, 'boottime_ns': before_ns - origin_ns,
+            'realtime_after_ns': before_ns + 1000000, 'clock_ticks_per_second': 100,
+            'utc_offset_seconds': offset}
+
+
+def timing_metadata(base, arm, *, core_epoch=1793462978, prewarm=1793462960, start_ticks=100,
+                    lifetime=23, reap=1793462978, drain_end=None):
+    """Clock/log/owned-drain metadata only; never touches proc or a native clock."""
+    origin = 1793462954
+    facts = json.loads((base / 'inventory-a1.json').read_text())
+    facts['workers'][0].update({'start_ticks': start_ticks, 'started_epoch': origin + start_ticks / 100})
+    facts['started_at'] = int(prewarm)
+    facts['master'] = {'pid': 500, 'start_ticks': 50, 'exe_identity': [1, 2]}
+    facts['clock_mapping'] = clock_mapping(prewarm, prewarm - origin)
+    facts['prewarm_wall_interval_ns'] = [facts['clock_mapping']['realtime_before_ns'], facts['clock_mapping']['realtime_after_ns']]
+    (base / 'inventory-a1.json').write_text(json.dumps(facts))
+    stamp = datetime.fromtimestamp(reap, timezone.utc).strftime('%d-%b-%Y %H:%M:%S')
+    (arm / 'private/fpm.log').write_text(f'[{stamp}] WARNING: [pool fixture] child 123 exited on signal 11 (SIGSEGV - core dumped) after {lifetime:.6f} seconds from start\n')
+    end = reap + 1.1 if drain_end is None else drain_end
+    drain = {'state': 'drained', 'resource_acceptance': False, 'master_verified': True, 'master': facts['master'],
+             'master_terminated': False, 'core_dumping_remaining': 0, 'exit_match_count': 1,
+             'started_realtime_ns': round((core_epoch + 0.1) * NANO), 'completed_realtime_ns': round(end * NANO),
+             'clock_mapping': clock_mapping(end, end - origin), 'duration_seconds': end - core_epoch - 0.1}
+    (base / 'drain-a1.json').write_text(json.dumps(drain))
+    return facts, drain
 
 
 def note(name, kind, desc):
@@ -45,7 +77,7 @@ def environment():
 
 
 @contextlib.contextmanager
-def core_collection_fixture(*, malformed_environment=False, core_pid=123, core_signal=11, core_executable='/usr/sbin/php-fpm8.4'):
+def core_collection_fixture(*, malformed_environment=False, core_pid=123, core_signal=11, core_executable='/usr/sbin/php-fpm8.4', core_epoch=1793462978):
     """Tiny synthetic ELF/files; every ownership/native/process seam is mocked."""
     with tempfile.TemporaryDirectory() as temp:
         base, arm = Path(temp) / 'capture', Path(temp) / 'arm'
@@ -64,8 +96,9 @@ def core_collection_fixture(*, malformed_environment=False, core_pid=123, core_s
         struct.pack_into('<h', status, 12, core_signal)
         struct.pack_into('<i', status, 32, core_pid)
         files = struct.pack('<QQQQQ', 1, 4096, 0, 1, 0) + core_executable.encode() + b'\0'
-        core = base / 'cores/core.123.11.1793462978'
+        core = base / f'cores/core.123.11.{core_epoch}'
         core.write_bytes(elf(note(b'CORE', 1, status) + note(b'CORE', 0x46494C45, files)))
+        timing_metadata(base, arm, core_epoch=core_epoch)
         original_read, original_lstat = capture.read_bytes, Path.lstat
 
         def bounded_read(path, limit):
@@ -92,7 +125,10 @@ def core_collection_fixture(*, malformed_environment=False, core_pid=123, core_s
               mock.patch.object(capture, 'build_id', return_value=identity),
               mock.patch.object(capture, 'read_bytes', side_effect=bounded_read),
               mock.patch.object(Path, 'lstat', owned_core_lstat),
+              mock.patch.object(capture.time, 'localtime', return_value=types.SimpleNamespace(tm_gmtoff=0)),
               mock.patch.object(capture.time, 'time', return_value=1793462980),
+              mock.patch.object(capture.time, 'time_ns', return_value=1793462980 * NANO),
+              mock.patch.object(capture.time, 'clock_gettime_ns', side_effect=lambda clock: 1793462980 * NANO if clock == capture.time.CLOCK_REALTIME else 26 * NANO),
               mock.patch.object(capture, 'process_identity', side_effect=FileNotFoundError),
               mock.patch.object(capture, 'run', side_effect=gdb_receipt) as debugger):
             yield base, arm, core, debugger
@@ -195,6 +231,247 @@ def gdb_entry_fixture(*, unwind_failure=False, debug_case=None):
 
 
 class NativeCrashEvidenceTest(unittest.TestCase):
+    def test_inventory_records_owned_master_and_paired_prewarm_clocks(self):
+        with core_collection_fixture() as (base, arm, core, debugger):
+            (arm / 'fixture-owned').write_text('123:1\n')
+            original_text, original_bytes, original_read = Path.read_text, Path.read_bytes, capture.read_bytes
+            original_link, original_stat = os.readlink, os.stat
+            workers = list(range(101, 111))
+
+            def proc_text(path, *args, **kwargs):
+                value = str(path)
+                if value == '/proc/500/task/500/children':
+                    return ' '.join(map(str, workers))
+                if value == '/proc/stat':
+                    return 'btime 1793462954\n'
+                if value == '/proc/500/stat':
+                    return '500 (php-fpm) ' + ' '.join(['S'] + ['0'] * 18 + ['50'] + ['0'] * 8)
+                if value.startswith('/proc/'):
+                    raise AssertionError('Unmocked proc read refused.')
+                return original_text(path, *args, **kwargs)
+
+            def proc_bytes(path):
+                if str(path) == '/proc/500/cmdline':
+                    return ('php-fpm: master process ' + str(arm) + '/fpm.conf\0').encode()
+                if str(path).startswith('/proc/'):
+                    raise AssertionError('Unmocked proc read refused.')
+                return original_bytes(path)
+
+            def identity(pid, executable):
+                return {'pid': pid, 'start_ticks': 50 if pid == 500 else 100,
+                        'pool': 'master' if pid == 500 else 'fixture', 'exe_identity': [1, 2]}
+
+            def bounded_read(path, limit):
+                if str(path).startswith('/proc/'):
+                    return proc_bytes(path) if str(path).endswith('/cmdline') else proc_text(path).encode()
+                return original_read(path, limit)
+
+            with (mock.patch.dict(os.environ, {'PINOVA_FPM_BIN': '/usr/sbin/php-fpm8.4', 'PINOVA_FPM_MASTER_PID': '500'}),
+                  mock.patch.object(capture, 'state_load', return_value={'owner': '123:1'}),
+                  mock.patch.object(Path, 'read_text', proc_text), mock.patch.object(Path, 'read_bytes', proc_bytes),
+                  mock.patch.object(capture, 'read_bytes', side_effect=bounded_read),
+                  mock.patch.object(os, 'readlink', side_effect=lambda path, *a, **k: '/usr/sbin/php-fpm8.4' if str(path).startswith('/proc/') else original_link(path, *a, **k)),
+                  mock.patch.object(os, 'stat', side_effect=lambda path, *a, **k: types.SimpleNamespace(st_dev=1, st_ino=2) if str(path).startswith('/proc/') else original_stat(path, *a, **k)),
+                  mock.patch.object(capture, 'process_identity', side_effect=identity),
+                  mock.patch.object(capture.os, 'sysconf', return_value=100),
+                  mock.patch.object(capture.time, 'localtime', return_value=types.SimpleNamespace(tm_gmtoff=0)),
+                  mock.patch.object(capture, 'write_json') as saved,
+                  mock.patch.object(capture, 'run') as native, mock.patch.object(capture.subprocess, 'run') as native_process,
+                  mock.patch.object(os, 'kill') as kill, mock.patch.object(os, 'pidfd_open') as pidfd,
+                  mock.patch.object(capture.signal, 'pidfd_send_signal') as signals):
+                capture.inventory(base.parent, arm, base)
+                value = saved.call_args.args[1]
+                self.assertIn('clock_mapping', value, 'The inventory must record the paired clocks used by its birth-time fence.')
+                self.assertEqual(value['clock_mapping']['utc_offset_seconds'], 0)
+                self.assertEqual(value['clock_mapping']['clock_ticks_per_second'], 100)
+                self.assertEqual(value['master']['pid'], 500)
+                self.assertEqual(value['master']['start_ticks'], 50)
+                self.assertEqual(len(value['prewarm_wall_interval_ns']), 2)
+                self.assertLessEqual(*value['prewarm_wall_interval_ns'])
+                for operation in (native, native_process, kill, pidfd, signals):
+                    operation.assert_not_called()
+
+    def test_native_drain_is_readonly_bounded_and_keeps_owned_master_alive(self):
+        for fault in ('none', 'timeout', 'identity_drift', 'missing_exit'):
+            with self.subTest(drain=fault), core_collection_fixture() as (base, arm, core, debugger):
+                elapsed = [0.0]
+                sleeps = [0]
+                original_text, original_bytes, original_read = Path.read_text, Path.read_bytes, capture.read_bytes
+                original_link, original_stat = os.readlink, os.stat
+                facts = json.loads((base / 'inventory-a1.json').read_text())
+                facts['workers'].append({**facts['workers'][0], 'pid': 124, 'start_ticks': 101})
+                (base / 'inventory-a1.json').write_text(json.dumps(facts))
+                (arm / 'private/fpm.log').write_text('')
+                row = facts['workers'][0]
+
+                def advance(seconds):
+                    self.assertGreater(seconds, 0)
+                    self.assertLessEqual(seconds, 30)
+                    sleeps[0] += 1
+                    if sleeps[0] > 1024:
+                        raise AssertionError('The drain exceeded its finite polling budget.')
+                    elapsed[0] += seconds
+                    if elapsed[0] >= 0.2 and fault not in ('timeout', 'missing_exit'):
+                        stamp = datetime.fromtimestamp(1793462980, timezone.utc).strftime('%d-%b-%Y %H:%M:%S')
+                        (arm / 'private/fpm.log').write_text(f'[{stamp}] WARNING: [pool fixture] child 123 exited on signal 11 (SIGSEGV - core dumped) after 25.000000 seconds from start\n')
+
+                def proc_data(path):
+                    value = str(path)
+                    if value in ('/proc/123/status', '/proc/124/status', '/proc/500/status'):
+                        dumping = value == '/proc/123/status' and (fault == 'timeout' or elapsed[0] < 0.2)
+                        return ('Name:\tphp-fpm\nCoreDumping:\t' + str(int(dumping)) + '\n').encode()
+                    if value == '/proc/500/task/500/children':
+                        return b'123 124'
+                    if value.endswith('/stat') and value.split('/')[2] in ('123', '124', '500'):
+                        pid = int(value.split('/')[2]); ticks = 50 if pid == 500 else 100 if pid == 123 else 101
+                        return (str(pid) + ' (php-fpm) ' + ' '.join(['S'] + ['0'] * 18 + [str(ticks)] + ['0'] * 8)).encode()
+                    if value == '/proc/500/cmdline':
+                        return ('php-fpm: master process ' + str(arm) + '/fpm.conf\0').encode()
+                    if value in ('/proc/123/cmdline', '/proc/124/cmdline'):
+                        return b'php-fpm: pool fixture\0'
+                    if value.startswith('/proc/'):
+                        raise AssertionError('Unmocked proc read refused.')
+                    return None
+
+                def proc_text(path, *args, **kwargs):
+                    data = proc_data(path)
+                    return data.decode() if data is not None else original_text(path, *args, **kwargs)
+
+                def proc_bytes(path):
+                    data = proc_data(path)
+                    return data if data is not None else original_bytes(path)
+
+                def bounded_read(path, limit):
+                    data = proc_data(path)
+                    return data if data is not None else original_read(path, limit)
+
+                def identity(pid, executable):
+                    if pid == 500:
+                        return {'pid': 500, 'start_ticks': 50, 'pool': 'master', 'exe_identity': [1, 2]}
+                    result = {**row, 'pid': pid, 'start_ticks': 101 if pid == 124 or fault == 'identity_drift' else 100}
+                    return result
+
+                def proc_link(path, *args, **kwargs):
+                    return '/usr/sbin/php-fpm8.4' if str(path).startswith('/proc/') else original_link(path, *args, **kwargs)
+
+                def proc_stat(path, *args, **kwargs):
+                    return types.SimpleNamespace(st_dev=1, st_ino=2) if str(path).startswith('/proc/') else original_stat(path, *args, **kwargs)
+
+                output = io.StringIO()
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch.object(capture, 'context', return_value=(base.parent, arm, base)))
+                    stack.enter_context(mock.patch.object(capture, 'state_load', return_value={'owner': '123:1'}))
+                    stack.enter_context(mock.patch.dict(os.environ, {'PINOVA_FPM_MASTER_PID': '500', 'PINOVA_FPM_BIN': '/usr/sbin/php-fpm8.4'}))
+                    stack.enter_context(mock.patch.object(capture.sys, 'argv', ['helper', 'drain']))
+                    stack.enter_context(mock.patch.object(Path, 'read_text', proc_text))
+                    stack.enter_context(mock.patch.object(Path, 'read_bytes', proc_bytes))
+                    stack.enter_context(mock.patch.object(capture, 'read_bytes', side_effect=bounded_read))
+                    stack.enter_context(mock.patch.object(os, 'readlink', side_effect=proc_link))
+                    stack.enter_context(mock.patch.object(os, 'stat', side_effect=proc_stat))
+                    stack.enter_context(mock.patch.object(capture, 'process_identity', side_effect=identity))
+                    stack.enter_context(mock.patch.object(capture.time, 'sleep', side_effect=advance))
+                    stack.enter_context(mock.patch.object(capture.time, 'monotonic', side_effect=lambda: elapsed[0]))
+                    stack.enter_context(mock.patch.object(capture.time, 'monotonic_ns', side_effect=lambda: round(elapsed[0] * NANO)))
+                    stack.enter_context(mock.patch.object(capture.time, 'time', side_effect=lambda: 1793462980 + elapsed[0]))
+                    stack.enter_context(mock.patch.object(capture.time, 'time_ns', side_effect=lambda: 1793462980 * NANO + round(elapsed[0] * NANO)))
+                    stack.enter_context(mock.patch.object(capture.time, 'clock_gettime_ns', side_effect=lambda clock: (1793462980 * NANO if clock == capture.time.CLOCK_REALTIME else 26 * NANO) + round(elapsed[0] * NANO)))
+                    native = stack.enter_context(mock.patch.object(capture, 'run'))
+                    native_process = stack.enter_context(mock.patch.object(capture.subprocess, 'run'))
+                    kill = stack.enter_context(mock.patch.object(os, 'kill'))
+                    pidfd = stack.enter_context(mock.patch.object(os, 'pidfd_open'))
+                    signal_send = stack.enter_context(mock.patch.object(capture.signal, 'pidfd_send_signal'))
+                    stack.enter_context(contextlib.redirect_stdout(output))
+                    capture.main()
+                    result = json.loads(output.getvalue())
+                    self.assertNotEqual(result.get('reason'), 'command_unavailable', 'The existing helper command entry must perform the native-only bounded drain.')
+                    self.assertEqual(result['state'], 'drained' if fault == 'none' else 'needs_review')
+                    self.assertFalse(result['resource_acceptance'])
+                    self.assertFalse(result['master_terminated'])
+                    self.assertLessEqual(result['duration_seconds'], 30)
+                    if fault == 'none':
+                        self.assertEqual(result['core_dumping_remaining'], 0)
+                        self.assertEqual(result['exit_match_count'], 1)
+                    for operation in (native, native_process, kill, pidfd, signal_send):
+                        operation.assert_not_called()
+
+    def test_shell_native_failure_drain_precedes_term_and_preserves_original_status(self):
+        source = (HELPER.parent / 'otp-fpm-full-stack.sh').read_text()
+        body = source.split('cleanup_processes() {', 1)[1].split('\n}\ntrap cleanup_processes EXIT', 1)[0]
+        self.assertIn('native-fpm-crash-evidence.py', body, 'Native failure cleanup must invoke the bounded read-only drain.')
+        self.assertIn('PINOVA_FPM_NATIVE_CAPTURE', body)
+        self.assertLess(body.index(' drain'), body.index('kill -TERM'))
+        self.assertIn('local status=$?', body)
+        self.assertIn('exit "${status}"', body)
+
+    def test_missing_duplicate_exit_keeps_finite_core_timing_facts_before_refusal(self):
+        for fault in ('missing', 'duplicate'):
+            with self.subTest(exit_record=fault), core_collection_fixture() as (base, arm, core, debugger):
+                log = arm / 'private/fpm.log'
+                content = log.read_text()
+                log.write_text('' if fault == 'missing' else content + content)
+                result = None
+                try:
+                    result = capture.collect(base.parent, arm, base)
+                except capture.CaptureError:
+                    pass
+                self.assertIsNotNone(result, 'A refused lifetime guard must preserve finite core and clock facts instead of erasing them.')
+                self.assertEqual(result['state'], 'needs_review')
+                self.assertEqual(result['core_count'], 1)
+                item = result['cores'][0]
+                self.assertEqual((item['pid'], item['signal']), (123, 11))
+                timing = item['timing']
+                self.assertEqual(timing['core_timestamp_epoch'], 1793462978)
+                self.assertEqual(timing['core_size_bytes'], core.stat().st_size)
+                self.assertEqual(timing['worker_start_ticks'], 100)
+                self.assertEqual(timing['exit_match_count'], 0 if fault == 'missing' else 2)
+                self.assertEqual(len(timing['birth_epoch_interval_ns']), 2)
+                self.assertEqual(len(timing['prewarm_wall_interval_ns']), 2)
+                self.assertIn('drain', timing)
+                self.assertEqual(item['frames'], [])
+                debugger.assert_not_called()
+
+    def test_reap_delay_and_fractional_core_second_use_endpoint_intersections(self):
+        for case in ('long_dump_delay', 'fractional_core_second'):
+            epoch = 1793462978 if case == 'long_dump_delay' else 1793462955
+            with self.subTest(clock_case=case), core_collection_fixture(core_epoch=epoch) as (base, arm, core, debugger):
+                if case == 'long_dump_delay':
+                    timing_metadata(base, arm, lifetime=40, reap=1793462995)
+                else:
+                    timing_metadata(base, arm, core_epoch=epoch, prewarm=1793462955.05, start_ticks=101, lifetime=9.95, reap=1793462965)
+                with (mock.patch.object(capture.time, 'time', return_value=1793462998),
+                      mock.patch.object(capture.time, 'time_ns', return_value=1793462998 * NANO),
+                      mock.patch.object(capture.time, 'clock_gettime_ns', side_effect=lambda clock: 1793462998 * NANO if clock == capture.time.CLOCK_REALTIME else 44 * NANO)):
+                    result = None
+                    try:
+                        result = capture.collect(base.parent, arm, base)
+                    except capture.CaptureError:
+                        pass
+                self.assertIsNotNone(result, 'Kernel core creation and parent reap are distinct events; valid endpoint intervals must reach diagnosis.')
+                debugger.assert_called_once()
+                self.assertEqual(result['cores'][0]['frames'][0]['symbol'], 'zend_execute')
+                self.assertFalse(result['resource_acceptance'])
+
+    def test_discontinuous_nonutc_and_inconsistent_endpoints_refuse_gdb(self):
+        for fault in ('clock_step', 'nonutc', 'postfork_outside_birth_window', 'reap_after_drain'):
+            with self.subTest(clock_guard=fault), core_collection_fixture() as (base, arm, core, debugger):
+                facts, drain = timing_metadata(base, arm)
+                if fault == 'clock_step':
+                    drain['clock_mapping']['boottime_ns'] -= 5 * NANO
+                elif fault == 'nonutc':
+                    facts['clock_mapping']['utc_offset_seconds'] = 3600
+                elif fault == 'postfork_outside_birth_window':
+                    timing_metadata(base, arm, lifetime=1)
+                else:
+                    drain['completed_realtime_ns'] = 1793462977 * NANO
+                if fault != 'postfork_outside_birth_window':
+                    (base / 'inventory-a1.json').write_text(json.dumps(facts))
+                    (base / 'drain-a1.json').write_text(json.dumps(drain))
+                try:
+                    capture.collect(base.parent, arm, base)
+                except capture.CaptureError:
+                    pass
+                debugger.assert_not_called()
+
     def test_bounded_partial_core_retains_frames_without_complete_stack_claim(self):
         for mode in ('at_limit', 'missing_load'):
             with self.subTest(partial=mode), core_collection_fixture() as (base, arm, core, debugger):

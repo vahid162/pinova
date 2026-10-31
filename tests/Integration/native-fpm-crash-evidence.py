@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Disposable hosted diagnostic only. Never publishes cores or debugger text."""
 import hashlib
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -341,9 +342,139 @@ def process_identity(pid, executable):
     require(target == executable, "process_identity_mismatch")
     command = (proc / "cmdline").read_bytes()
     pool = "fixture_status" if command.startswith(b"php-fpm: pool fixture_status\0") else "fixture" if command.startswith(b"php-fpm: pool fixture\0") else None
+    if (pid == int(os.environ.get('PINOVA_FPM_MASTER_PID', '0'))
+            and command.startswith(b'php-fpm: master process ')
+            and os.environ.get('PINOVA_FPM_FULL_STACK_ROOT', '').encode() in command
+            and os.environ.get('PINOVA_FPM_FULL_STACK_ROOT')):
+        pool = 'master'
     require(pool is not None, "process_identity_mismatch")
     info = os.stat(proc / "exe")
     return {"pid": pid, "start_ticks": start, "pool": pool, "exe_identity": [info.st_dev, info.st_ino]}
+
+
+NANO = 1000000000
+
+
+def paired_clocks(ticks, utc_offset=None):
+    before = time.clock_gettime_ns(time.CLOCK_REALTIME)
+    boot = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+    after = time.clock_gettime_ns(time.CLOCK_REALTIME)
+    return {'realtime_before_ns': before, 'boottime_ns': boot, 'realtime_after_ns': after,
+            'clock_ticks_per_second': ticks, 'utc_offset_seconds': time.localtime().tm_gmtoff if utc_offset is None else utc_offset}
+
+
+def clock_offset(mapping):
+    keys = ('realtime_before_ns', 'boottime_ns', 'realtime_after_ns', 'clock_ticks_per_second', 'utc_offset_seconds')
+    require(isinstance(mapping, dict) and all(type(mapping.get(key)) is int for key in keys), 'clock_mapping_invalid')
+    before, after, boot = (mapping[key] for key in ('realtime_before_ns', 'realtime_after_ns', 'boottime_ns'))
+    require(1577836800 * NANO <= before <= after <= 4102444800 * NANO
+            and after - before <= NANO and boot >= 0
+            and 1 <= mapping['clock_ticks_per_second'] <= 1000000, 'clock_mapping_invalid')
+    require(mapping['utc_offset_seconds'] == 0, 'clock_timezone_unverified')
+    return before - boot, after - boot
+
+
+def log_tail(arm_root):
+    fd = os.open(arm_root / 'private/fpm.log', os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        require(stat.S_ISREG(info.st_mode), 'exit_log_unavailable')
+        return os.pread(fd, min(65536, info.st_size), max(0, info.st_size - 65536)).decode('utf-8', errors='replace')
+    finally:
+        os.close(fd)
+
+
+def exit_records(text, pid, expected_signal=None):
+    pattern = (r'^\[([^\r\n\]]{1,32})\] [A-Z]+: \[pool fixture(?:_status)?\] child ' + str(pid)
+               + r' exited on signal (6|7|11) \([^\r\n)]{1,64}\) after ([0-9]{1,9})(?:\.([0-9]{1,9}))? seconds from start$')
+    records = []
+    for stamp, signum, whole, fraction in re.findall(pattern, text, re.MULTILINE):
+        if expected_signal is not None and int(signum) != expected_signal:
+            continue
+        # fpm's prefix has local whole seconds; inventory must independently establish UTC.
+        try:
+            reap = int(datetime.strptime(stamp, '%d-%b-%Y %H:%M:%S').replace(tzinfo=timezone.utc).timestamp())
+        except ValueError:
+            continue
+        records.append({'signal': int(signum), 'lifetime_ns': int(whole) * NANO + int(fraction.ljust(9, '0') or '0'),
+                        'reap_epoch': reap})
+        require(len(records) <= 64, 'exit_log_bound')
+    return records
+
+
+def drain(campaign, arm_root, base):
+    """Read-only native-diagnostic wait while the owned master can still reap dumps."""
+    state = state_load(base)
+    require(mount_matches(base, state), 'mount_identity_mismatch')
+    arm = os.environ.get('PINOVA_FPM_REVISION_ARM')
+    require(arm in ARMS)
+    facts = json.loads(read_bytes(base / f'inventory-{arm}.json', 16384))
+    executable, master = facts['executable'], facts['master']
+    require(executable == '/usr/sbin/php-fpm8.4' and master['pid'] == int(os.environ.get('PINOVA_FPM_MASTER_PID', '0')),
+            'process_identity_mismatch')
+    started = time.monotonic()
+    result = {'state': 'needs_review', 'reason': 'drain_timeout', 'resource_acceptance': False,
+              'master': master, 'master_verified': False, 'master_terminated': False,
+              'started_realtime_ns': time.clock_gettime_ns(time.CLOCK_REALTIME),
+              'core_dumping_remaining': 0, 'exit_match_count': 0}
+    targets = set()
+    try:
+        while True:
+            current = process_identity(master['pid'], executable)
+            require(all(current[key] == master[key] for key in ('pid', 'start_ticks', 'exe_identity')),
+                    'master_identity_changed')
+            result['master_verified'] = True
+            status = read_bytes(Path(f"/proc/{master['pid']}/status"), 65536).decode('ascii', errors='replace')
+            master_dumping = re.findall(r'^CoreDumping:\s*([01])\s*$', status, re.MULTILINE)
+            require(len(master_dumping) == 1, 'master_dump_status_unavailable')
+            result['master_core_dumping'] = int(master_dumping[0])
+            cores = list((base / 'cores').iterdir())
+            require(len(cores) <= 64, 'core_count_bound')
+            for item in cores:
+                match = re.fullmatch(r'core\.([0-9]+)\.(?:6|7|11)\.[0-9]+', item.name)
+                require(match is not None, 'core_identity_mismatch')
+                if int(match[1]) != master['pid']:
+                    targets.add(int(match[1]))
+            dumping = result['master_core_dumping']
+            known = {row['pid']: row for row in facts['workers']}
+            require(targets <= known.keys(), 'core_identity_mismatch')
+            for pid, expected in known.items():
+                try:
+                    current = process_identity(pid, executable)
+                    require(all(current[key] == expected[key] for key in ('pid', 'start_ticks', 'exe_identity')),
+                            'worker_identity_changed')
+                    status = read_bytes(Path(f'/proc/{pid}/status'), 65536).decode('ascii', errors='replace')
+                    values = re.findall(r'^CoreDumping:\s*([01])\s*$', status, re.MULTILINE)
+                    require(len(values) == 1, 'dump_status_unavailable')
+                    if values[0] == '1':
+                        targets.add(pid)
+                        dumping += 1
+                except FileNotFoundError:
+                    if expected['pool'] == 'fixture':
+                        targets.add(pid)
+            result['core_dumping_remaining'] = dumping
+            tail = log_tail(arm_root)
+            counts = [len(exit_records(tail, pid)) for pid in sorted(targets)]
+            result['exit_match_count'] = sum(counts)
+            require(all(count <= 1 for count in counts), 'exit_record_ambiguous')
+            if dumping == 0 and all(count == 1 for count in counts):
+                result.update({'state': 'drained', 'reason': None})
+                break
+            elapsed = time.monotonic() - started
+            if elapsed >= 30:
+                break
+            time.sleep(min(0.1, 30 - elapsed))
+    except CaptureError as error:
+        result['reason'] = error.code
+    except (OSError, ValueError, KeyError, TypeError):
+        result['reason'] = 'drain_observation_unavailable'
+    result['duration_seconds'] = max(0, time.monotonic() - started)
+    if result['duration_seconds'] > 30:
+        result.update({'state': 'needs_review', 'reason': 'drain_timeout'})
+    result['completed_realtime_ns'] = time.clock_gettime_ns(time.CLOCK_REALTIME)
+    result['clock_mapping'] = paired_clocks(facts['clock_mapping']['clock_ticks_per_second'])
+    write_json(base / f'drain-{arm}.json', result)
+    return result
 
 
 def inventory(campaign, arm_root, base):
@@ -361,11 +492,15 @@ def inventory(campaign, arm_root, base):
     require(sum(row["pool"] == "fixture" for row in workers) == 10, "process_inventory_incomplete")
     boot = int(next(line.split()[1] for line in Path('/proc/stat').read_text().splitlines() if line.startswith('btime ')))
     ticks = os.sysconf('SC_CLK_TCK')
+    mapping = paired_clocks(ticks, time.localtime().tm_gmtoff)
+    clock_offset(mapping)
+    master_identity = process_identity(master, executable)
     for row in workers:
         row['started_epoch'] = boot + row['start_ticks'] / ticks
     value = {"arm": arm, "executable": executable, "build_id": build_id(executable),
              "executable_sha256": hashlib.sha256(read_bytes(executable, 32 * 1024 * 1024)).hexdigest(), "workers": workers,
-             "started_at": int(time.time()), "resource_acceptance": False}
+             "started_at": int(time.time()), "resource_acceptance": False, 'master': master_identity,
+             'clock_mapping': mapping, 'prewarm_wall_interval_ns': [mapping['realtime_before_ns'], mapping['realtime_after_ns']]}
     write_json(base / f"inventory-{arm}.json", value)
     return {"state": "recorded", "workers": len(workers), "resource_acceptance": False}
 
@@ -420,6 +555,56 @@ def gdb_extract():
     write_json(base / "gdb-output.json", output)
 
 
+def core_timing(facts, worker, at, size, records, drained, observed):
+    """Retain finite endpoints before enforcing the native lifetime fence."""
+    timing = {'core_timestamp_epoch': at, 'core_size_bytes': size, 'worker_start_ticks': worker['start_ticks'],
+              'exit_match_count': len(records), 'prewarm_wall_interval_ns': facts.get('prewarm_wall_interval_ns'),
+              'birth_epoch_interval_ns': None, 'drain': drained, 'collection_clock_mapping': observed,
+              'reported_lifetime_ns': records[0]['lifetime_ns'] if len(records) == 1 else None,
+              'reap_log_interval_ns': [records[0]['reap_epoch'] * NANO, (records[0]['reap_epoch'] + 1) * NANO] if len(records) == 1 else None}
+    try:
+        lower, upper = clock_offset(facts['clock_mapping'])
+        hz = facts['clock_mapping']['clock_ticks_per_second']
+        ticks = worker['start_ticks']
+        require(type(ticks) is int and ticks >= 0, 'clock_mapping_invalid')
+        timing['birth_epoch_interval_ns'] = [lower + ticks * NANO // hz, upper + ((ticks + 1) * NANO + hz - 1) // hz]
+    except (CaptureError, KeyError, TypeError):
+        pass
+    return timing
+
+
+def verify_core_timing(facts, timing, drained, observed):
+    require(timing['birth_epoch_interval_ns'] is not None, 'clock_mapping_invalid')
+    offsets = [clock_offset(facts['clock_mapping']), clock_offset(drained['clock_mapping']), clock_offset(observed)]
+    lower, upper = max(row[0] for row in offsets), min(row[1] for row in offsets)
+    require(lower <= upper, 'clock_discontinuity')
+    hz = facts['clock_mapping']['clock_ticks_per_second']
+    require(all(mapping['clock_ticks_per_second'] == hz for mapping in (drained['clock_mapping'], observed)), 'clock_mapping_invalid')
+    ticks = timing['worker_start_ticks']
+    timing['birth_epoch_interval_ns'] = [lower + ticks * NANO // hz, upper + ((ticks + 1) * NANO + hz - 1) // hz]
+    require(drained.get('state') == 'drained' and drained.get('master_verified') is True
+            and drained.get('master_terminated') is False and drained.get('master') == facts['master']
+            and drained.get('core_dumping_remaining') == 0, 'drain_incomplete')
+    prewarm = timing['prewarm_wall_interval_ns']
+    require(isinstance(prewarm, list) and len(prewarm) == 2 and all(type(value) is int for value in prewarm)
+            and prewarm == [facts['clock_mapping']['realtime_before_ns'], facts['clock_mapping']['realtime_after_ns']], 'clock_mapping_invalid')
+    end, start = drained['completed_realtime_ns'], drained['started_realtime_ns']
+    require(type(start) is int and type(end) is int and prewarm[0] <= start <= end
+            and end <= observed['realtime_after_ns'], 'drain_clock_invalid')
+    require(timing['exit_match_count'] == 1, 'core_process_lifetime_mismatch')
+    reap = timing['reap_log_interval_ns']
+    require(reap[0] <= end, 'reap_after_drain')
+    birth = timing['birth_epoch_interval_ns']
+    lifetime = timing['reported_lifetime_ns']
+    first_fork = max(reap[0] - lifetime, birth[0])
+    require(lifetime >= 0 and first_fork <= prewarm[1] and first_fork + lifetime <= end
+            and first_fork + lifetime < reap[1],
+            'core_process_lifetime_mismatch')
+    core_start = timing['core_timestamp_epoch'] * NANO
+    require(core_start <= end and core_start < reap[1] and core_start <= prewarm[1] + lifetime
+            and core_start + NANO > prewarm[0], 'core_process_lifetime_mismatch')
+
+
 def collect(campaign, arm_root, base):
     state = state_load(base)
     require(mount_matches(base, state), "mount_identity_mismatch")
@@ -442,44 +627,51 @@ def collect(campaign, arm_root, base):
     except CaptureError as error:
         # Optional metadata cannot suppress independently verified native cores.
         result['inventory_status'] = {'state': 'needs_review', 'reason': error.code}
-    log = arm_root / 'private/fpm.log'
-    fd = os.open(log, os.O_RDONLY | os.O_NOFOLLOW)
     try:
-        size = os.fstat(fd).st_size
-        tail = os.pread(fd, min(65536, size), max(0, size - 65536)).decode('utf-8', errors='replace')
-    finally:
-        os.close(fd)
+        tail = log_tail(arm_root)
+        result['exit_log_status'] = 'read'
+    except (CaptureError, OSError):
+        tail = ''
+        result['exit_log_status'] = 'unavailable'
+    try:
+        drained = json.loads(read_bytes(base / f'drain-{arm}.json', 16384))
+    except (OSError, ValueError):
+        drained = {'state': 'needs_review', 'reason': 'drain_receipt_unavailable'}
+    observed = paired_clocks(facts.get('clock_mapping', {}).get('clock_ticks_per_second', 0))
     for item in sorted(cores):
         match = re.fullmatch(r"core\.([0-9]+)\.(6|7|11)\.([0-9]+)", item.name)
         require(match and item.lstat().st_uid == 0 and stat.S_ISREG(item.lstat().st_mode)
                 and not item.is_symlink() and item.stat().st_size <= CORE_LIMIT, "core_identity_mismatch")
-        pid, signal, at = map(int, match.groups())
-        require(pid in workers and facts["started_at"] - 2 <= at <= int(time.time()) + 2, "core_identity_mismatch")
-        lifetimes = re.findall(r'\[pool fixture(?:_status)?\] child ' + str(pid) + r' exited on signal ' + str(signal)
-                               + r' \([^\r\n)]{1,64}\) after ([0-9]+(?:\.[0-9]+)?) seconds from start', tail)
-        require(len(lifetimes) == 1 and abs(at - (workers[pid]['started_epoch'] + float(lifetimes[0]))) <= 3,
-                'core_process_lifetime_mismatch')
-        receipt = {"pid": pid, "signal": signal, "state": "needs_review", "reason": "core_bound", "frames": [], "resource_acceptance": False,
+        pid, signum, at = map(int, match.groups())
+        require(pid in workers, "core_identity_mismatch")
+        records = exit_records(tail, pid, signum)
+        timing = core_timing(facts, workers[pid], at, item.stat().st_size, records, drained, observed)
+        receipt = {"pid": pid, "signal": signum, "state": "needs_review", "reason": "core_bound", "frames": [], "resource_acceptance": False,
+                   'timing': timing,
                    'partial_core': item.stat().st_size >= CORE_LIMIT, 'stack_complete': False}
         if len(result["cores"]) < 2:
             try:
-                core_identity(item, pid, signal, exe)
+                verify_core_timing(facts, timing, drained, observed)
+                core_identity(item, pid, signum, exe)
                 partial = item.stat().st_size >= CORE_LIMIT or core_has_missing_loads(item)
                 directory = campaign / 'private/debug-symbols/usr/lib/debug'
                 target = directory / '.build-id' / facts['build_id'][:2] / (facts['build_id'][2:] + '.debug')
-                write_json(base / "gdb-input.json", {"core": str(item), "executable": exe, "pid": pid, "signal": signal,
+                write_json(base / "gdb-input.json", {"core": str(item), "executable": exe, "pid": pid, "signal": signum,
                     'build_id': facts['build_id'], 'partial_core': partial, 'debug_directory': str(directory), 'debug_file': str(target)})
                 (base / "gdb-output.json").unlink(missing_ok=True)
                 command = ["gdb", "-q", "-nx", "-nh", "--batch", "-iex", "set auto-load off", "-iex", "set debuginfod enabled off",
                            "-ex", "python import gdb", "-ex", "source " + str(Path(__file__).resolve())]
                 run(command, 30)
                 receipt = json.loads(read_bytes(base / "gdb-output.json", 32768))
+                receipt['timing'] = timing
                 receipt['partial_core'] = partial
                 receipt['stack_complete'] = receipt.get('stack_complete') is True and not partial
                 if partial:
                     receipt.update({'state': 'needs_review', 'reason': 'partial_core', 'stack_complete': False})
             except CaptureError as error:
                 receipt["reason"] = error.code
+            except (KeyError, ValueError, TypeError, OSError):
+                receipt['reason'] = 'core_timing_unavailable'
         result["cores"].append(receipt)
     # Check the exact earlier PID/start/executable identity; never blame or kill an unrelated PID.
     end = time.monotonic() + 3
@@ -601,7 +793,7 @@ def main():
     output = {"state": "needs_review", "reason": "capture_unavailable", "resource_acceptance": False}
     try:
         args = sys.argv[1:]
-        require(len(args) == 1 and args[0] in ("setup", "inventory", "preflight", "collect", "cleanup"), "command_unavailable")
+        require(len(args) == 1 and args[0] in ("setup", "inventory", "preflight", "drain", "collect", "cleanup"), "command_unavailable")
         owned = context()
         try:
             output = globals()[args[0]](*owned)
@@ -612,7 +804,17 @@ def main():
         output["reason"] = error.code
     except BaseException:
         pass
-    print(json.dumps(output, separators=(",", ":")))
+    # The parent round-trips stdout through JavaScript; exact epoch nanoseconds
+    # exceed its integer precision. Private clock receipts retain Python ints.
+    def public(value):
+        if type(value) is int and abs(value) > 9007199254740991:
+            return str(value)
+        if isinstance(value, dict):
+            return {key: public(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [public(item) for item in value]
+        return value
+    print(json.dumps(public(output), separators=(",", ":")))
     return 1 if output["state"] == "needs_review" else 0
 
 

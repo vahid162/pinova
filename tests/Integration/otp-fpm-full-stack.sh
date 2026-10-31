@@ -218,6 +218,12 @@ fpm_pid='' nginx_pid=''
 cleanup_processes() {
 	local status=$? pid command_line
 	trap - EXIT
+	if [[ "${PINOVA_FPM_NATIVE_CAPTURE:-}" == 1 && -n "${fpm_pid}" ]]; then
+		# Diagnostic-only: let the verified master reap a bounded core dump before TERM.
+		# This runs after Node/measurement and never changes the original exit status.
+		python3 "${repo_root}/tests/Integration/native-fpm-crash-evidence.py" drain \
+			> "${run_root}/private/native-drain.json" 2>/dev/null || true
+	fi
 	for pid in "${nginx_pid}" "${fpm_pid}"; do
 		if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
 			command_line="$(tr '\0' ' ' < "/proc/${pid}/cmdline")"

@@ -78,7 +78,7 @@ final class MobileVerificationAPI extends RestAPI {
 				]
 			);
 			OTPService::schedule_queued_delivery( $flow[0] );
-			\Pinova\Services\OTPImmediateDelivery::arm( $flow[0], $response, $request );
+			\Pinova\Services\OTPImmediateDelivery::arm( $flow[0], $response, $request, $flow[1] );
 			add_action( 'shutdown', [ OTPService::class, 'spawn_queued_delivery' ], 100 );
 			return $response;
 		} catch ( RateLimitException $exception ) {

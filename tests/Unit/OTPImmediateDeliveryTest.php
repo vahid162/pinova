@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pinova\Tests\Unit;
 
 use Pinova\Services\OTPImmediateDelivery;
+use Pinova\Services\OTPService;
 use PHPUnit\Framework\TestCase;
 
 final class OTPImmediateDeliveryTest extends TestCase {
@@ -35,6 +36,24 @@ final class OTPImmediateDeliveryTest extends TestCase {
 			[ "MemFree: 2097152 kB\n", [ 0, 0, 0 ], false ],
 			[ "MemAvailable: 2097152 kB\n", false, false ],
 		];
+	}
+
+	public function test_diagnostic_clock_failure_and_discontinuity_remain_unknown(): void {
+		$failed = static function (): never {
+			throw new \RuntimeException( 'Synthetic clock failure.' );
+		};
+		self::assertNull( OTPService::diagnostic_clock( $failed ) );
+		self::assertNull( OTPService::diagnostic_duration( 1000000, $failed ) );
+		foreach ( [ null, false, '1000', INF, NAN, -1 ] as $invalid ) {
+			self::assertNull( OTPService::diagnostic_clock( static fn() => $invalid ) );
+			self::assertNull( OTPService::diagnostic_duration( 1000000, static fn() => $invalid ) );
+		}
+		self::assertNull( OTPService::diagnostic_duration( null, static fn(): int => 2000000 ) );
+		self::assertNull( OTPService::diagnostic_duration( INF, static fn(): int => 2000000 ) );
+		self::assertNull( OTPService::diagnostic_duration( 2000000, static fn(): int => 1000000 ) );
+		self::assertNull( OTPService::diagnostic_duration( 0, static fn(): int => 600001000000 ) );
+		self::assertSame( 1, OTPService::diagnostic_duration( 1000000, static fn(): int => 2000000 ) );
+		self::assertSame( 0, OTPService::diagnostic_duration( 1000000, static fn(): int => 1000000 ) );
 	}
 
 }

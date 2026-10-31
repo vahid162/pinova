@@ -177,7 +177,7 @@ class UserAPI extends RestAPI {
 			[ $data['jwt'], $data['ttl'] ] = self::decoy_otp_state( $decoy_flow );
 			$response                      = self::response( true, $message, $data );
 			OTPService::schedule_queued_delivery( $decoy_flow[0] );
-			\Pinova\Services\OTPImmediateDelivery::arm( $decoy_flow[0], $response, $request );
+			\Pinova\Services\OTPImmediateDelivery::arm( $decoy_flow[0], $response, $request, $decoy_flow[1] );
 			add_action( 'shutdown', [ OTPService::class, 'spawn_queued_delivery' ], 100 );
 		} catch ( RateLimitException $e ) {
 			self::minimum_response_time( $started );

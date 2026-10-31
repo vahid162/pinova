@@ -8,7 +8,7 @@ use Pinova\Exceptions\AuthenticationPolicyException;
 use Pinova\Exceptions\ExpiredTokenException;
 use Pinova\Exceptions\BlockedException;
 use Pinova\Exceptions\OTPCompletionException;
-use Pinova\Exceptions\OTPImmediateDeliveryDeferredException;
+use Pinova\Exceptions\OTPDeliveryDeferredException;
 use Pinova\Exceptions\ProviderOutcomeUnknownException;
 use Pinova\Exceptions\RateLimitUnavailableException;
 use Pinova\Exceptions\SendOTPException;
@@ -17,6 +17,8 @@ use Pinova\Helpers\JWT;
 use Pinova\Models\OTP;
 use Pinova\Logging\Logger;
 use Pinova\Logging\EventThrottle;
+use Pinova\Logging\DiagnosticContext;
+use Pinova\Logging\OTPHealthState;
 use Pinova\Objects\Identifier;
 use Pinova\Pinova;
 use Throwable;
@@ -25,11 +27,89 @@ class OTPService {
 
 	public const RETENTION_DAYS      = 7;
 	private const CLEANUP_BATCH_SIZE = 5000;
+	/** @var DiagnosticContext[] Bounded request-local buffers, never a logging queue. */
+	private static array $deferred_diagnostics = [];
+	private static bool $draining_diagnostics  = false;
+
+	/** Construct only from an already trusted flow/deadline; failure loses detail alone. */
+	public static function diagnostic_context( string $flow_id, int $deadline, string $operation = 'queued_otp' ): ?DiagnosticContext {
+		try {
+			return new DiagnosticContext( $flow_id, $deadline, $operation );
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+			return null;
+		}
+	}
+
+	/**
+	 * Pure, best-effort monotonic clock; diagnostic failures never change delivery.
+	 *
+	 * @phpstan-impure
+	 */
+	public static function diagnostic_clock( ?callable $clock = null ): int|float|null {
+		try {
+			$value = null === $clock ? ( function_exists( 'hrtime' ) ? hrtime( true ) : null ) : $clock();
+			return ( is_int( $value ) || is_float( $value ) ) && is_finite( (float) $value ) && 0 <= $value ? $value : null;
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+			return null;
+		}
+	}
+
+	/**
+	 * Capture elapsed milliseconds without inventing values after a clock discontinuity.
+	 *
+	 * @phpstan-impure
+	 */
+	public static function diagnostic_duration( int|float|null $started, ?callable $clock = null ): ?int {
+		$ended = self::diagnostic_clock( $clock );
+		if ( null === $started || ! is_finite( (float) $started ) || 0 > $started || null === $ended ) {
+			return null;
+		}
+		$elapsed = ( $ended - $started ) / 1000000;
+		return is_finite( $elapsed ) && 0 <= $elapsed && 600000 >= $elapsed ? (int) round( $elapsed ) : null;
+	}
+
+	/** No configuration or logger work is allowed while any delivery lease is held. */
+	public static function retain_diagnostic( DiagnosticContext $diagnostic ): void {
+		if ( 12 > count( self::$deferred_diagnostics ) && ! in_array( $diagnostic, self::$deferred_diagnostics, true ) ) {
+			self::$deferred_diagnostics[] = $diagnostic;
+		}
+		self::flush_diagnostics();
+	}
+
+	public static function flush_diagnostics(): void {
+		if ( self::$draining_diagnostics || OTPQueueStore::has_held_claims() || OTPImmediateDelivery::is_active() ) {
+			return;
+		}
+		self::$draining_diagnostics = true;
+		try {
+			for ( $flushed = 0; 12 > $flushed; ++$flushed ) {
+				if ( [] === self::$deferred_diagnostics || OTPQueueStore::has_held_claims() || OTPImmediateDelivery::is_active() ) {
+					break;
+				}
+				$diagnostic = array_shift( self::$deferred_diagnostics );
+				$diagnostic->flush();
+			}
+		} finally {
+			self::$draining_diagnostics = false;
+		}
+	}
+
+	/** The execution method is an observation, not evidence of provider acceptance. */
+	public static function diagnostic_mode( ?string $flow_id = null ): string {
+		return null !== $flow_id && OTPImmediateDelivery::is_active( $flow_id ) ? 'immediate'
+			: ( defined( 'WP_CLI' ) && WP_CLI ? 'cli' : 'cron' );
+	}
 
 	/** Keep seven days after expiry, including verified and legacy flow records. */
 	public static function cleanup(): int|false {
 		global $wpdb;
 
+		$deleted      = false;
+		$backlog      = 'unknown';
+		$continuation = 'unknown';
+		$success      = false;
 		try {
 			$table   = $wpdb->prefix . 'pinova_otp';
 			$deleted = $wpdb->query(
@@ -53,14 +133,22 @@ class OTPService {
 			if ( '' !== (string) $wpdb->last_error ) {
 				return false;
 			}
+			$backlog      = null === $pending ? 'clear' : 'pending';
+			$continuation = null === $pending ? 'not_needed' : 'scheduled';
 			if ( null !== $pending && false === wp_next_scheduled( 'pinova_otp_cleanup_continue' )
 				&& true !== wp_schedule_single_event( time() + 5 * MINUTE_IN_SECONDS, 'pinova_otp_cleanup_continue' ) ) {
+				$continuation = 'failed';
 				return false;
 			}
+			$success = true;
 			return max( 0, (int) $deleted );
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
 			return false;
+		} finally {
+			if ( ! OTPQueueStore::has_held_claims() && ! OTPImmediateDelivery::is_active() ) {
+				OTPHealthState::record_cleanup( $success, false === $deleted ? null : max( 0, (int) $deleted ), $backlog, $continuation );
+			}
 		}
 	}
 
@@ -181,7 +269,15 @@ class OTPService {
 				'expires_at' => null === $state_deadline ? null : Carbon::createFromTimestampUTC( $state_deadline ),
 			]
 		);
-		if ( null !== $queue_claim_token && ( null === $flow_id || ! RateLimitService::queued_otp_is_active( $flow_id, $queue_claim_token ) ) ) {
+
+		$claim_state = null !== $queue_claim_token && null !== $flow_id ? OTPQueueStore::queued_claim_state( $flow_id, $queue_claim_token ) : null;
+		if ( null !== $queue_claim_token && 'unavailable' === $claim_state ) {
+			if ( false === OTPQueueStore::provider_was_attempted( (string) $flow_id, $queue_claim_token ) ) {
+				$otp->delete();
+			}
+			throw new OTPDeliveryDeferredException( 'Queued delivery ownership is unavailable.' );
+		}
+		if ( null !== $queue_claim_token && 'active' !== $claim_state ) {
 			$otp->delete();
 			if ( null !== $flow_id ) {
 				self::observe_delivery_skipped( $flow_id, 'claim_unavailable' );
@@ -192,7 +288,8 @@ class OTPService {
 		try {
 			$successful_channels = ChannelService::send( $otp, $code, $queue_claim_token );
 		} catch ( Throwable $e ) {
-			if ( $e instanceof OTPImmediateDeliveryDeferredException && OTPImmediateDelivery::is_active( $flow_id ) && ! OTPImmediateDelivery::provider_was_attempted() ) {
+			if ( $e instanceof OTPDeliveryDeferredException && null !== $flow_id && null !== $queue_claim_token
+				&& false === OTPQueueStore::provider_was_attempted( $flow_id, $queue_claim_token ) ) {
 				// Only this newly created, never-attempted record can be removed
 				// while restoring the exact encrypted reservation for cron.
 				$otp->delete();
@@ -248,20 +345,40 @@ class OTPService {
 
 	/** Deliver only after the public initiation response has been prepared. */
 	public static function deliver_queued( string $flow_id ): void {
-		$queued   = null;
-		$deferred = false;
+		$queued            = null;
+		$deferred          = false;
+		$diagnostic        = null;
+		$diagnostic_result = 'skipped';
+		$diagnostic_code   = 'operation_failed';
 		try {
 			$admission = OTPImmediateDelivery::admission( $flow_id );
 			$queued    = null === $admission ? RateLimitService::claim_queued_otp( $flow_id ) : OTPQueueStore::claim_queued_otp( $flow_id, $admission );
 			if ( null === $queued || $queued['deadline'] <= time() ) {
 				RateLimitService::observe_expired_queued_otp( $flow_id );
 				if ( null === $queued ) {
+					OTPImmediateDelivery::observe_claim_decline( $flow_id );
 					RateLimitService::observe_deferred_queued_otp( $flow_id );
 				}
 				if ( null !== $queued ) {
+					$diagnostic_code = 'deadline_expired';
 					self::observe_delivery_skipped( $flow_id, 'expired' );
 				}
 				return;
+			}
+			$diagnostic = self::diagnostic_context( $flow_id, $queued['deadline'] );
+			$details    = [
+				'execution_mode' => self::diagnostic_mode( $flow_id ),
+				'result'         => 'started',
+				'error_code'     => 'none',
+			];
+			$age        = time() - ( $queued['deadline'] - JWT::DEFAULT_TTL );
+			if ( 0 <= $age && JWT::DEFAULT_TTL >= $age ) {
+				$details['request_to_worker_seconds'] = $age;
+				$details['remaining_seconds']         = JWT::DEFAULT_TTL - $age;
+			}
+			$diagnostic?->observe( 'worker_started', $details );
+			if ( null !== $diagnostic ) {
+				OTPQueueStore::attach_diagnostic( $flow_id, $queued['claim_token'], $diagnostic );
 			}
 			OTPImmediateDelivery::guard( $flow_id, $queued['claim_token'] );
 
@@ -269,29 +386,35 @@ class OTPService {
 			// must never send a second OTP for it.
 			$existing = OTP::query()->where( 'flow_id', $flow_id )->limit( 2 )->get();
 			if ( $existing->count() > 1 ) {
+				$diagnostic_code = 'duplicate_records';
 				self::observe_delivery_skipped( $flow_id, 'duplicate_records' );
 				return;
 			}
 			if ( 1 === $existing->count() ) {
 				$previous = $existing->first();
 				if ( $previous->isVerified() || in_array( true, (array) $previous->channels, true ) ) {
+					$diagnostic_code = 'already_completed';
 					self::observe_delivery_skipped( $flow_id, 'already_completed' );
 					return;
 				}
 				// Provider acceptance before a crash is unknowable. Keep the old
 				// code valid and let a later public request open a fresh flow.
 				RateLimitService::retire_queued_otp( $flow_id );
+				$diagnostic_result = 'unknown';
+				$diagnostic_code   = 'provider_outcome_unknown';
 				self::observe_delivery_skipped( $flow_id, 'provider_outcome_unknown' );
 				return;
 			}
 			$identifier = new Identifier( $queued['identifier'] );
 			if ( ! $identifier->is_valid() || $identifier->is_username() ) {
+				$diagnostic_code = 'invalid_payload';
 				self::observe_delivery_skipped( $flow_id, 'invalid_payload' );
 				return;
 			}
 			if ( OTP::TYPE_VERIFY_MOBILE === $queued['purpose'] ) {
 				$user_id = (int) $queued['user_id'];
 				if ( ! MobileVerificationService::can_assign( $user_id, $identifier ) ) {
+					$diagnostic_code = 'policy_rejected';
 					self::observe_delivery_skipped( $flow_id, 'policy_rejected' );
 					return;
 				}
@@ -302,10 +425,12 @@ class OTPService {
 
 			$user = $user_id ? get_userdata( $user_id ) : false;
 			if ( $user instanceof \WP_User && UserService::is_native_only( $user ) ) {
+				$diagnostic_code = 'policy_rejected';
 				self::observe_delivery_skipped( $flow_id, 'policy_rejected' );
 				return;
 			}
 			if ( ! $user_id && ( 'forget' === $queued['purpose'] || ! Pinova::users_can_register() || $identifier->is_email() || ! $mobile_unclaimed ) ) {
+				$diagnostic_code = 'policy_rejected';
 				self::observe_delivery_skipped( $flow_id, 'policy_rejected' );
 				return;
 			}
@@ -318,40 +443,59 @@ class OTPService {
 				$type = $user_id ? OTP::TYPE_LOGIN : OTP::TYPE_REGISTER;
 			}
 			if ( $queued['deadline'] <= time() ) {
+				$diagnostic_code = 'deadline_expired';
 				self::observe_delivery_skipped( $flow_id, 'expired' );
 				return;
 			}
 			if ( FirewallService::is_blocked( $identifier->get_value() ) || FirewallService::is_blocked( $queued['ip'] ) ) {
+				$diagnostic_code = 'policy_rejected';
 				self::observe_delivery_skipped( $flow_id, 'policy_rejected' );
 				return;
 			}
-			if ( ! RateLimitService::queued_otp_is_active( $flow_id, $queued['claim_token'] ) ) {
+			$claim_state = OTPQueueStore::queued_claim_state( $flow_id, $queued['claim_token'] );
+			if ( 'unavailable' === $claim_state ) {
+				throw new OTPDeliveryDeferredException( 'Queued delivery ownership is unavailable.' );
+			}
+			if ( 'active' !== $claim_state ) {
+				$diagnostic_code = 'claim_unavailable';
 				self::observe_delivery_skipped( $flow_id, 'claim_unavailable' );
 				return;
 			}
 			$channels = ChannelService::get_channels( $identifier );
 			OTPImmediateDelivery::guard( $flow_id, $queued['claim_token'], $channels );
 			self::create( $identifier, $channels, $type, $user_id, true, $queued['deadline'], $flow_id, $queued['ip'], $queued['claim_token'] );
-		} catch ( OTPImmediateDeliveryDeferredException $exception ) {
-			if ( null !== $queued && ! OTPImmediateDelivery::provider_was_attempted() ) {
+			$diagnostic_result = 'accepted';
+			$diagnostic_code   = 'none';
+		} catch ( OTPDeliveryDeferredException $exception ) {
+			$diagnostic_result = 'deferred';
+			$diagnostic_code   = $exception->diagnostic_reason();
+			if ( null !== $queued && false === OTPQueueStore::provider_was_attempted( $flow_id, $queued['claim_token'] ) ) {
 				// Never run finish() after an unattempted deferral: it consumes the
 				// durable fallback. A lost connection cannot restore another claim.
 				$deferred = true;
 				OTPQueueStore::defer_queued_otp( $flow_id, $queued['claim_token'] );
 			} elseif ( null !== $queued ) {
 				RateLimitService::retire_queued_otp( $flow_id );
+				$diagnostic_result = 'unknown';
+				$diagnostic_code   = 'provider_outcome_unknown';
 				self::observe_delivery_skipped( $flow_id, 'provider_outcome_unknown' );
 			}
 			unset( $exception );
 		} catch ( ProviderOutcomeUnknownException $exception ) {
+			$diagnostic_result = 'unknown';
 			RateLimitService::retire_queued_otp( $flow_id );
+			$diagnostic_code = 'provider_outcome_unknown';
 			self::observe_delivery_skipped( $flow_id, 'provider_outcome_unknown' );
 			unset( $exception );
 		} catch ( SendOTPException $exception ) {
+			$diagnostic_result = 'rejected';
+			$diagnostic_code   = 'operation_failed';
 			// ChannelService already recorded the privacy-safe provider failure.
 			RateLimitService::release_queued_otp( $flow_id, $queued['claim_token'] );
 			unset( $exception );
 		} catch ( Throwable $throwable ) {
+			$diagnostic_result = 'failed';
+			$diagnostic_code   = 'operation_failed';
 			if ( null !== $queued ) {
 				RateLimitService::release_queued_otp( $flow_id, $queued['claim_token'] );
 			}
@@ -366,8 +510,23 @@ class OTPService {
 			// A queued delivery cannot change the response already sent to the caller.
 			unset( $throwable );
 		} finally {
-			if ( null !== $queued && ! $deferred ) {
-				RateLimitService::finish_queued_otp( $flow_id, $queued['claim_token'] );
+			try {
+				if ( null !== $queued && ! $deferred ) {
+					RateLimitService::finish_queued_otp( $flow_id, $queued['claim_token'] );
+				}
+			} finally {
+				if ( null !== $diagnostic ) {
+					$diagnostic->observe(
+						'delivery_completed',
+						[
+							'execution_mode' => self::diagnostic_mode( $flow_id ),
+							'result'         => $diagnostic_result,
+							'error_code'     => $diagnostic_code,
+						]
+					);
+					self::retain_diagnostic( $diagnostic );
+				}
+				self::flush_diagnostics();
 			}
 		}
 	}
@@ -481,99 +640,135 @@ class OTPService {
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
-		if ( FirewallService::is_ip_blocked() ) {
-			throw new BlockedException( 'ip' );
-		}
-
-		if ( $identifier->is_valid() && FirewallService::is_blocked( $identifier->get_value() ) ) {
-			throw new BlockedException( $identifier->get_type() );
-		}
-
-		if ( $otp->isExpired() || $otp->isVerified() || $otp->attempts >= 5 ) {
-			EventThrottle::log(
-				'otp.verify_failed',
-				$log_context + [
-					'attempts' => $otp->attempts,
-					'reason'   => $otp->isExpired() ? 'expired' : ( $otp->isVerified() ? 'already_verified' : 'attempt_limit' ),
-				]
-			);
-			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
-		}
-
-		if ( IP::get() !== $otp->ip_address ) {
-			EventThrottle::log(
-				'otp.verify_failed',
-				$log_context + [
-					'ip_fingerprint' => Logger::instance()->fingerprint( IP::get(), 'ip' ),
-					'reason'         => 'ip_mismatch',
-				]
-			);
-			throw new Exception( __( 'شما به این کد دسترسی ندارید.', 'pinova' ) );
-		}
-
-		if ( ! wp_check_password( $code, $otp->code ) ) {
-
-			$otp->incrementAttempts();
-			EventThrottle::log(
-				'otp.verify_failed',
-				$log_context + [
-					'attempts' => $otp->attempts,
-					'reason'   => 'invalid_code',
-				]
-			);
-
-			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
-		}
-
+		$diagnostic        = is_string( $record_flow ) && null !== $otp->expires_at
+			? self::diagnostic_context( $record_flow, $otp->expires_at->getTimestamp(), OTP::TYPE_VERIFY_MOBILE === $otp->type ? 'verify_mobile' : 'verify_otp' ) : null;
+		$diagnostic_result = 'failed';
+		$diagnostic_code   = 'operation_failed';
 		try {
-			AuthenticationPolicy::assert_otp( $otp );
-		} catch ( Exception $exception ) {
-			EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'policy_rejected' ] );
-			throw $exception;
-		}
-
-		$proof_epoch = null;
-		try {
-			if ( $identifier->is_mobile() && null !== $otp->user_id && OTP::TYPE_FORGET !== $otp->type ) {
-				$proof_epoch = MobileVerificationService::epoch( (int) $otp->user_id );
+			if ( FirewallService::is_ip_blocked() ) {
+				$diagnostic_result = 'rejected';
+				$diagnostic_code   = 'policy_rejected';
+				throw new BlockedException( 'ip' );
 			}
-		} catch ( Throwable $throwable ) {
-			unset( $throwable );
-			throw self::completion_failure( $log_context, 'mobile_evidence_unavailable' );
-		}
 
-		if ( ! $otp->markVerified() ) {
-			EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'claim_rejected' ] );
-			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
-		}
-		if ( is_string( $record_flow ) ) {
-			RateLimitService::retire_queued_otp( $record_flow );
-		}
-		Logger::instance()->info(
-			'otp.verified',
-			$log_context
-		);
+			if ( $identifier->is_valid() && FirewallService::is_blocked( $identifier->get_value() ) ) {
+				$diagnostic_result = 'rejected';
+				$diagnostic_code   = 'policy_rejected';
+				throw new BlockedException( $identifier->get_type() );
+			}
 
-		try {
-			if ( OTP::TYPE_VERIFY_MOBILE === $otp->type ) {
-				MobileVerificationService::complete( (int) $otp->user_id, $identifier, (string) $proof_epoch );
-				$user = new \WP_User( (int) $otp->user_id );
-			} else {
-				$user                   = UserService::get_or_create( $otp );
-				$log_context['user_id'] = $user->ID;
-				if ( $identifier->is_mobile() && in_array( $otp->type, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ], true )
-					&& MobileVerificationService::current_mobile( $user->ID ) === $identifier->get_value() ) {
-					MobileVerificationService::record( $user->ID, $identifier, $proof_epoch ?? MobileVerificationService::epoch( $user->ID ) );
+			if ( $otp->isExpired() || $otp->isVerified() || $otp->attempts >= 5 ) {
+				$diagnostic_result = 'rejected';
+				$diagnostic_code   = $otp->isExpired() ? 'deadline_expired' : ( $otp->isVerified() ? 'already_verified' : 'attempt_limit' );
+				EventThrottle::log(
+					'otp.verify_failed',
+					$log_context + [
+						'attempts' => $otp->attempts,
+						'reason'   => $otp->isExpired() ? 'expired' : ( $otp->isVerified() ? 'already_verified' : 'attempt_limit' ),
+					]
+				);
+				throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
+			}
+
+			if ( IP::get() !== $otp->ip_address ) {
+				$diagnostic_result = 'rejected';
+				$diagnostic_code   = 'ip_mismatch';
+				EventThrottle::log(
+					'otp.verify_failed',
+					$log_context + [
+						'ip_fingerprint' => Logger::instance()->fingerprint( IP::get(), 'ip' ),
+						'reason'         => 'ip_mismatch',
+					]
+				);
+				throw new Exception( __( 'شما به این کد دسترسی ندارید.', 'pinova' ) );
+			}
+
+			if ( ! wp_check_password( $code, $otp->code ) ) {
+				$diagnostic_result = 'rejected';
+				$diagnostic_code   = 'invalid_code';
+
+				$otp->incrementAttempts();
+				EventThrottle::log(
+					'otp.verify_failed',
+					$log_context + [
+						'attempts' => $otp->attempts,
+						'reason'   => 'invalid_code',
+					]
+				);
+
+				throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
+			}
+
+			try {
+				AuthenticationPolicy::assert_otp( $otp );
+			} catch ( Exception $exception ) {
+				$diagnostic_result = 'rejected';
+				$diagnostic_code   = 'policy_rejected';
+				EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'policy_rejected' ] );
+				throw $exception;
+			}
+
+			$proof_epoch = null;
+			try {
+				if ( $identifier->is_mobile() && null !== $otp->user_id && OTP::TYPE_FORGET !== $otp->type ) {
+					$proof_epoch = MobileVerificationService::epoch( (int) $otp->user_id );
 				}
+			} catch ( Throwable $throwable ) {
+				unset( $throwable );
+				throw self::completion_failure( $log_context, 'mobile_evidence_unavailable' );
 			}
-		} catch ( AuthenticationPolicyException $exception ) {
-			EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'policy_rejected' ] );
-			throw $exception;
-		} catch ( Throwable $throwable ) {
-			unset( $throwable );
-			throw self::completion_failure( $log_context, 'otp_completion_failed' );
+
+			if ( ! $otp->markVerified() ) {
+				$diagnostic_result = 'rejected';
+				$diagnostic_code   = 'claim_rejected';
+				EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'claim_rejected' ] );
+				throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
+			}
+			if ( is_string( $record_flow ) ) {
+				RateLimitService::retire_queued_otp( $record_flow );
+			}
+			Logger::instance()->info(
+				'otp.verified',
+				$log_context
+			);
+
+			try {
+				if ( OTP::TYPE_VERIFY_MOBILE === $otp->type ) {
+					MobileVerificationService::complete( (int) $otp->user_id, $identifier, (string) $proof_epoch );
+					$user = new \WP_User( (int) $otp->user_id );
+				} else {
+					$user                   = UserService::get_or_create( $otp );
+					$log_context['user_id'] = $user->ID;
+					if ( $identifier->is_mobile() && in_array( $otp->type, [ OTP::TYPE_LOGIN, OTP::TYPE_REGISTER ], true )
+						&& MobileVerificationService::current_mobile( $user->ID ) === $identifier->get_value() ) {
+						MobileVerificationService::record( $user->ID, $identifier, $proof_epoch ?? MobileVerificationService::epoch( $user->ID ) );
+					}
+				}
+			} catch ( AuthenticationPolicyException $exception ) {
+				$diagnostic_result = 'rejected';
+				$diagnostic_code   = 'policy_rejected';
+				EventThrottle::log( 'otp.verify_failed', $log_context + [ 'reason' => 'policy_rejected' ] );
+				throw $exception;
+			} catch ( Throwable $throwable ) {
+				unset( $throwable );
+				throw self::completion_failure( $log_context, 'otp_completion_failed' );
+			}
+			$diagnostic_result = 'verified';
+			$diagnostic_code   = 'none';
+			return [ $user, $record_flow, $identifier ];
+		} finally {
+			if ( null !== $diagnostic ) {
+				$diagnostic->observe(
+					'verification_completed',
+					[
+						'execution_mode' => 'request',
+						'result'         => $diagnostic_result,
+						'error_code'     => $diagnostic_code,
+					]
+				);
+				self::retain_diagnostic( $diagnostic );
+			}
 		}
-		return [ $user, $record_flow, $identifier ];
 	}
 
 	/** Record an operational failure without retaining exception text or request secrets. */

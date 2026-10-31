@@ -5,6 +5,7 @@ namespace Pinova\Channels;
 use Exception;
 use Pinova\Models\OTP;
 use Pinova\Pinova;
+use Pinova\Services\OTPImmediateDelivery;
 
 class Email implements ChannelInterface {
 
@@ -51,14 +52,11 @@ class Email implements ChannelInterface {
 			}
 		);
 
-		return wp_mail(
-			$identifier,
-			$site_name . ' - ' . $copy['title'],
-			str_replace( array_map( 'strval', array_keys( $tags ) ), array_map( 'strval', array_values( $tags ) ), $content ),
-			[
-				'content-type: text/html',
-			]
-		);
+		$subject = $site_name . ' - ' . $copy['title'];
+		$message = str_replace( array_map( 'strval', array_keys( $tags ) ), array_map( 'strval', array_values( $tags ) ), $content );
+		$headers = [ 'content-type: text/html' ];
+		OTPImmediateDelivery::provider_timeout();
+		return wp_mail( $identifier, $subject, $message, $headers );
 	}
 
 	/**

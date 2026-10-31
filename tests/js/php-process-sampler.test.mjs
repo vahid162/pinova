@@ -33,6 +33,7 @@ test('process disappearance and PID reuse latch incomplete coverage', () => {
     assert.equal(result.coverage_complete, false);
     assert.ok(result.coverage_reasons.includes('fpm_process_unreadable'));
     assert.ok(result.coverage_reasons.includes('fpm_process_identity_changed'));
+    assert.deepEqual(result.first_identity_delta.removed.map(({ pid, start }) => ({ pid, start })), [{ pid: 12, start: 20 }]);
 });
 test('missing final CLI witness and sample discontinuity cannot become healthy later', () => {
     const { sampler, processes, advance } = fixture(); sampler.sample();
@@ -60,4 +61,27 @@ test('native process inspection refuses missing PSS and identity changes between
     let reads = 0;
     assert.throws(() => inspectProcess(15, 100, file => file.endsWith('/stat') ? stat(10) : file.endsWith('/status') ? 'VmRSS: 100 kB\n' : ''), /incomplete_process_observation/);
     assert.throws(() => inspectProcess(15, 100, file => file.endsWith('/stat') ? stat(++reads === 1 ? 10 : 11) : file.endsWith('/status') ? 'VmRSS: 100 kB\n' : 'Pss: 60 kB\n'), /incomplete_process_observation/);
+});
+test('auxiliary pool birth stays in total PSS and retains the first identity delta', () => {
+    let at = 0;
+    const sampler = new PHPProcessSampler({ master: 11, ticks: 100, children: () => at ? [12, 13] : [12], clock: () => at,
+        inspect: pid => ({ pid, start: pid * 10, cpu: 1, rss: 20, pss: 15, pool: pid === 13 ? 'fixture_status' : 'fixture' }) });
+    sampler.sample(); at = 0.04; sampler.sample();
+    const result = sampler.summary();
+    assert.equal(result.coverage_complete, false);
+    assert.equal(result.peak_sampled_total_php_pss_kib, 45);
+    assert.deepEqual(result.first_identity_delta.added, [{ pid: 13, start: 130, pool: 'fixture_status' }]);
+    assert.equal(result.first_identity_delta.after_ms, 40);
+    at = 0.08; sampler.sample();
+    assert.deepEqual(sampler.summary().first_identity_delta, result.first_identity_delta);
+});
+test('native pool labels retain only the two finite fixture roles', () => {
+    const stat = `15 (php-fpm8.4) S ${Array.from({ length: 20 }, (_, index) => index === 18 ? 10 : 1).join(' ')}\n`;
+    const read = title => file => file.endsWith('/stat') ? stat : file.endsWith('/status') ? 'VmRSS: 100 kB\n' :
+        file.endsWith('/smaps_rollup') ? 'Pss: 60 kB\n' : title;
+    assert.equal(inspectProcess(15, 100, read('php-fpm8.4: pool fixture_status\0')).pool, 'fixture_status');
+    assert.equal(inspectProcess(15, 100, read('php-fpm: pool fixture\0')).pool, 'fixture');
+    const unrelated = inspectProcess(15, 100, read('php /private/source/with-secret-token\0'));
+    assert.equal(unrelated.pool, 'unknown');
+    assert.equal(JSON.stringify(unrelated).includes('secret-token'), false);
 });

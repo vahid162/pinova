@@ -499,7 +499,7 @@ let receipt = {
     profile: { wordpress: manifest.wordpress, plugins: manifest.deployed_plugins.map(({ slug, version, sha256 }) => ({ slug, version, sha256 })),
         php_cli: execFileSync(process.env.PINOVA_FPM_PHP_BIN || 'php', ['-r', 'echo PHP_VERSION;'], { encoding: 'utf8' }), redis: 'not_applicable_not_installed' },
     isolation: 'fresh_loopback_only_network_namespace_and_run_owned_unix_socket_database',
-    limits: { fpm_children: 10, fast_tails: 2, provider_budget_seconds: 8, normal_provider_delay_ms: 200,
+    limits: { fpm_children: 10, fpm_process_max: 11, fast_tails: 2, provider_budget_seconds: 8, normal_provider_delay_ms: 200,
         slow_provider_delay_ms: 6000, normal_flows_per_resource_variant: 10,
         controlled_existing_cli_opportunities: { idle: 1, normal: 10, slow: 1, concurrent: 1 },
         fixed_resource_windows_ms: { idle: 20000, slow: 24000, concurrent: 32000 }, process_sample_interval_ms: 40, status_interval_ms: 125 },

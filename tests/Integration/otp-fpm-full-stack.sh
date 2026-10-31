@@ -124,6 +124,9 @@ cat > "${run_root}/fpm.conf" <<EOF
 daemonize = no
 error_log = ${run_root}/private/fpm.log
 pid = ${run_root}/fpm.pid
+; Ten fixed application workers plus one native status worker. This bounds
+; instrumentation inventory identically in both revision arms; no host tuning.
+process.max = 11
 [fixture]
 user = root
 group = root

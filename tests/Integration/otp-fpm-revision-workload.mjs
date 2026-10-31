@@ -13,9 +13,9 @@ export async function revisionWorkload({ ensure, root, writeFileSync, issue, ord
     for (let index = 0; index < 10; index++) {
         const flow = await issue(41 + index, `revision-warm-${index + 1}`);
         ensure((await ordinary(index, 'revision-warm-page')).status === 200, 'Revision warmup page failed.');
+        await runWorker(`revision-warm-worker-${index + 1}`);
         await until(() => records.some(record => record.case === flow.label && record.accepted !== null), 'Revision warmup provider acceptance missing.');
         await quiescent();
-        await runWorker(`revision-warm-worker-${index + 1}`);
         warmFlows.push(flow);
     }
     await Promise.all(warmFlows.map(flow => verifyFlow(flow)));
@@ -51,9 +51,9 @@ export async function revisionWorkload({ ensure, root, writeFileSync, issue, ord
             pageTimes.push(page.ms);
             receipt.revision_arm.ordinary_count = pageTimes.length;
         }
+        await runWorker(`revision-normal-worker-${chunk + 1}`);
         await until(() => records.some(record => record.case === flow.label && record.accepted !== null), 'Revision provider acceptance missing.');
         await quiescent();
-        await runWorker(`revision-normal-worker-${chunk + 1}`);
         const state = await inspect(flow);
         ensure(state.rows === 1 && state.purpose === 'login' && state.otp_expiry === state.expiry &&
             state.accepted_channels.length === 1 && state.accepted_channels[0] === 'sms' &&

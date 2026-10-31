@@ -1,6 +1,12 @@
 /** Bounded Linux observations of this disposable fixture's PHP processes. */
 import { readFileSync } from 'node:fs';
 
+function poolRole(commandLine) {
+    if (typeof commandLine !== 'string' || commandLine.length > 4096) return 'unknown';
+    const title = commandLine.split('\0').join(' ').trim().replace(/\s+/g, ' ');
+    return title.match(/^php-fpm(?:[0-9.]+)?: pool (fixture|fixture_status)$/)?.[1] || 'unknown';
+}
+
 export function inspectProcess(pid, ticks, read = file => readFileSync(file, 'utf8')) {
     if (!Number.isSafeInteger(pid) || pid < 2 || !Number.isFinite(ticks) || ticks <= 0) throw new Error('invalid_process_identity');
     const parse = text => {
@@ -15,13 +21,14 @@ export function inspectProcess(pid, ticks, read = file => readFileSync(file, 'ut
     const before = parse(read(`/proc/${pid}/stat`));
     const status = read(`/proc/${pid}/status`);
     const rollup = read(`/proc/${pid}/smaps_rollup`);
+    const pool = poolRole(read(`/proc/${pid}/cmdline`));
     const rss = Number(status.match(/^VmRSS:\s+(\d+) kB$/m)?.[1]);
     const pss = Number(rollup.match(/^Pss:\s+(\d+) kB$/m)?.[1]);
     const after = parse(read(`/proc/${pid}/stat`));
     if (before.start !== after.start || !Number.isSafeInteger(rss) || rss <= 0 || !Number.isSafeInteger(pss) || pss <= 0) {
         throw new Error('incomplete_process_observation');
     }
-    return { pid, start: after.start, cpu: after.cpu, rss, pss };
+    return { pid, start: after.start, cpu: after.cpu, rss, pss, pool };
 }
 
 export class PHPProcessSampler {
@@ -37,6 +44,8 @@ export class PHPProcessSampler {
         this.first = new Map();
         this.last = new Map();
         this.expectedFpm = null;
+        this.expectedFpmRows = [];
+        this.firstIdentityDelta = null;
         this.peak = 0;
         this.samples = 0;
         this.started = this.clock();
@@ -99,9 +108,24 @@ export class PHPProcessSampler {
                 }
             }
         }
-        const identity = workers.filter(worker => worker.kind !== 'cli').map(worker => `${worker.pid}:${worker.start}`).sort().join(',');
-        if (this.expectedFpm === null) this.expectedFpm = identity;
-        else if (identity !== this.expectedFpm) this.fail('fpm_process_identity_changed');
+        const current = workers.filter(worker => worker.kind !== 'cli').map(worker => ({ pid: worker.pid, start: worker.start,
+            pool: worker.kind === 'fpm_master' ? 'master' : ['fixture', 'fixture_status'].includes(worker.pool) ? worker.pool : 'unknown' }))
+            .sort((a, b) => a.pid - b.pid);
+        const identity = current.map(worker => `${worker.pid}:${worker.start}`).sort().join(',');
+        if (this.expectedFpm === null) { this.expectedFpm = identity; this.expectedFpmRows = current; }
+        else if (identity !== this.expectedFpm) {
+            this.fail('fpm_process_identity_changed');
+            if (this.firstIdentityDelta === null) {
+                const key = worker => `${worker.pid}:${worker.start}`;
+                const oldKeys = new Set(this.expectedFpmRows.map(key));
+                const newKeys = new Set(current.map(key));
+                const elapsed = (at - this.started) * 1000;
+                this.firstIdentityDelta = { after_ms: Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= 3600000 ? Math.round(elapsed) : null,
+                    initial: this.expectedFpmRows, observed: current,
+                    added: current.filter(worker => !oldKeys.has(key(worker))),
+                    removed: this.expectedFpmRows.filter(worker => !newKeys.has(key(worker))) };
+            }
+        }
         this.peak = Math.max(this.peak, workers.reduce((sum, worker) => sum + worker.pss, 0));
         this.samples++;
         return { at, workers };
@@ -116,6 +140,8 @@ export class PHPProcessSampler {
             fpm_cpu_seconds: [...this.last].reduce((sum, [key, value]) => sum + value - this.first.get(key), 0),
             process_samples: this.samples,
             process_sample_scope: 'run_owned_fpm_master_workers_and_measured_cli',
+            initial_fpm_inventory: this.expectedFpmRows,
+            first_identity_delta: this.firstIdentityDelta,
             limits: ['sampled_not_allocator_peak', 'cli_first_sample_precedes_wp_cli_bootstrap', 'cpu_excludes_database_and_host'],
         };
     }

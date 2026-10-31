@@ -1,0 +1,64 @@
+name: U3 and U5 contract proof
+
+on:
+  push:
+    branches: ['proof/diagnostics-u3-u5-contracts']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proof-u3-u5-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  webotp-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.21.0'
+      - name: Prove stale WebOTP cannot enter a replacement flow
+        run: node --test tests/js/auth-webotp-lifecycle.test.mjs
+
+  cron-lease-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
+      WP_ENV_HOME: /tmp/pinova-browser-${{ github.run_id }}-${{ github.run_attempt }}
+      WP_ENV_PORT: '8890'
+      WP_ENV_TESTS_PORT: '8891'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:2.10.3
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.21.0'
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: npm ci --ignore-scripts
+      - run: npm run env:configure
+        env:
+          WP_VERSION: '6.8'
+          WC_VERSION: '10.7.0'
+          PINOVA_TEST_PHP: '8.3'
+      - run: npm run env:start -- --update
+      - name: Verify proof container PHP
+        run: npx wp-env run tests-cli php -r 'exit(PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION === "8.3" ? 0 : 1);'
+      - name: Install PDO MySQL only in the disposable proof container
+        run: npx wp-env run tests-cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
+      - name: Prove legacy logging reconnect cannot authorize another handoff
+        run: |
+          plugin_directory="$(basename "$GITHUB_WORKSPACE")"
+          npx wp-env run tests-cli --env-cwd="wp-content/plugins/$plugin_directory" env PINOVA_TEST_HPOS=no vendor/bin/phpunit -c phpunit.integration.xml.dist --filter test_cron_legacy_logging_reconnect_does_not_allow_a_second_provider_handoff
+      - name: Remove only this proof job's disposable environment
+        if: always()
+        run: bash tools/cleanup-browser-env.sh

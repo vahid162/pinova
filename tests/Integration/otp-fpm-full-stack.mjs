@@ -57,6 +57,9 @@ ensure(['8.3', '8.4'].includes(selectedPhp), 'Unexpected selected native PHP run
 const matchesPhp = value => new RegExp(`^${selectedPhp.replace('.', '\\.')}\\.[0-9]+$`).test(value || '');
 const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
 const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
+const nativeCapture = process.env.PINOVA_FPM_NATIVE_CAPTURE === '1';
+ensure(!nativeCapture || (selectedPhp === '8.4' && process.env.PINOVA_FPM_LOGGING_PROFILE === 'normal' && !probeId &&
+    /^[ab][123]$/.test(process.env.PINOVA_FPM_REVISION_ARM || '')), 'Invalid native capture scope.');
 ensure(!probeId || (probeCase && probeCase.php === selectedPhp && probeCase.logging === process.env.PINOVA_FPM_LOGGING_PROFILE &&
     probeCase.arm === process.env.PINOVA_FPM_REVISION_ARM), 'Invalid focused diagnostic case.');
 const checkpointStarted = performance.now();
@@ -521,6 +524,7 @@ async function verifyFlow(flow, purpose = 'login') {
 
 let receipt = {
     fixture: 'pinova-full-stack-fpm-v1', state: 'running',
+    ...(nativeCapture ? { resource_acceptance: false, diagnostic_only: 'native_crash_capture' } : {}),
     source_commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
     profile: { wordpress: manifest.wordpress, plugins: manifest.deployed_plugins.map(({ slug, version, sha256 }) => ({ slug, version, sha256 })),
         php_cli: execFileSync(process.env.PINOVA_FPM_PHP_BIN || 'php', ['-r', 'echo PHP_VERSION;'], { encoding: 'utf8' }), redis: 'not_applicable_not_installed' },
@@ -538,6 +542,12 @@ try {
     await until(async () => {
         try { return (await statusSnapshot(false)).status === 200; } catch { return false; }
     }, 'Native FPM/nginx did not become ready.');
+    if (nativeCapture) {
+        ensure(receipt.profile.php_cli === '8.4.27', 'Native diagnostic CLI version changed.');
+        const native = JSON.parse(execFileSync('python3', [path.join(repo, 'tests/Integration/native-fpm-crash-evidence.py'), 'inventory'],
+            { encoding: 'utf8', timeout: 15000, maxBuffer: 16384 }));
+        ensure(native.state === 'recorded', 'Native worker identity capture failed.');
+    }
     const setupLine = readFileSync(path.join(privateRoot, 'setup.log'), 'utf8').split('\n').find(line => line.startsWith('PINOVA_FULL_STACK_RESULT='));
     ensure(setupLine, 'Missing representative-profile setup receipt.');
     const pages = JSON.parse(setupLine.slice('PINOVA_FULL_STACK_RESULT='.length));
@@ -997,5 +1007,6 @@ try {
         receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), last_phase: lastCheckpoint,
             checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
     }
+    if (nativeCapture && receipt.revision_arm) receipt.revision_arm.resource_acceptance = false;
     sanitizedReceipt('full-stack-result.json', receipt);
 }

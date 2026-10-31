@@ -27,6 +27,8 @@ requireFact(contract.php.includes(php) && contract.logging_profiles.includes(log
 const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
 const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
 requireFact(!probeId || (probeCase && probeCase.php === php && probeCase.logging === logging), 'Invalid focused diagnostic case.');
+const nativeCapture = process.env.PINOVA_FPM_NATIVE_CAPTURE === '1';
+requireFact(!nativeCapture || (php === '8.4' && logging === 'normal' && !probeId), 'Invalid native diagnostic cohort.');
 const order = probeCase ? [probeCase.arm] : contract.order;
 const git = args => execFileSync('git', args, { cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 const candidate = git(['rev-parse', 'HEAD']).trim();
@@ -46,19 +48,35 @@ chmodSync(campaignRoot, 0o755); // Traversal for sanitized receipts; config/priv
 mkdirSync(`${campaignRoot}/receipt`, { mode: 0o755 });
 mkdirSync(`${campaignRoot}/private`, { mode: 0o700 });
 const identity = { candidate, inventory, php, logging, profile: null };
-const campaign = { schema: probeCase ? 'pinova.warmup-diagnostic.v1' : contract.schema, state: 'running', contract, contract_sha256: hash(contractBytes),
+const campaign = { schema: nativeCapture ? 'pinova.native-crash-diagnostic.v1' : probeCase ? 'pinova.warmup-diagnostic.v1' : contract.schema, state: 'running', contract, contract_sha256: hash(contractBytes),
     identity, composer_lock_sha256: hash(lock), dependency_normalization: 'both_code_revisions_use_identical_candidate_locked_production_vendor',
     ...(probeCase ? { resource_acceptance: false, probe_case: probeCase } : {}),
+    ...(nativeCapture ? { resource_acceptance: false, diagnostic_only: 'one_predeclared_six_arm_native_crash_capture' } : {}),
     active_arm: null, arms: order.map(arm => ({ arm, source: arm.startsWith('a') ? contract.baseline_source : candidate,
+        ...(nativeCapture ? { resource_acceptance: false } : {}),
         inventory_sha256: inventory, profile_sha256: null, source_archive_sha256: null,
         state: 'unexecuted', measurement: null, failure_phase: null, cleanup_status: 'not_started' })) };
 function save() {
-    const target = `${campaignRoot}/receipt/${probeCase ? 'warmup-diagnostic' : 'revision-comparison'}.json`;
+    const target = `${campaignRoot}/receipt/${nativeCapture ? 'native-crash-diagnostic' : probeCase ? 'warmup-diagnostic' : 'revision-comparison'}.json`;
     writeFileSync(target, JSON.stringify(campaign, null, 2) + '\n', { mode: 0o600 }); chmodSync(target, 0o644);
 }
 save();
 let campaignPhase = 'arm_setup';
 let activeRow;
+function nativeEvidence(command, arm = null) {
+    const result = spawnSync('python3', [path.join(repo, 'tests/Integration/native-fpm-crash-evidence.py'), command], {
+        cwd: repo, env: { ...process.env, ...(arm ? { PINOVA_FPM_REVISION_ARM: arm } : {}) },
+        encoding: 'utf8', maxBuffer: 131072, timeout: 120000,
+    });
+    try {
+        const receipt = JSON.parse(result.stdout);
+        requireFact(receipt.resource_acceptance === false && ['ready', 'recorded', 'no_crash_observed', 'crash_captured',
+            'needs_review', 'complete', 'not_started'].includes(receipt.state), 'Invalid native capture receipt.');
+        return receipt;
+    } catch {
+        return { state: 'needs_review', reason: result.error?.code === 'ETIMEDOUT' ? 'helper_timeout' : 'helper_receipt_unavailable', resource_acceptance: false };
+    }
+}
 function cleanupError(code, witness = null) {
     const error = new Error('Owned arm cleanup is incomplete.'); error.code = code; error.witness = witness; return error;
 }
@@ -77,6 +95,10 @@ function removeOwnedArm() {
     rmSync(runRoot, { recursive: true });
 }
 try {
+    if (nativeCapture) {
+        campaign.native_capture_setup = nativeEvidence('setup'); save();
+        requireFact(campaign.native_capture_setup.state === 'ready', 'Native capture route is unavailable.');
+    }
     for (const arm of order) {
         campaignPhase = 'arm_setup';
         activeRow = campaign.arms.find(row => row.arm === arm);
@@ -109,6 +131,10 @@ try {
         if (probeCase || execution.status !== 0 || execution.error || execution.signal) activeRow.parent_diagnostic_evidence = { ...readDiagnosticEvidence(runRoot),
             collection_boundary: 'after_fixture_exit_or_timeout', termination_causation_unverified: true };
         save();
+        if (nativeCapture) {
+            activeRow.native_capture = nativeEvidence('collect', arm); save();
+            requireFact(!activeRow.native_capture.cleanup_workers_alive?.length, 'An owned native worker survived fixture teardown.');
+        }
         writeFileSync(stdout, `${execution.stdout || ''}\n${execution.stderr || ''}`, { mode: 0o600 });
         let receipt;
         if (existsSync(`${runRoot}/receipt/full-stack-result.json`)) {
@@ -122,7 +148,8 @@ try {
         if (identity.profile === null && profile) identity.profile = profile;
         Object.assign(activeRow, { profile_sha256: profile,
             state: execution.status === 0 && receipt?.state === 'passed' ? 'passed' : 'failed',
-            measurement: probeCase ? null : receipt?.revision_arm || null,
+            measurement: probeCase || nativeCapture ? null : receipt?.revision_arm || null,
+            ...(nativeCapture ? { resource_acceptance: false, diagnostic_workload: receipt?.revision_arm || null } : {}),
             ...(probeCase ? { diagnostic: receipt?.diagnostic_probe || null } : {}),
             ...(activeRow.parent_diagnostic_evidence ? {
                 diagnostic_evidence: receipt?.diagnostic_evidence || activeRow.parent_diagnostic_evidence } : {}),
@@ -137,7 +164,11 @@ try {
         campaign.active_arm = null; save();
     }
     campaignPhase = 'campaign_evaluation';
-    if (probeCase) {
+    if (nativeCapture) {
+        campaign.state = campaign.arms.every(row => ['passed', 'failed'].includes(row.state) && row.cleanup_status === 'complete' &&
+            (row.native_capture?.state === 'crash_captured' || row.state === 'passed' && row.native_capture?.state === 'no_crash_observed')) ?
+            'diagnostic_completed' : 'needs_review';
+    } else if (probeCase) {
         // A focused warmup is never an input to the six-arm resource gate.
         campaign.state = campaign.arms.every(row => row.state === 'passed' && row.cleanup_status === 'complete' &&
             row.diagnostic?.state === 'completed' && row.diagnostic?.warm_flows_completed === 10 &&
@@ -147,7 +178,7 @@ try {
         campaign.state = campaign.acceptance.state;
     }
     save();
-    process.stdout.write(`${probeCase ? 'Focused warmup diagnosis (no resource acceptance)' : 'Revision comparison'} ${campaign.state}: ${campaign.arms.length} predeclared arms retained.\n`);
+    process.stdout.write(`${nativeCapture ? 'Native crash diagnosis (no resource acceptance)' : probeCase ? 'Focused warmup diagnosis (no resource acceptance)' : 'Revision comparison'} ${campaign.state}: ${campaign.arms.length} predeclared arms retained.\n`);
     if (!['passed', 'diagnostic_completed'].includes(campaign.state)) process.exitCode = 1;
 } catch (error) {
     campaign.state = 'needs_review';
@@ -173,4 +204,10 @@ try {
     save();
     process.stderr.write('Revision comparison incomplete; retain all receipts and inspect private runner diagnostics.\n');
     process.exitCode = 1;
+} finally {
+    if (nativeCapture) {
+        campaign.native_capture_cleanup = nativeEvidence('cleanup');
+        if (campaign.native_capture_cleanup.state !== 'complete') { campaign.state = 'needs_review'; process.exitCode = 1; }
+        save();
+    }
 }

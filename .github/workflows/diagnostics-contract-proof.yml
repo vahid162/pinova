@@ -1,0 +1,31 @@
+name: U2 diagnostic contract red proof
+
+on:
+  push:
+    branches: [proof/diagnostics-u2-contract]
+
+permissions:
+  contents: read
+
+jobs:
+  finite-catalogue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:2.10.3
+      - name: Require isolated test compute
+        run: |
+          test "${GITHUB_ACTIONS}" = true
+          test "${RUNNER_ENVIRONMENT}" = github-hosted
+      - name: Install locked test dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Observe the new finite catalogue regression against unchanged logger code
+        run: vendor/bin/phpunit --configuration phpunit.xml.dist --filter test_diagnostic_catalogue_preserves_finite_facts_in_input_and_historical_output tests/Unit/LoggingTest.php

@@ -5,6 +5,7 @@ namespace Pinova\Channels;
 use Exception;
 use Pinova\Pinova;
 use Pinova\Services\SMSService;
+use Pinova\Services\OTPImmediateDelivery;
 
 class SMS implements ChannelInterface {
 
@@ -25,6 +26,10 @@ class SMS implements ChannelInterface {
 			throw new Exception( sprintf( 'درگاه پیامکی «%s» پیکربندی نشده است.', $gateway->get_name() ) );
 		}
 
+		if ( ! in_array( get_class( $gateway ), [ \Pinova\Gateways\MeliPayamak::class, \Pinova\Gateways\MaxSMS::class, \Pinova\Gateways\PanelChi::class ], true ) ) {
+			// Opaque extensions do not share Curl's final native boundary.
+			OTPImmediateDelivery::provider_timeout();
+		}
 		return $gateway->send( $identifier, $message );
 	}
 

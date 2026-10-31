@@ -232,6 +232,11 @@ final class OTPImmediateDeliveryIntegrationTest extends WP_UnitTestCase {
 			$claim = OTPQueueStore::claim_queued_otp( $flow );
 			self::assertIsArray( $claim );
 			self::assertTrue( OTPQueueStore::owns_queued_claim( $flow, $claim['claim_token'] ) );
+			self::assertTrue( OTPQueueStore::immediate_claim_is_active( $flow, $claim['claim_token'], $lease ) );
+			self::assertFalse( OTPQueueStore::immediate_claim_is_active( $flow, $claim['claim_token'], [ 'connection' => $lease['connection'] ] ), 'A missing fast-slot name must never borrow the flow lock as its slot.' );
+			self::assertFalse( OTPQueueStore::immediate_claim_is_active( $flow, $claim['claim_token'], [ 'name' => '', 'connection' => $lease['connection'] ] ) );
+			self::assertNull( OTPQueueStore::provider_was_attempted( $flow, str_repeat( '0', 16 ) ), 'A different token has no attempt witness.' );
+			self::assertFalse( OTPQueueStore::provider_was_attempted( $flow, $claim['claim_token'] ) );
 			self::assertTrue( $database->close() );
 			self::assertTrue( $database->db_connect( false ) );
 			self::assertFalse( OTPQueueStore::owns_immediate_slot( $lease ) );

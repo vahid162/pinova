@@ -10,6 +10,7 @@ use Pinova\Gateways\PanelChi;
 use Pinova\Gateways\BaseGateway;
 use Pinova\Objects\Identifier;
 use Pinova\Pinova;
+use Pinova\Logging\DiagnosticContext;
 use Throwable;
 use WP_REST_Request;
 use WP_REST_Response;
@@ -29,27 +30,47 @@ final class OTPImmediateDelivery {
 	private int $late_level               = 0;
 	private array $expected;
 
-	private function __construct( private string $flow_id, private WP_REST_Response $response, private WP_REST_Request $request ) {
+	private function __construct( private string $flow_id, private WP_REST_Response $response, private WP_REST_Request $request, private ?DiagnosticContext $diagnostic = null ) {
 		$this->expected = $response->get_data();
 	}
 
 	/** Called only by successful originating APIs after scheduling and acknowledgement. */
-	public static function arm( string $flow_id, WP_REST_Response $response, WP_REST_Request $request ): void {
+	public static function arm( string $flow_id, WP_REST_Response $response, WP_REST_Request $request, ?int $original_deadline = null ): void {
+		$diagnostic = null === $original_deadline ? null : OTPService::diagnostic_context( $flow_id, $original_deadline );
 		try {
-			if ( ! defined( 'PINOVA_OTP_IMMEDIATE_DELIVERY' ) || true !== PINOVA_OTP_IMMEDIATE_DELIVERY
-				|| self::$armed || ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id )
-				|| 'fpm-fcgi' !== PHP_SAPI || ! function_exists( 'fastcgi_finish_request' ) || headers_sent()
-				|| 1 !== has_action( 'shutdown', 'wp_ob_end_flush_all' )
-				|| 200 !== $response->get_status() || ! is_array( $response->get_data() ) || true !== ( $response->get_data()['success'] ?? null ) ) {
+			if ( ! defined( 'PINOVA_OTP_IMMEDIATE_DELIVERY' ) || true !== PINOVA_OTP_IMMEDIATE_DELIVERY ) {
+				self::observe_decline( $diagnostic, 'disabled' );
+				return;
+			}
+			if ( self::$armed || ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) ) {
+				self::observe_decline( $diagnostic, 'claim_unavailable' );
+				return;
+			}
+			if ( 'fpm-fcgi' !== PHP_SAPI ) {
+				self::observe_decline( $diagnostic, 'unsupported_runtime' );
+				return;
+			}
+			if ( ! function_exists( 'fastcgi_finish_request' ) ) {
+				self::observe_decline( $diagnostic, 'completion_unavailable' );
+				return;
+			}
+			if ( headers_sent() || 200 !== $response->get_status() || ! is_array( $response->get_data() ) || true !== ( $response->get_data()['success'] ?? null ) ) {
+				self::observe_decline( $diagnostic, 'response_unhealthy' );
+				return;
+			}
+			if ( 1 !== has_action( 'shutdown', 'wp_ob_end_flush_all' ) ) {
+				self::observe_decline( $diagnostic, 'unsupported_buffer' );
 				return;
 			}
 			foreach ( ob_get_status( true ) as $buffer ) {
 				if ( 'default output handler' !== $buffer['name'] || 0 !== $buffer['buffer_used'] ) {
+					self::observe_decline( $diagnostic, 'unsupported_buffer' );
 					return;
 				}
 			}
-			$boundary = new self( $flow_id, $response, $request );
+			$boundary = new self( $flow_id, $response, $request, $diagnostic );
 			if ( ! ob_start( [ $boundary, 'observe_body' ] ) ) {
+				self::observe_decline( $diagnostic, 'completion_unavailable' );
 				return;
 			}
 			self::$armed = true;
@@ -62,6 +83,21 @@ final class OTPImmediateDelivery {
 		} catch ( Throwable $throwable ) {
 			// Optional acceleration must never affect the accepted public response.
 			unset( $throwable );
+			self::observe_decline( $diagnostic, 'operation_failed' );
+		}
+	}
+
+	private static function observe_decline( ?DiagnosticContext $diagnostic, string $reason ): void {
+		if ( null !== $diagnostic ) {
+			$diagnostic->observe(
+				'immediate_admission',
+				[
+					'execution_mode' => 'request',
+					'result'         => 'deferred',
+					'error_code'     => $reason,
+				]
+			);
+			OTPService::retain_diagnostic( $diagnostic );
 		}
 	}
 
@@ -122,14 +158,18 @@ final class OTPImmediateDelivery {
 			if ( ! $this->valid || ! $this->post_dispatch || ! $this->pre_serve || ! $this->pre_echo || ! $this->body_closed
 				|| $this->late_closed || ! $observer || ob_get_level() !== $this->late_level || '' !== ob_get_contents()
 				|| $fatal || 200 !== http_response_code() || ! $this->headers_are_healthy() || json_decode( $this->body, true ) !== $this->expected ) {
+				self::observe_decline( $this->diagnostic, 'response_unhealthy' );
 				return;
 			}
 			ob_end_flush();
 			if ( true === fastcgi_finish_request() ) {
-				self::dispatch( $this->flow_id );
+				self::dispatch( $this->flow_id, $this->diagnostic );
+			} else {
+				self::observe_decline( $this->diagnostic, 'completion_failed' );
 			}
 		} catch ( Throwable $throwable ) {
 			unset( $throwable );
+			self::observe_decline( $this->diagnostic, 'operation_failed' );
 		}
 	}
 
@@ -151,37 +191,76 @@ final class OTPImmediateDelivery {
 	}
 
 	/** Only finish() reaches this in production; no endpoint accepts a flow override. */
-	private static function dispatch( string $flow_id ): void {
-		if ( null !== self::$context || ! self::has_headroom() ) {
+	private static function dispatch( string $flow_id, ?DiagnosticContext $diagnostic = null ): void {
+		if ( null !== self::$context ) {
+			self::observe_decline( $diagnostic, 'claim_unavailable' );
+			return;
+		}
+		$headroom = self::headroom_decline_reason();
+		if ( null !== $headroom ) {
+			self::observe_decline( $diagnostic, $headroom );
 			return;
 		}
 		$lease = OTPQueueStore::acquire_immediate_slot();
 		if ( null === $lease ) {
+			self::observe_decline( $diagnostic, 'slot_unavailable' );
 			return;
 		}
 		self::$context = [
-			'flow'      => $flow_id,
-			'lease'     => $lease,
-			'deadline'  => microtime( true ) + self::PROVIDER_BUDGET_SECONDS,
-			'attempted' => false,
+			'flow'               => $flow_id,
+			'lease'              => $lease,
+			'deadline'           => microtime( true ) + self::PROVIDER_BUDGET_SECONDS,
+			'attempted'          => false,
+			'diagnostic'         => $diagnostic,
+			'admission_observed' => false,
 		];
 		try {
 			OTPService::deliver_queued( $flow_id );
 		} finally {
-			self::$context = null;
-			OTPQueueStore::release_immediate_slot( $lease );
+			if ( ! self::$context['admission_observed'] && null !== $diagnostic ) {
+				$diagnostic->observe(
+					'immediate_admission',
+					[
+						'execution_mode' => 'immediate',
+						'result'         => 'deferred',
+						'error_code'     => 'claim_unavailable',
+					]
+				);
+			}
+			$released = false;
+			try {
+				$released = OTPQueueStore::release_immediate_slot_observed( $lease );
+			} finally {
+				// Unknown release keeps this finite request-local context as a
+				// suppression latch. Even finish()'s catch may not flush beneath it.
+				if ( $released ) {
+					self::$context = null;
+				}
+				if ( null !== $diagnostic ) {
+					OTPService::retain_diagnostic( $diagnostic );
+				}
+				OTPService::flush_diagnostics();
+			}
 		}
 	}
 
 	/** Unknown host pressure retains cron; this does not tune the shared PHP pool. */
 	private static function has_headroom(): bool {
+		return null === self::headroom_decline_reason();
+	}
+
+	private static function headroom_decline_reason(): ?string {
 		if ( 'Linux' !== PHP_OS_FAMILY || ! function_exists( 'sys_getloadavg' ) ) {
-			return false;
+			return 'headroom_unavailable';
 		}
 		$load = sys_getloadavg();
 		// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Bounded local procfs observation; unavailable pressure data silently retains cron.
 		$memory = @file_get_contents( '/proc/meminfo', false, null, 0, 8192 );
-		return self::headroom_is_sufficient( $memory, $load );
+		if ( ! is_array( $load ) || ! isset( $load[0] ) || ! is_numeric( $load[0] ) || ! is_finite( (float) $load[0] ) || 0 > $load[0]
+			|| ! is_string( $memory ) || 1 !== preg_match( '/^MemAvailable:\s+(\d+)\s+kB$/m', $memory ) ) {
+			return 'headroom_unavailable';
+		}
+		return self::headroom_is_sufficient( $memory, $load ) ? null : 'headroom_insufficient';
 	}
 
 	private static function headroom_is_sufficient( string|false $memory, array|false $load ): bool {
@@ -200,11 +279,49 @@ final class OTPImmediateDelivery {
 		}
 		return static function ( array $queued ): bool {
 			$identifier = new Identifier( $queued['identifier'] );
-			if ( ! $identifier->is_mobile() || $queued['deadline'] <= time() || ! self::capacity_is_active() ) {
+			if ( ! $identifier->is_mobile() ) {
+				self::observe_active_admission( 'channel_unsupported' );
 				return false;
 			}
-			return self::channels_are_bounded( ChannelService::get_channels( $identifier ) );
+			if ( $queued['deadline'] <= time() ) {
+				self::observe_active_admission( 'deadline_expired' );
+				return false;
+			}
+			if ( ! self::capacity_is_active() ) {
+				self::observe_active_admission( microtime( true ) >= self::$context['deadline'] ? 'budget_expired' : 'claim_unavailable' );
+				return false;
+			}
+			if ( ! self::channels_are_bounded( ChannelService::get_channels( $identifier ) ) ) {
+				self::observe_active_admission( 'channel_unsupported' );
+				return false;
+			}
+			self::observe_active_admission( 'none' );
+			return true;
 		};
+	}
+
+	/** Pure buffered fact; no claim is acquired or restored for diagnostics. */
+	public static function observe_claim_decline( string $flow_id ): void {
+		if ( self::is_active( $flow_id ) ) {
+			self::observe_active_admission( 'claim_unavailable' );
+		}
+	}
+
+	private static function observe_active_admission( string $reason ): void {
+		if ( null !== self::$context ) {
+			self::$context['admission_observed'] = true;
+			$diagnostic = self::$context['diagnostic'] ?? null;
+			if ( $diagnostic instanceof DiagnosticContext ) {
+				$diagnostic->observe(
+					'immediate_admission',
+					[
+						'execution_mode' => 'immediate',
+						'result'         => 'none' === $reason ? 'admitted' : 'deferred',
+						'error_code'     => $reason,
+					]
+				);
+			}
+		}
 	}
 
 	public static function channels_are_bounded( array $channels ): bool {
@@ -250,9 +367,14 @@ final class OTPImmediateDelivery {
 		}
 		// Provider selection can read options and reconnect wpdb. Make the single
 		// ownership/token observation the final database read before admission.
-		if ( ( [] !== $channels && ! self::channels_are_bounded( $channels ) ) || microtime( true ) >= self::$context['deadline']
-			|| ! OTPQueueStore::immediate_claim_is_active( $flow_id, $claim_token, self::$context['lease'] ) ) {
-			throw new OTPImmediateDeliveryDeferredException( 'Immediate delivery was deferred.' );
+		if ( [] !== $channels && ! self::channels_are_bounded( $channels ) ) {
+			throw new OTPImmediateDeliveryDeferredException( 'Immediate provider is unsupported.', reason: 'channel_unsupported' );
+		}
+		if ( microtime( true ) >= self::$context['deadline'] ) {
+			throw new OTPImmediateDeliveryDeferredException( 'Immediate provider budget expired.', reason: 'budget_expired' );
+		}
+		if ( ! OTPQueueStore::immediate_claim_is_active( $flow_id, $claim_token, self::$context['lease'] ) ) {
+			throw new OTPImmediateDeliveryDeferredException( 'Immediate delivery permission ended.' );
 		}
 		self::$context['claim_token'] = $claim_token;
 	}
@@ -263,16 +385,23 @@ final class OTPImmediateDelivery {
 
 	/** Curl uses this immediately before handing work to WordPress HTTP transports. */
 	public static function provider_timeout(): int|float {
-		if ( null === self::$context ) {
+		$scope = OTPQueueStore::provider_scope();
+		if ( null === $scope ) {
 			return 8;
 		}
-		self::guard( self::$context['flow'], self::$context['claim_token'] ?? '' );
+		if ( ! self::is_active( $scope['flow'] ) ) {
+			OTPQueueStore::guard_provider();
+			OTPQueueStore::mark_provider_attempted();
+			return 8;
+		}
+		self::guard( $scope['flow'], $scope['token'] );
 		$remaining = self::$context['deadline'] - microtime( true );
 		if ( 0 >= $remaining ) {
-			throw new OTPImmediateDeliveryDeferredException( 'Immediate provider budget expired.' );
+			throw new OTPImmediateDeliveryDeferredException( 'Immediate provider budget expired.', reason: 'budget_expired' );
 		}
 		// Mark before HTTP hooks: a throw or timeout has an unknown external outcome.
 		self::$context['attempted'] = true;
+		OTPQueueStore::mark_provider_attempted();
 		return min( 8.0, $remaining );
 	}
 

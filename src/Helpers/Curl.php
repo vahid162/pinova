@@ -6,6 +6,8 @@ use Exception;
 use JsonException;
 use WP_Error;
 use Pinova\Services\OTPImmediateDelivery;
+use Pinova\Services\OTPQueueStore;
+use Pinova\Services\OTPService;
 
 class Curl {
 
@@ -23,16 +25,41 @@ class Curl {
 		}
 		$request_headers = self::normalize_headers( $headers );
 
-		$response = wp_remote_post(
-			$url,
+		$arguments = [
+			'timeout'     => 8,
+			'redirection' => 0,
+			'headers'     => $request_headers,
+			'body'        => $data,
+			'data_format' => 'body',
+		];
+		// This is the final connection/flow/slot observation and attempt mark.
+		// Only pure clocks and bounded memory observations precede the handoff.
+		$arguments['timeout'] = OTPImmediateDelivery::provider_timeout();
+		$started              = OTPService::diagnostic_clock();
+		OTPQueueStore::observe_provider(
+			'provider_started',
 			[
-				'timeout'     => OTPImmediateDelivery::provider_timeout(),
-				'redirection' => 0,
-				'headers'     => $request_headers,
-				'body'        => $data,
-				'data_format' => 'body',
+				'result'     => 'started',
+				'error_code' => 'none',
 			]
 		);
+		$response = null;
+		try {
+			$response = wp_remote_post( $url, $arguments );
+		} finally {
+			$details = [
+				'result'     => is_array( $response ) ? 'completed' : 'unknown',
+				'error_code' => is_array( $response ) ? 'none' : 'provider_outcome_unknown',
+			];
+			$duration = OTPService::diagnostic_duration( $started );
+			if ( null !== $duration ) {
+				$details['provider_duration_ms'] = $duration;
+			}
+			if ( is_array( $response ) ) {
+				$details['http_status'] = (int) ( $response['response']['code'] ?? 0 );
+			}
+			OTPQueueStore::observe_provider( 'provider_completed', $details );
+		}
 
 		if ( $response instanceof WP_Error ) {
 			throw new Exception( 'ارتباط امن با سرویس‌دهنده برقرار نشد. لطفاً دوباره تلاش کنید.' );
@@ -95,7 +122,7 @@ class Curl {
 			if ( ! is_scalar( $credential ) ) {
 				continue;
 			}
-			$value    = trim( (string) $credential );
+			$value = trim( (string) $credential );
 			$values[] = $value;
 			$values[] = preg_replace( '/^(?:bearer|basic)\s+/i', '', $value ) ?? '';
 		}

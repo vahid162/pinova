@@ -52,7 +52,8 @@ jobs:
           PINOVA_TEST_PHP: '8.3'
       - run: npm run env:start -- --update
       - name: Verify proof container PHP
-        run: npx wp-env run tests-cli php -r 'exit(PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION === "8.3" ? 0 : 1);'
+        run: |
+          npx wp-env run tests-cli php -r 'exit(PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION === "8.3" ? 0 : 1);'
       - name: Install PDO MySQL only in the disposable proof container
         run: npx wp-env run tests-cli sudo env PHP_INI_DIR=/usr/local/etc/php docker-php-ext-install pdo_mysql
       - name: Prove legacy logging reconnect cannot authorize another handoff

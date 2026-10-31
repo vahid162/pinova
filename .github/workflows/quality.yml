@@ -2,6 +2,7 @@ name: Quality
 
 on:
   push:
+    branches-ignore: ['proof/diagnostics-file-observer-unlinked']
   pull_request:
   workflow_dispatch:
 

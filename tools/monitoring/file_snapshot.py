@@ -46,24 +46,40 @@ def _number(raw, base=10, minimum=0, maximum=2**64 - 1):
 
 
 def parse_lsof(data, identities, *, max_records=4096):
-    """Parse only -F0pfaDiG numeric-FD records, rejecting incomplete frames."""
+    """Validate bounded -F0pfaDiGt frames, returning selected numeric REG FDs."""
     if isinstance(data, bytes) and len(data) > 2097152:
         raise NativeFailure("native_output_bound")
     if (not isinstance(data, bytes) or not data or not data.endswith(b"\0\n")
             or type(max_records) is not int or not 1 <= max_records <= 16384):
         raise NativeFailure("native_output_shape")
     output, current, pid, pids = [], None, None, set()
+    records, descriptors = 0, set()
 
     def finish():
+        nonlocal records
         if current is None:
             return
-        if set(current) != {b"f", b"a", b"D", b"i", b"G"}:
+        records += 1
+        if records > max_records:
+            raise NativeFailure("native_output_bound")
+        if not {b"f", b"t", b"D", b"i"} <= set(current) or not current[b"t"]:
             raise NativeFailure("native_output_shape")
-        fd = _number(current[b"f"], maximum=2**31 - 1)
+        fd = None
+        if current[b"f"].isdigit():
+            fd = _number(current[b"f"], maximum=2**31 - 1)
+            if (pid, fd) in descriptors:
+                raise NativeFailure("native_output_shape")
+            descriptors.add((pid, fd))
+        elif re.fullmatch(rb"[A-Za-z]{1,16}", current[b"f"]) is None:
+            raise NativeFailure("native_output_shape")
         identity = (_number(current[b"D"], 16, 1), _number(current[b"i"], minimum=1))
+        if identity not in identities:
+            return
+        if fd is None or current[b"t"] != b"REG" or set(current) != {b"f", b"a", b"D", b"i", b"G", b"t"}:
+            raise NativeFailure("native_output_shape")
         access = current[b"a"]
         flag_parts = current[b"G"].split(b";")
-        if identity not in identities or access not in (b"r", b"w", b"u") or len(flag_parts) != 2:
+        if access not in (b"r", b"w", b"u") or len(flag_parts) != 2:
             raise NativeFailure("native_output_shape")
         flags, descriptor_flags = (_number(x, 16) for x in flag_parts)
         if flags & os.O_ACCMODE != {b"r": os.O_RDONLY, b"w": os.O_WRONLY, b"u": os.O_RDWR}[access]:
@@ -71,13 +87,11 @@ def parse_lsof(data, identities, *, max_records=4096):
         if access in (b"w", b"u") and not flags & os.O_APPEND:
             raise NativeFailure("native_nonappend_writer")
         output.append((pid, fd, identity, access, flags, descriptor_flags))
-        if len(output) > max_records:
-            raise NativeFailure("native_output_bound")
 
     for token in data.split(b"\0")[:-1]:
         if token.startswith(b"\n"):
             token = token[1:]
-        if not token or b"\n" in token or token[:1] not in (b"p", b"f", b"a", b"D", b"i", b"G"):
+        if not token or b"\n" in token or token[:1] not in (b"p", b"f", b"a", b"D", b"i", b"G", b"t"):
             raise NativeFailure("native_output_shape")
         key, value = token[:1], token[1:]
         if key == b"p":
@@ -115,6 +129,18 @@ def _read(path, limit):
 
 def _identity(info):
     return info.st_dev, info.st_ino
+
+
+def _link_counts(targets):
+    links = {}
+    for (pid, fd), identity in targets.items():
+        if pid != os.getpid():
+            raise NativeFailure("native_source_shape")
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or _identity(info) != identity:
+            raise NativeFailure("native_writer_churn")
+        links[(pid, fd)] = info.st_nlink
+    return links
 
 
 def scope_identity():
@@ -192,10 +218,25 @@ class NativeFileSnapshot:
 
     def _run_lsof(self, selectors):
         limit = self.max_output_bytes
+        linked, unlinked = [], False
+        prefix = f"/proc/{os.getpid()}/fd/"
+        if not selectors:
+            raise NativeFailure("native_source_shape")
+        for selector in selectors:
+            suffix = selector[len(prefix):] if isinstance(selector, str) and selector.startswith(prefix) else ""
+            if re.fullmatch(r"[0-9]{1,10}", suffix) is None:
+                raise NativeFailure("native_source_shape")
+            info = os.fstat(int(suffix))
+            if not stat.S_ISREG(info.st_mode):
+                raise NativeFailure("native_writer_churn")
+            if info.st_nlink == 0:
+                unlinked = True
+            else:
+                linked.append(selector)
         def limits():
             resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
         with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
-            process = subprocess.Popen([str(self.binary), "-nP", "-F0pfaDiG", "--", *selectors],
+            process = subprocess.Popen([str(self.binary), "-nP", "-F0pfaDiGt", *(["+L1"] if unlinked else []), "--", *linked],
                 stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, close_fds=True,
                 env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"}, preexec_fn=limits)
             try:
@@ -221,6 +262,11 @@ class NativeFileSnapshot:
             if out_size >= limit or err_size >= limit:
                 raise NativeFailure("native_output_bound")
             if process.returncode != 0 or err_size:
+                prefix = os.pread(stderr.fileno(), min(err_size, 4096), 0).lower()
+                if b"status error on " in prefix:
+                    raise NativeFailure("native_file_argument_error")
+                if b"permission denied" in prefix:
+                    raise NativeFailure("native_visibility_denied")
                 raise NativeFailure("native_scan_incomplete")
             stdout.seek(0)
             return stdout.read(limit + 1)
@@ -274,15 +320,17 @@ class NativeFileSnapshot:
                 targets, initial = self._cursors(cursors, assurances)
                 selectors = [f"/proc/{pid}/fd/{fd}" for pid, fd in sorted(targets)]
                 identities = set(targets.values())
-                first = parse_lsof(self._run_lsof(selectors), identities, max_records=self.max_records)
-                writers = tuple(x for x in first if x[3] in (b"w", b"u"))
-                if len(writers) > 1024 or len({x[0] for x in writers}) > 256:
-                    raise NativeFailure("native_output_bound")
-                for (pid, fd), identity in targets.items():
-                    if not any(x[0] == pid and x[1] == fd and x[2] == identity and x[3] == b"r" for x in first):
-                        raise NativeFailure("native_scan_incomplete")
                 try:
+                    links = _link_counts(targets)
+                    first = parse_lsof(self._run_lsof(selectors), identities, max_records=self.max_records)
+                    writers = tuple(x for x in first if x[3] in (b"w", b"u"))
+                    if len(writers) > 1024 or len({x[0] for x in writers}) > 256:
+                        raise NativeFailure("native_output_bound")
+                    for (pid, fd), identity in targets.items():
+                        if not any(x[0] == pid and x[1] == fd and x[2] == identity and x[3] == b"r" for x in first):
+                            raise NativeFailure("native_scan_incomplete")
                     before = {pid: _start_ticks(pid) for pid in {x[0] for x in writers}}
+                    links = _link_counts(targets)
                     second = parse_lsof(self._run_lsof(selectors), identities, max_records=self.max_records)
                     for (pid, fd), identity in targets.items():
                         if not any(x[0] == pid and x[1] == fd and x[2] == identity and x[3] == b"r" for x in second):
@@ -302,7 +350,13 @@ class NativeFileSnapshot:
                     if attempt + 1 == self.attempts:
                         raise NativeFailure("native_writer_churn") from None
                 except NativeFailure as error:
-                    if error.args != ("native_writer_churn",) or attempt + 1 == self.attempts:
+                    if attempt + 1 == self.attempts:
+                        raise
+                    if error.args == ("native_file_argument_error",):
+                        fresh = _link_counts(targets)
+                        if not any(links[key] > 0 and fresh[key] == 0 for key in links):
+                            raise
+                    elif error.args != ("native_writer_churn",):
                         raise
             else:
                 raise NativeFailure("native_writer_churn")
@@ -331,7 +385,8 @@ class NativeFileSnapshot:
             allowed = {"native_root_visibility_required", "native_threaded_controller", "native_source_shape", "native_output_shape",
                 "native_access_flags_unknown", "native_nonappend_writer", "native_output_bound",
                 "native_read_bound", "native_writer_churn", "native_scan_incomplete", "native_scan_timeout",
-                "native_child_not_reaped", "native_code_pin_changed", "native_scope_changed"}
+                "native_child_not_reaped", "native_code_pin_changed", "native_scope_changed",
+                "native_file_argument_error", "native_visibility_denied"}
             code = reason.args[0] if (isinstance(reason, NativeFailure) and reason.args
                                      and isinstance(reason.args[0], str) and reason.args[0] in allowed) else "native_read_failed"
             return {"state": "failed", "reason": code, "readers": readers}

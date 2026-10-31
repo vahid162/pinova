@@ -33,15 +33,31 @@ S = load("snapshot_source_assurance", ROOT / "tools/monitoring/source_assurance.
 PINS = {key: value * 64 for key, value in (("adapter", "a"), ("cursor", "b"), ("assurance", "c"), ("lsof", "d"))}
 CAP = {"receipt_sha256": "e" * 64, "scope_identity": "f" * 64}
 SOURCE = {"writer": "1" * 64, "rotation_inventory": "2" * 64, "configuration": "3" * 64}
+NATIVE_FAILURE_REASONS = {
+    "native_root_visibility_required", "native_threaded_controller", "native_source_shape", "native_output_shape",
+    "native_access_flags_unknown", "native_nonappend_writer", "native_output_bound", "native_read_bound",
+    "native_writer_churn", "native_scan_incomplete", "native_scan_timeout", "native_child_not_reaped",
+    "native_code_pin_changed", "native_scope_changed", "native_scope_unavailable", "native_read_failed",
+    "native_file_argument_error", "native_visibility_denied",
+    "isolated_root_ci_required", "native_fixture_child_failed", "cross_uid_writer_not_observed",
+    "nonappend_writer_not_rejected", "late_generation_not_preserved", "retired_writer_not_drained",
+    "native_fixture_failed",
+}
+NATIVE_PHASES = {
+    "not_started", "root_guard", "adapter_setup", "fixture_setup", "writer_ready", "cross_uid_scan",
+    "nonappend_scan", "rotation_late_write", "late_scan", "writer_drain", "drained_scan",
+}
 
 
-def output(records):
+def output(records, *, file_type="REG"):
     """records=(pid,fd,access,device,inode,fileflags,fdflags)."""
     result, prior = bytearray(), None
     for pid, fd, access, device, inode, flags, fdflags in records:
         if pid != prior:
             result.extend(f"p{pid}".encode() + b"\0\n"); prior = pid
         fields = (f"f{fd}", f"a{access}", f"G0x{flags:x};0x{fdflags:x}", f"D0x{device:x}", f"i{inode}")
+        if file_type is not None:
+            fields += (f"t{file_type}",)
         result.extend(b"\0".join(x.encode() for x in fields) + b"\0\n")
     return bytes(result)
 
@@ -80,12 +96,61 @@ class ParserTests(unittest.TestCase):
             with self.subTest(rows=rows), self.assertRaises(M.NativeFailure):
                 M.parse_lsof(output(rows), ids, max_records=limit)
 
+    def test_typed_global_rows_keep_selected_files_and_drop_unrelated_nonappend_files(self):
+        records = [(3, 3, "r", 1, 2, 0, 0), (3, 4, "w", 1, 2, 0x401, 0),
+                   (4, 8, "u", 1, 9, 2, 0), (4, 9, "u", 1, 10, 2, 0)]
+        payload = output(records, file_type="REG").replace(b"i10\0tREG\0", b"i10\0tDEL\0")
+        try:
+            rows = M.parse_lsof(payload, {(1, 2)})
+        except M.NativeFailure:
+            self.fail("valid selected REG rows were refused in the global scan")
+        self.assertEqual(((3, 3, (1, 2), b"r", 0, 0), (3, 4, (1, 2), b"w", 0x401, 0)), rows)
+
+    def test_selected_typed_rows_with_uncertain_identity_or_unsafe_access_refuse(self):
+        healthy = output([(3, 3, "w", 1, 2, 0x401, 0)], file_type="REG")
+        cases = {
+            "selected_del": healthy.replace(b"tREG\0", b"tDEL\0"),
+            "selected_del_beside_reader": output([(2, 2, "r", 1, 2, 0, 0)], file_type="REG") + healthy.replace(b"tREG\0", b"tDEL\0"),
+            "missing_type": healthy.replace(b"tREG\0", b""),
+            "missing_device": healthy.replace(b"D0x1\0", b""),
+            "missing_inode": healthy.replace(b"i2\0", b""),
+            "missing_flags": healthy.replace(b"G0x401;0x0\0", b""),
+            "nonnumeric_fd": healthy.replace(b"f3\0", b"fmem\0"),
+            "nonappend_writer": healthy.replace(b"G0x401;0x0\0", b"G0x1;0x0\0"),
+        }
+        for case, payload in cases.items():
+            with self.subTest(case=case), self.assertRaises(M.NativeFailure):
+                M.parse_lsof(payload, {(1, 2)})
+
+    def test_unselected_global_rows_still_require_valid_framing_and_identity(self):
+        selected = output([(3, 3, "r", 1, 2, 0, 0)], file_type="REG")
+        unrelated = output([(4, 8, "u", 1, 9, 2, 0)], file_type="REG")
+        cases = {
+            "truncated": unrelated[:-2],
+            "unknown_field": unrelated.replace(b"i9\0", b"i9\0n/private/customer-secret\0"),
+            "duplicate_device": unrelated.replace(b"D0x1\0", b"D0x1\0D0x1\0"),
+            "unknown_device": unrelated.replace(b"D0x1\0", b"Dunknown\0"),
+            "missing_identity": unrelated.replace(b"i9\0", b""),
+            "duplicate_fd": output([(4, 8, "u", 1, 9, 2, 0)] * 2, file_type="REG"),
+        }
+        for case, payload in cases.items():
+            with self.subTest(case=case), self.assertRaises(M.NativeFailure) as error:
+                M.parse_lsof(selected + payload, {(1, 2)})
+            self.assertNotIn("customer-secret", str(error.exception))
+
+    def test_discarded_global_rows_still_consume_the_parser_record_bound(self):
+        records = [(2, 4, "u", 1, 9, 2, 0), (2, 5, "u", 1, 10, 2, 0), (3, 3, "r", 1, 2, 0, 0)]
+        with self.assertRaises(M.NativeFailure) as error:
+            M.parse_lsof(output(records, file_type="REG"), {(1, 2)}, max_records=2)
+        self.assertEqual("native_output_bound", str(error.exception))
+
 
 class SnapshotTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.path = Path(self.directory.name) / "source.log"; self.path.write_bytes(b"before\n")
         self.cursor = L.LogCursor(self.path)
+        self.selectors = [f"/proc/{os.getpid()}/fd/{state.fd}" for state in self.cursor._files.values()]
         self.pin = mock.patch.object(M, "_pin", return_value=(1, 2, 0, 0, 0, 1, 1, 1)); self.pin.start()
         self.scope = mock.patch.object(M, "scope_identity", return_value=(CAP["scope_identity"], "4" * 64)); self.scope.start()
         self.root = mock.patch.object(M.os, "geteuid", return_value=0); self.root.start()
@@ -178,6 +243,187 @@ class SnapshotTests(unittest.TestCase):
         finally:
             writer.close()
 
+    def test_mixed_linked_unlinked_capture_selects_both_and_drops_unrelated_tempfile(self):
+        writer = self.path.open("ab"); old_identity = next(iter(self.cursor._files))
+        try:
+            rotated = self.path.with_suffix(".old"); self.path.rename(rotated); self.path.write_bytes(b"current\n")
+            rotated.unlink(); self.cursor.observe()
+            own = [(os.getpid(), state.fd, "r", *identity, 0, 0) for identity, state in self.cursor._files.items()]
+            linked = {f"/proc/{os.getpid()}/fd/{state.fd}" for state in self.cursor._files.values()
+                      if os.fstat(state.fd).st_nlink > 0}
+            unlinked = {f"/proc/{os.getpid()}/fd/{state.fd}" for state in self.cursor._files.values()
+                        if os.fstat(state.fd).st_nlink == 0}
+            self.assertEqual((1, 1), (len(linked), len(unlinked)))
+            with tempfile.TemporaryFile() as unrelated:
+                info = os.fstat(unrelated.fileno()); self.assertEqual(0, info.st_nlink)
+                records = [*own, (500, 8, "w", *old_identity, 0x401, 0),
+                           (os.getpid(), unrelated.fileno(), "u", info.st_dev, info.st_ino, os.O_RDWR, 0)]
+                payload = output(sorted(records), file_type="REG")
+                calls = []
+                class Child:
+                    returncode = 0
+                    def wait(self, timeout):
+                        return 0
+                def launch(argv, **kwargs):
+                    calls.append(list(argv))
+                    kwargs["stdout"].write(payload); kwargs["stdout"].flush()
+                    return Child()
+                with mock.patch.object(M.subprocess, "Popen", side_effect=launch):
+                    result = self.snapshot.capture(self.sources, self.assurances, 1)
+            self.assertEqual("observed", result["state"])
+            self.assertEqual(2, len(calls))
+            for argv in calls:
+                self.assertIn("+L1", argv[:argv.index("--")])
+                self.assertEqual(linked, set(argv[argv.index("--") + 1:]))
+                self.assertFalse(unlinked.intersection(argv))
+                self.assertFalse(any(arg == "-a" or arg.startswith("-p") for arg in argv))
+                self.assertEqual(1, sum(arg.startswith("-F") and "t" in arg for arg in argv))
+            self.assertEqual(2, len(result["witnesses"]["one"]["retained"]))
+            self.assertEqual([{"identity": list(old_identity), "process": [500, 100]}],
+                             result["witnesses"]["one"]["writer_refs"])
+        finally:
+            writer.close()
+
+    def test_mixed_scan_requires_each_retained_reader_in_both_batches(self):
+        rotated = self.path.with_suffix(".old"); self.path.rename(rotated); self.path.write_bytes(b"current\n")
+        rotated.unlink(); self.cursor.observe()
+        own = [(os.getpid(), state.fd, "r", *identity, 0, 0) for identity, state in self.cursor._files.items()]
+        old_identity = next(identity for identity, state in self.cursor._files.items() if os.fstat(state.fd).st_nlink == 0)
+        writer = (500, 8, "w", *old_identity, 0x401, 0)
+        for missing in own:
+            for incomplete_scan in (1, 2):
+                with self.subTest(missing_fd=missing[1], incomplete_scan=incomplete_scan):
+                    calls = []
+                    class Child:
+                        returncode = 0
+                        def wait(self, timeout):
+                            return 0
+                    def launch(argv, **kwargs):
+                        calls.append(list(argv))
+                        records = [row for row in own if row != missing or len(calls) != incomplete_scan]
+                        kwargs["stdout"].write(output(sorted([*records, writer]), file_type="REG"))
+                        kwargs["stdout"].flush()
+                        return Child()
+                    with mock.patch.object(M.subprocess, "Popen", side_effect=launch):
+                        result = self.snapshot.capture(self.sources, self.assurances, 1)
+                    self.assertEqual("failed", result["state"])
+
+    def test_all_unlinked_scan_uses_link_count_selection_without_filename_arguments(self):
+        with tempfile.TemporaryFile() as first, tempfile.TemporaryFile() as second:
+            infos = [(stream.fileno(), os.fstat(stream.fileno())) for stream in (first, second)]
+            self.assertTrue(all(info.st_nlink == 0 for _, info in infos))
+            selectors = [f"/proc/{os.getpid()}/fd/{fd}" for fd, _ in infos]
+            payload = output([(os.getpid(), fd, "r", info.st_dev, info.st_ino, 0, 0)
+                              for fd, info in infos], file_type="REG")
+            calls = []
+            class Child:
+                returncode = 0
+                def wait(self, timeout):
+                    return 0
+            def launch(argv, **kwargs):
+                calls.append(list(argv)); kwargs["stdout"].write(payload); kwargs["stdout"].flush()
+                return Child()
+            with mock.patch.object(M.subprocess, "Popen", side_effect=launch):
+                self.assertEqual(payload, self.snapshot._run_lsof(selectors))
+            self.assertEqual(1, len(calls))
+            argv = calls[0]
+            self.assertIn("+L1", argv)
+            self.assertEqual([], argv[argv.index("--") + 1:])
+            self.assertFalse(any(arg == "-a" or arg.startswith("-p") for arg in argv))
+            self.assertEqual(1, sum(arg.startswith("-F") and "t" in arg for arg in argv))
+
+    def test_linked_only_scan_keeps_filename_arguments_without_link_count_selection(self):
+        selectors = [f"/proc/{os.getpid()}/fd/{state.fd}" for state in self.cursor._files.values()]
+        payload = self.rows(); calls = []
+        class Child:
+            returncode = 0
+            def wait(self, timeout):
+                return 0
+        def launch(argv, **kwargs):
+            calls.append(list(argv)); kwargs["stdout"].write(payload); kwargs["stdout"].flush()
+            return Child()
+        with mock.patch.object(M.subprocess, "Popen", side_effect=launch):
+            self.assertEqual(payload, self.snapshot._run_lsof(selectors))
+        self.assertEqual(1, len(calls))
+        self.assertNotIn("+L1", calls[0])
+        self.assertEqual(selectors, calls[0][calls[0].index("--") + 1:])
+
+    def test_linked_to_unlinked_file_argument_race_retries_only_within_attempt_bound(self):
+        self.snapshot.attempts = 2
+        for failed_scan in (1, 2):
+            with self.subTest(failed_scan=failed_scan):
+                path = self.path.with_name(f"transition-{failed_scan}.log"); path.write_bytes(b"before\n")
+                cursor = L.LogCursor(path)
+                try:
+                    old_identity = next(iter(cursor._files)); old_fd = cursor._files[old_identity].fd
+                    rotated = path.with_suffix(".old"); path.rename(rotated); path.write_bytes(b"current\n"); cursor.observe()
+                    self.assertGreater(os.fstat(old_fd).st_nlink, 0)
+                    records = [(os.getpid(), state.fd, "r", *identity, 0, 0) for identity, state in cursor._files.items()]
+                    payload = output(sorted([*records, (500, 8, "w", *old_identity, 0x401, 0)]), file_type="REG")
+                    calls = []
+                    class Child:
+                        def __init__(self, returncode):
+                            self.returncode = returncode
+                        def wait(self, timeout):
+                            return self.returncode
+                    def launch(argv, **kwargs):
+                        calls.append(list(argv))
+                        if len(calls) == failed_scan:
+                            rotated.unlink()
+                            kwargs["stderr"].write(b"lsof: status error on /private/customer-secret: No such file or directory\n")
+                            kwargs["stderr"].flush()
+                            return Child(1)
+                        kwargs["stdout"].write(payload); kwargs["stdout"].flush()
+                        return Child(0)
+                    with mock.patch.object(M.subprocess, "Popen", side_effect=launch):
+                        result = self.snapshot.capture({"one": cursor}, self.assurances, 1)
+                    self.assertEqual("observed", result["state"])
+                    self.assertEqual(failed_scan + 2, len(calls))
+                    self.assertEqual(0, os.fstat(old_fd).st_nlink)
+                    for argv in calls[-2:]:
+                        self.assertIn("+L1", argv)
+                        self.assertNotIn(f"/proc/{os.getpid()}/fd/{old_fd}", argv)
+                    self.assertEqual([{"identity": list(old_identity), "process": [500, 100]}],
+                                     result["witnesses"]["one"]["writer_refs"])
+                finally:
+                    cursor.close()
+
+    def test_file_argument_retry_requires_a_fresh_transition_and_other_failures_never_retry(self):
+        self.snapshot.attempts = 2
+        cases = (
+            ("unchanged", b"lsof: status error on /private/customer-secret\n", 1, "native_file_argument_error"),
+            ("already_unlinked", b"lsof: status error on /private/customer-secret\n", 1, "native_file_argument_error"),
+            ("transition_exhausted", b"lsof: status error on /private/customer-secret\n", 1, "native_file_argument_error"),
+            ("transition_permission", b"lsof: Permission denied /private/customer-secret\n", 1, "native_visibility_denied"),
+            ("transition_stderr", b"lsof: opaque failure /private/customer-secret\n", 0, "native_scan_incomplete"),
+            ("transition_nonzero", b"", 1, "native_scan_incomplete"),
+        )
+        for case, stderr, returncode, expected in cases:
+            with self.subTest(case=case):
+                self.snapshot.attempts = 1 if case == "transition_exhausted" else 2
+                path = self.path.with_name(case + ".log"); path.write_bytes(b"before\n")
+                cursor = L.LogCursor(path)
+                try:
+                    rotated = path.with_suffix(".old"); path.rename(rotated); path.write_bytes(b"current\n"); cursor.observe()
+                    if case == "already_unlinked":
+                        rotated.unlink()
+                    class Child:
+                        def wait(self, timeout):
+                            return self.returncode
+                    def launch(argv, **kwargs):
+                        if case.startswith("transition_"):
+                            rotated.unlink()
+                        kwargs["stderr"].write(stderr); kwargs["stderr"].flush()
+                        child = Child(); child.returncode = returncode; return child
+                    with mock.patch.object(M.subprocess, "Popen", side_effect=launch) as run:
+                        result = self.snapshot.capture({"one": cursor}, self.assurances, 1)
+                    self.assertEqual("failed", result["state"])
+                    self.assertEqual(expected, result["reason"])
+                    self.assertEqual(1, run.call_count)
+                    self.assertNotIn("customer-secret", json.dumps(result))
+                finally:
+                    cursor.close()
+
     def test_subprocess_is_argv_only_and_raw_stderr_never_escapes(self):
         payload = self.rows()
         class Child:
@@ -185,19 +431,44 @@ class SnapshotTests(unittest.TestCase):
             def wait(self, timeout):
                 return 0
         def launch(argv, **kwargs):
-            self.assertEqual(["-nP", "-F0pfaDiG", "--"], argv[1:4])
+            self.assertEqual(["-nP", "-F0pfaDiGt", "--"], argv[1:4])
             self.assertNotIn("shell", kwargs)
             self.assertNotIn("-p", argv)
             kwargs["stdout"].write(payload); kwargs["stdout"].flush()
             return Child()
         with mock.patch.object(M.subprocess, "Popen", side_effect=launch):
-            self.assertEqual(payload, self.snapshot._run_lsof(["/proc/1/fd/3"]))
+            self.assertEqual(payload, self.snapshot._run_lsof(self.selectors))
         def stderr_launch(argv, **kwargs):
             kwargs["stderr"].write(b"/private/customer-secret"); kwargs["stderr"].flush()
             return Child()
         with mock.patch.object(M.subprocess, "Popen", side_effect=stderr_launch), self.assertRaises(M.NativeFailure) as error:
-            self.snapshot._run_lsof(["/proc/1/fd/3"])
+            self.snapshot._run_lsof(self.selectors)
         self.assertEqual("native_scan_incomplete", str(error.exception))
+
+    def test_native_stderr_failures_are_finite_and_private_through_capture(self):
+        payload = self.rows()
+        class Child:
+            returncode = 1
+            def wait(self, timeout):
+                return self.returncode
+        for stderr, expected in (
+                (b"lsof: status error on /private/customer-secret: No such file or directory\n", "native_file_argument_error"),
+                (b"lsof: /private/customer-secret: Permission denied\n", "native_visibility_denied"),
+                (b"lsof: opaque failure /private/customer-secret\n", "native_scan_incomplete")):
+            with self.subTest(reason=expected):
+                def launch(argv, **kwargs):
+                    kwargs["stdout"].write(payload); kwargs["stdout"].flush()
+                    kwargs["stderr"].write(stderr); kwargs["stderr"].flush()
+                    return Child()
+                with mock.patch.object(M.subprocess, "Popen", side_effect=launch):
+                    result = self.snapshot.capture(self.sources, self.assurances, 1)
+                    with self.assertRaises(M.NativeFailure) as error:
+                        self.snapshot._run_lsof(self.selectors)
+                self.assertEqual("failed", result["state"])
+                for private in ("/private/", "customer-secret"):
+                    self.assertNotIn(private, str(error.exception))
+                    self.assertNotIn(private, json.dumps(result))
+                self.assertEqual(expected, result["reason"])
 
     def test_child_output_bound_and_owned_timeout_cleanup(self):
         class Child:
@@ -213,13 +484,13 @@ class SnapshotTests(unittest.TestCase):
                 self.killed = True
         child = Child()
         with mock.patch.object(M.subprocess, "Popen", return_value=child), self.assertRaises(M.NativeFailure) as error:
-            self.snapshot._run_lsof(["/proc/1/fd/3"])
+            self.snapshot._run_lsof(self.selectors)
         self.assertEqual("native_scan_timeout", str(error.exception)); self.assertTrue(child.killed)
         def large(argv, **kwargs):
             kwargs["stdout"].write(b"x" * self.snapshot.max_output_bytes); kwargs["stdout"].flush()
             fake = Child(); fake.calls = 1; return fake
         with mock.patch.object(M.subprocess, "Popen", side_effect=large), self.assertRaises(M.NativeFailure) as error:
-            self.snapshot._run_lsof(["/proc/1/fd/3"])
+            self.snapshot._run_lsof(self.selectors)
         self.assertEqual("native_output_bound", str(error.exception))
 
     def test_wait_interruption_kills_owned_child_and_reaps_without_masking_failure(self):
@@ -247,16 +518,19 @@ class SnapshotTests(unittest.TestCase):
                 with mock.patch.object(M.subprocess, "Popen", return_value=child), \
                         mock.patch.object(M.os, "kill") as kill_pid, \
                         mock.patch.object(M.os, "killpg") as kill_group, self.assertRaises(Stop) as error:
-                    self.snapshot._run_lsof(["/proc/1/fd/3"])
+                    self.snapshot._run_lsof(self.selectors)
                 self.assertIs(interruption, error.exception)
                 self.assertEqual([("wait", self.snapshot.timeout_seconds), ("kill",), ("wait", 1)], events)
                 kill_pid.assert_not_called(); kill_group.assert_not_called()
 
 
-def native_characterization():
+def native_characterization(progress=None):
     """Explicit isolated-root fixture; ordinary unittest never invokes this."""
+    progress = {} if progress is None else progress
+    progress["phase"] = "root_guard"
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.geteuid() != 0:
         raise M.NativeFailure("isolated_root_ci_required")
+    progress["phase"] = "adapter_setup"
     digest = lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
     pins = {"adapter": digest(ROOT / "tools/monitoring/file_snapshot.py"),
             "cursor": digest(ROOT / "tools/monitoring/log_cursor.py"),
@@ -265,6 +539,7 @@ def native_characterization():
     # This fixture creates its own controlled cross-UID witness, not production permission.
     capability = {"scope_identity": scope, "receipt_sha256": hashlib.sha256(b"isolated-cross-uid-fixture-v1").hexdigest()}
     snapshot = M.NativeFileSnapshot(pins=pins, capability=capability)
+    progress["phase"] = "fixture_setup"
     with tempfile.TemporaryDirectory() as directory:
         os.chmod(directory, 0o755)
         path = Path(directory) / "synthetic.log"; path.write_bytes(b"before\n"); os.chmod(path, 0o666)
@@ -283,6 +558,7 @@ with open(sys.argv[1], 'ab', buffering=0) as writer:
                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, preexec_fn=unprivileged)
         cursor = None
         try:
+            progress["phase"] = "writer_ready"
             if not select.select([child.stdout], [], [], 5)[0] or child.stdout.read(1) != b"r":
                 raise M.NativeFailure("native_fixture_child_failed")
             cursor = L.LogCursor(path)
@@ -290,24 +566,39 @@ with open(sys.argv[1], 'ab', buffering=0) as writer:
                 adapter_sha256=pins["adapter"], producer_identity="5" * 64, boot_identity=boot,
                 max_witness_age_seconds=30)
             sources, assurances = {"synthetic": cursor}, {"synthetic": assurance}
+            progress["phase"] = "cross_uid_scan"
             first = snapshot.observe_sources(sources, assurances, 1)
-            if first["state"] != "observed" or not any(x["process"][0] == child.pid for x in first["witnesses"]["synthetic"]["writer_refs"]):
+            if first["state"] != "observed":
+                raise M.NativeFailure(first.get("reason", "native_read_failed"))
+            if not any(x["process"][0] == child.pid for x in first["witnesses"]["synthetic"]["writer_refs"]):
                 raise M.NativeFailure("cross_uid_writer_not_observed")
+            progress["phase"] = "nonappend_scan"
             with path.open("r+b"):
-                if snapshot.capture(sources, assurances, 2).get("reason") != "native_nonappend_writer":
+                nonappend = snapshot.capture(sources, assurances, 2)
+                if nonappend.get("reason") != "native_nonappend_writer":
+                    if nonappend.get("state") == "failed":
+                        raise M.NativeFailure(nonappend.get("reason", "native_read_failed"))
                     raise M.NativeFailure("nonappend_writer_not_rejected")
+            progress["phase"] = "rotation_late_write"
             rotated = path.with_suffix(".old"); path.rename(rotated); path.write_bytes(b"current\n"); os.chmod(path, 0o666)
             child.stdin.write(b"w"); child.stdin.flush()
             if not select.select([child.stdout], [], [], 5)[0] or child.stdout.read(1) != b"a":
                 raise M.NativeFailure("native_fixture_child_failed")
             rotated.unlink()
+            progress["phase"] = "late_scan"
             late = snapshot.capture(sources, assurances, 3)
-            if (late["state"] != "observed" or late["readers"]["synthetic"]["totals"]["php_warning"] != 1
+            if late["state"] != "observed":
+                raise M.NativeFailure(late.get("reason", "native_read_failed"))
+            if (late["readers"]["synthetic"]["totals"]["php_warning"] != 1
                     or len(late["witnesses"]["synthetic"]["retained"]) != 2):
                 raise M.NativeFailure("late_generation_not_preserved")
+            progress["phase"] = "writer_drain"
             child.stdin.close(); child.wait(timeout=5)
+            progress["phase"] = "drained_scan"
             drained = snapshot.capture(sources, assurances, 4)
-            if drained["state"] != "observed" or drained["witnesses"]["synthetic"]["writer_refs"]:
+            if drained["state"] != "observed":
+                raise M.NativeFailure(drained.get("reason", "native_read_failed"))
+            if drained["witnesses"]["synthetic"]["writer_refs"]:
                 raise M.NativeFailure("retired_writer_not_drained")
             return {"schema": "pinova.native-file-fixture.v1", "state": "passed", "source_history_24h_verified": False,
                     "checks": ["all-source-inode-selection", "cross-uid-append", "nonappend-rejection",
@@ -322,10 +613,15 @@ with open(sys.argv[1], 'ab', buffering=0) as writer:
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--native-characterization"]:
+        progress = {"phase": "not_started"}
         try:
-            print(json.dumps(native_characterization(), sort_keys=True))
-        except BaseException:
-            print(json.dumps({"schema": "pinova.native-file-fixture.v1", "state": "failed"}))
+            print(json.dumps(native_characterization(progress), sort_keys=True))
+        except BaseException as error:
+            reason = error.args[0] if (isinstance(error, M.NativeFailure) and len(error.args) == 1
+                and type(error.args[0]) is str and error.args[0] in NATIVE_FAILURE_REASONS) else "native_fixture_failed"
+            phase = progress.get("phase")
+            print(json.dumps({"schema": "pinova.native-file-fixture.v1", "state": "failed", "reason": reason,
+                "phase": phase if phase in NATIVE_PHASES else "not_reported", "cleanup_state": "not_reported"}, sort_keys=True))
             raise SystemExit(1)
     else:
         unittest.main()

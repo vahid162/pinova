@@ -1,0 +1,199 @@
+name: Diagnostics npm security resolution
+
+# Temporary maintenance job; remove after consuming its reviewed manifest/lock.
+on:
+  push:
+    branches: [feat/diagnostics-upgrade]
+    paths: [.github/workflows/diagnostics-npm-repair.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    if: github.ref == 'refs/heads/feat/diagnostics-upgrade'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.21.0'
+      - name: Require the isolated pinned resolver
+        run: |
+          test "${GITHUB_ACTIONS}" = true
+          test "${RUNNER_ENVIRONMENT}" = github-hosted
+          test "${GITHUB_REF}" = refs/heads/feat/diagnostics-upgrade
+          test "$(node --version)" = v24.21.0
+          test "$(npm --version)" = 11.19.0
+      - name: Scope the two fixed APIs to the existing wp-env cleanup chain
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          target = Path('package.json')
+          manifest = json.loads(target.read_text())
+          scope = manifest['overrides']['@wordpress/env']
+          assert 'rimraf' not in scope, 'Unexpected existing cleanup override.'
+          scope['rimraf'] = {'glob': {'.': '14.0.2', 'minimatch': '11.0.1'}}
+          target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n')
+          PY
+      - name: Resolve without installing or executing package scripts
+        run: timeout 180s npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Require the exact override and bounded dependency-closure change
+        env:
+          PINOVA_NPM_RECEIPT_DIR: ${{ runner.temp }}/diagnostics-npm-repair
+        run: |
+          python3 - <<'PY'
+          import copy
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import shutil
+          import subprocess
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          def original(name):
+              return subprocess.check_output(['git', 'show', 'HEAD:' + name])
+
+          old_manifest_bytes = original('package.json')
+          old_lock_bytes = original('package-lock.json')
+          new_manifest_bytes = Path('package.json').read_bytes()
+          new_lock_bytes = Path('package-lock.json').read_bytes()
+          old_manifest = json.loads(old_manifest_bytes)
+          new_manifest = json.loads(new_manifest_bytes)
+          expected = copy.deepcopy(old_manifest)
+          require('rimraf' not in expected['overrides']['@wordpress/env'], 'Unexpected old override.')
+          expected['overrides']['@wordpress/env']['rimraf'] = {
+              'glob': {'.': '14.0.2', 'minimatch': '11.0.1'}}
+          require(new_manifest == expected, 'Unrelated root manifest changes.')
+          old_lock, new_lock = json.loads(old_lock_bytes), json.loads(new_lock_bytes)
+          require({k: v for k, v in old_lock.items() if k != 'packages'} ==
+                  {k: v for k, v in new_lock.items() if k != 'packages'}, 'Lock metadata changed.')
+          old, new = old_lock['packages'], new_lock['packages']
+
+          def resolve(packages, requester, name):
+              parts = requester.split('/') if requester else []
+              while parts:
+                  if parts[-1] != 'node_modules':
+                      candidate = '/'.join(parts + ['node_modules', name])
+                      if candidate in packages:
+                          return candidate
+                  parts.pop()
+              candidate = 'node_modules/' + name
+              return candidate if candidate in packages else None
+
+          def closure(packages):
+              env = resolve(packages, '', '@wordpress/env')
+              cleanup = resolve(packages, env, 'rimraf')
+              root = resolve(packages, cleanup, 'glob')
+              require(all([env, cleanup, root]), 'Incomplete wp-env cleanup chain.')
+              seen, pending, edges = set(), [root], []
+              while pending:
+                  current = pending.pop()
+                  if current in seen:
+                      continue
+                  seen.add(current)
+                  require(len(seen) <= 64, 'Unexpectedly large glob dependency closure.')
+                  package = packages[current]
+                  dependencies = dict(package.get('dependencies', {}))
+                  dependencies.update(package.get('optionalDependencies', {}))
+                  for name in sorted(dependencies):
+                      target = resolve(packages, current, name)
+                      require(target is not None or name in package.get('optionalDependencies', {}),
+                              'Missing required dependency in the cleanup chain.')
+                      if target is not None:
+                          edges.append([current, name, target])
+                          pending.append(target)
+              return env, cleanup, root, seen, edges
+
+          old_env, old_cleanup, old_glob, old_closure, old_edges = closure(old)
+          new_env, new_cleanup, new_glob, new_closure, new_edges = closure(new)
+          require(old[old_env] == new[new_env] and old[old_env]['version'] == '12.0.0',
+                  'wp-env must remain unchanged.')
+          require(old[old_cleanup] == new[new_cleanup] and old[old_cleanup]['version'] == '5.0.10',
+                  'rimraf must remain unchanged.')
+          new_minimatch = resolve(new, new_glob, 'minimatch')
+          require(old[old_glob]['version'] == '10.5.0' and new[new_glob]['version'] == '14.0.2' and
+                  new_minimatch is not None and new[new_minimatch]['version'] == '11.0.1',
+                  'The exact fixed APIs were not selected.')
+          changed = sorted(key for key in old.keys() | new.keys() if old.get(key) != new.get(key))
+          require(changed and set(changed) <= old_closure | new_closure,
+                  'Changes outside the old/new glob dependency closure are forbidden.')
+          changes = []
+          for key in changed:
+              before, after = old.get(key), new.get(key)
+              if after is not None:
+                  require(after.get('dev') is True and
+                          after.get('resolved', '').startswith('https://registry.npmjs.org/') and
+                          re.fullmatch(r'sha512-[A-Za-z0-9+/]+={0,2}', after.get('integrity', '')),
+                          'A changed development dependency lacks official registry integrity.')
+              changes.append({'path': key, 'from': None if before is None else before.get('version'),
+                              'to': None if after is None else after.get('version'),
+                              'resolved': None if after is None else after.get('resolved'),
+                              'integrity': None if after is None else after.get('integrity'),
+                              'license': None if after is None else after.get('license')})
+          require(subprocess.check_output(['git', 'diff', '--name-only']).decode().splitlines() ==
+                  ['package-lock.json', 'package.json'], 'Unexpected tracked file mutation.')
+          source = os.environ.get('GITHUB_SHA', '')
+          require(re.fullmatch(r'[a-f0-9]{40}', source) is not None, 'Missing source revision.')
+          receipt = {'schema': 'pinova.npm-security-resolution.v1', 'state': 'resolved',
+                     'source_commit': source, 'node_version': '24.21.0', 'npm_version': '11.19.0',
+                     'root_direct_pins_and_other_overrides_unchanged': True,
+                     'changes': changes, 'old_resolution_edges': old_edges,
+                     'new_resolution_edges': new_edges,
+                     'before_sha256': {'package.json': hashlib.sha256(old_manifest_bytes).hexdigest(),
+                                       'package-lock.json': hashlib.sha256(old_lock_bytes).hexdigest()},
+                     'after_sha256': {'package.json': hashlib.sha256(new_manifest_bytes).hexdigest(),
+                                      'package-lock.json': hashlib.sha256(new_lock_bytes).hexdigest()}}
+          encoded = json.dumps(receipt, indent=2) + '\n'
+          require(len(encoded.encode()) <= 16384, 'Resolution receipt exceeds its bound.')
+          destination = Path(os.environ['PINOVA_NPM_RECEIPT_DIR'])
+          destination.mkdir()
+          for name in ['package.json', 'package-lock.json']:
+              shutil.copyfile(name, destination / name)
+          (destination / 'resolution.json').write_text(encoded)
+          print('Exact scoped override and dependency-closure change validated.')
+          PY
+      - name: Recreate and verify the actual installed APIs
+        run: |
+          timeout 180s npm ci --ignore-scripts --no-audit --no-fund
+          timeout 30s node tools/verify-dev-dependencies.mjs
+          node tools/verify-http-cache-patch.mjs
+      - name: Require the unchanged audit threshold
+        run: npm audit --audit-level=low
+      - name: Finalize finite verified evidence
+        env:
+          PINOVA_NPM_RECEIPT_DIR: ${{ runner.temp }}/diagnostics-npm-repair
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          target = Path(os.environ['PINOVA_NPM_RECEIPT_DIR']) / 'resolution.json'
+          receipt = json.loads(target.read_text())
+          receipt.update(state='passed', installed_api_checks='passed', npm_audit='passed')
+          encoded = json.dumps(receipt, indent=2) + '\n'
+          assert len(encoded.encode()) <= 16384
+          target.write_text(encoded)
+          PY
+      - name: Retain only the verified manifest, lock and finite receipt
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostics-npm-patches-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/diagnostics-npm-repair/package.json
+            ${{ runner.temp }}/diagnostics-npm-repair/package-lock.json
+            ${{ runner.temp }}/diagnostics-npm-repair/resolution.json
+          if-no-files-found: error
+          retention-days: 7

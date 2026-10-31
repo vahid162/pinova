@@ -59,7 +59,6 @@ def _policy(info):
 class _File:
     def __init__(self, fd, info, baseline):
         self.fd = fd
-        self.identity = _identity(info)
         self.policy = _policy(info)
         self.position = info.st_size if baseline else 0
         self.anchor = os.pread(fd, min(256, self.position), max(0, self.position - 256))

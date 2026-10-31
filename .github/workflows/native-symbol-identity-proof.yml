@@ -1,0 +1,241 @@
+name: Native symbol identity metadata only
+
+on:
+  push:
+    branches: ['proof/diagnostics-native-symbol-identity']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-symbol-identity-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: One native executable and debug identity preparation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PINOVA_FPM_CAMPAIGN_ROOT: /tmp/pinova-fpm-revisions-${{ github.run_id }}-${{ github.run_attempt }}
+      EXPECTED_PHP_PACKAGE_VERSION: 8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+      EXPECTED_PHP_BUILD_ID: 6d4f4250c0d4b32619cc09e3bafc6f1d0d37059b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        id: php_setup
+        with:
+          php-version: '8.4.27'
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, pdo_mysql, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: none
+      - name: Provision the exact existing native PHP package version
+        id: provision
+        run: |
+          sudo add-apt-repository --yes --no-update --component main --component main/debug --ppa ppa:ondrej/php
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            "php8.4-fpm=${EXPECTED_PHP_PACKAGE_VERSION}" "php8.4-cli=${EXPECTED_PHP_PACKAGE_VERSION}" \
+            "php8.4-common=${EXPECTED_PHP_PACKAGE_VERSION}" "php8.4-curl=${EXPECTED_PHP_PACKAGE_VERSION}" \
+            "php8.4-gd=${EXPECTED_PHP_PACKAGE_VERSION}" "php8.4-mbstring=${EXPECTED_PHP_PACKAGE_VERSION}" \
+            "php8.4-mysql=${EXPECTED_PHP_PACKAGE_VERSION}" "php8.4-xml=${EXPECTED_PHP_PACKAGE_VERSION}" \
+            "php8.4-zip=${EXPECTED_PHP_PACKAGE_VERSION}"
+          [[ "$(/usr/bin/php8.4 -r 'echo PHP_VERSION;')" == 8.4.27 ]]
+          /usr/sbin/php-fpm8.4 -v | head -n 1 | grep -E '^PHP 8\.4\.27 '
+      - name: Always retain finite preparation and independent ELF-reader observations
+        if: always()
+        env:
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          PHP_SETUP_OUTCOME: ${{ steps.php_setup.outcome }}
+          PROVISION_OUTCOME: ${{ steps.provision.outcome }}
+        run: |
+          sudo env GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_SHA="$GITHUB_SHA" \
+            PINOVA_FPM_CAMPAIGN_ROOT="$PINOVA_FPM_CAMPAIGN_ROOT" \
+            EXPECTED_PHP_PACKAGE_VERSION="$EXPECTED_PHP_PACKAGE_VERSION" EXPECTED_PHP_BUILD_ID="$EXPECTED_PHP_BUILD_ID" \
+            CHECKOUT_OUTCOME="$CHECKOUT_OUTCOME" PHP_SETUP_OUTCOME="$PHP_SETUP_OUTCOME" PROVISION_OUTCOME="$PROVISION_OUTCOME" \
+            python3 - <<'PYTHON'
+          import hashlib, importlib.util, json, os, re, resource, stat, subprocess, sys, tempfile
+          from pathlib import Path
+
+          os.umask(0o077)
+          expected_version = '8.4.27-1+ubuntu24.04.1+deb.sury.org+1'
+          expected_id = '6d4f4250c0d4b32619cc09e3bafc6f1d0d37059b'
+          phase, failure, safe_root, collector = 'namespace', None, False, None
+          receipt = {'schema': 'pinova.native-symbol-identity.v1', 'state': 'needs_review', 'phase': phase,
+              'namespace': {}, 'observations': {}, 'guards': {}, 'failed_guards': [],
+              'expected_package_version': expected_version, 'expected_build_id': expected_id,
+              'resource_acceptance': False, 'production_coverage_acceptance': False,
+              'cohort_executed': False, 'core_capture_started': False, 'engine_config_changed': False}
+          guards = receipt['guards']
+
+          class PreparationFailure(Exception):
+              pass
+
+          def checked(name, value):
+              guards[name] = bool(value)
+              if not value:
+                  raise PreparationFailure(name)
+
+          def digest(path):
+              result = hashlib.sha256()
+              with path.open('rb') as stream:
+                  for block in iter(lambda: stream.read(131072), b''):
+                      result.update(block)
+              return result.hexdigest()
+
+          def tool(args, **kwargs):
+              result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL, timeout=kwargs.pop('timeout', 30), check=False, **kwargs)
+              if result.returncode:
+                  raise PreparationFailure('preparation_tool_failed')
+
+          def readelf_observation(path):
+              value = {'return_code': None, 'stdout_bytes': 0, 'stderr_bytes': 0, 'build_id_count': 0,
+                  'valid_id': None, 'timed_out': False, 'output_bounded': False, 'error_code': None}
+              try:
+                  def limits():
+                      resource.setrlimit(resource.RLIMIT_FSIZE, (65537, 65537))
+                      resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+                  with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+                      child = subprocess.Popen(['readelf', '-n', str(path)], stdin=subprocess.DEVNULL,
+                          stdout=out, stderr=err, close_fds=True, preexec_fn=limits)
+                      try:
+                          child.wait(timeout=10)
+                      except subprocess.TimeoutExpired:
+                          value['timed_out'] = True
+                          child.kill()
+                          child.wait(timeout=2)
+                      value['return_code'] = child.returncode
+                      value['stdout_bytes'], value['stderr_bytes'] = os.fstat(out.fileno()).st_size, os.fstat(err.fileno()).st_size
+                      value['output_bounded'] = value['stdout_bytes'] <= 65536 and value['stderr_bytes'] <= 65536
+                      if value['output_bounded']:
+                          matches = re.findall(rb'Build ID:\s*([a-f0-9]{40})(?=\s|$)', os.pread(out.fileno(), value['stdout_bytes'], 0))
+                          value['build_id_count'] = len(matches)
+                          if len(matches) == 1:
+                              value['valid_id'] = matches[0].decode('ascii')
+              except BaseException:
+                  value['error_code'] = 'readelf_observation_unavailable'
+              return value
+
+          def collector_observation(path):
+              value = {'build_id': None, 'error_code': None}
+              if collector is None:
+                  value['error_code'] = 'collector_import_unavailable'
+                  return value
+              try:
+                  identity = collector.build_id(path)
+                  if isinstance(identity, str) and re.fullmatch(r'[a-f0-9]{8,128}', identity):
+                      value['build_id'] = identity
+                  else:
+                      value['error_code'] = 'collector_invalid_id'
+              except collector.CaptureError as error:
+                  allowed = {'elf_bound', 'elf_unavailable', 'elf_architecture_unavailable', 'elf_identity_mismatch',
+                      'elf_truncated', 'build_identity_unavailable'}
+                  value['error_code'] = error.code if error.code in allowed else 'collector_read_unavailable'
+              except BaseException:
+                  value['error_code'] = 'collector_read_unavailable'
+              return value
+
+          try:
+              run, attempt, source = (os.environ.get(key, '') for key in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA'))
+              checked('namespace_ids', re.fullmatch(r'[0-9]+', run) and re.fullmatch(r'[0-9]+', attempt) and re.fullmatch(r'[a-f0-9]{40}', source))
+              root = Path('/tmp/pinova-fpm-revisions-' + run + '-' + attempt)
+              checked('namespace_root', str(root) == os.environ.get('PINOVA_FPM_CAMPAIGN_ROOT') and root.resolve() == root and os.geteuid() == 0)
+              root.mkdir(mode=0o755, exist_ok=True)
+              checked('namespace_owner', root.lstat().st_uid == 0 and stat.S_ISDIR(root.lstat().st_mode) and not root.is_symlink())
+              safe_root = True
+              receipt['namespace'] = {'run_id': run, 'attempt': attempt, 'source_commit': source, 'owned': True}
+              destination = root / 'debug-symbols-staged'
+              checked('expected_constants', os.environ.get('EXPECTED_PHP_PACKAGE_VERSION') == expected_version and os.environ.get('EXPECTED_PHP_BUILD_ID') == expected_id)
+              checked('checkout_completed', os.environ.get('CHECKOUT_OUTCOME') == 'success')
+              checked('php_setup_completed', os.environ.get('PHP_SETUP_OUTCOME') == 'success')
+              checked('native_provision_completed', os.environ.get('PROVISION_OUTCOME') == 'success')
+              phase = 'installed_version'
+              raw_version = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', 'php8.4-fpm'], timeout=10, stderr=subprocess.DEVNULL)
+              checked('installed_package_version_exact', raw_version == expected_version.encode())
+              phase = 'signed_apt_download'
+              destination.mkdir(mode=0o700)
+              tool(['apt-get', 'download', 'php8.4-fpm-dbgsym=' + expected_version], cwd=destination, timeout=90)
+              archives = list(destination.glob('*.ddeb')) + list(destination.glob('*.deb'))
+              checked('one_debug_archive', len(archives) == 1)
+              archive = archives[0]
+              info = archive.lstat()
+              checked('debug_archive_regular_owned_bounded', stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022 and info.st_size <= 128 * 1024 * 1024)
+              phase = 'package_identity'
+              for field, expected in (('Package', 'php8.4-fpm-dbgsym'), ('Version', expected_version), ('Architecture', 'amd64')):
+                  actual = subprocess.check_output(['dpkg-deb', '-f', str(archive), field], timeout=10, stderr=subprocess.DEVNULL).strip()
+                  checked('debug_package_' + field.lower() + '_exact', actual == expected.encode())
+              receipt['archive_sha256'] = digest(archive)
+              phase = 'private_extraction'
+              tool(['dpkg-deb', '--extract', str(archive), str(destination)])
+              destination.chmod(0o700)
+              checked('staged_tree_private', destination.resolve() == destination and destination.stat().st_uid == 0 and stat.S_IMODE(destination.stat().st_mode) == 0o700)
+          except PreparationFailure as error:
+              failure = error.args[0] if error.args and error.args[0] in guards else 'preparation_tool_failed'
+          except BaseException:
+              failure = 'preparation_unavailable'
+          finally:
+              receipt['preparation_failure'] = failure
+              receipt['preparation_phase'] = phase
+              if safe_root:
+                  try:
+                      helper = Path.cwd() / 'tests/Integration/native-fpm-crash-evidence.py'
+                      spec = importlib.util.spec_from_file_location('native_symbol_identity_collector', helper)
+                      collector = importlib.util.module_from_spec(spec)
+                      sys.modules[spec.name] = collector
+                      spec.loader.exec_module(collector)
+                      guards['collector_imported'] = True
+                      receipt['collector_source_sha256'] = digest(helper)
+                  except BaseException:
+                      collector = None
+                      guards['collector_imported'] = False
+                  executable = Path('/usr/sbin/php-fpm8.4')
+                  debug = root / 'debug-symbols-staged/usr/lib/debug/.build-id' / expected_id[:2] / (expected_id[2:] + '.debug')
+                  for label, path, bound in (('executable', executable, 32 * 1024 * 1024), ('debug', debug, 128 * 1024 * 1024)):
+                      observation = {'exists': False, 'safe_regular_file': False,
+                          'readelf': {'return_code': None, 'stdout_bytes': 0, 'stderr_bytes': 0, 'build_id_count': 0, 'valid_id': None, 'timed_out': False, 'output_bounded': False, 'error_code': 'file_unavailable'},
+                          'collector': {'build_id': None, 'error_code': 'file_unavailable'}}
+                      try:
+                          info = path.lstat()
+                          observation['exists'] = True
+                          observation['safe_regular_file'] = stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022 and info.st_size <= bound and path.resolve() == path
+                          if observation['safe_regular_file']:
+                              observation['readelf'] = readelf_observation(path)
+                              observation['collector'] = collector_observation(path)
+                      except BaseException:
+                          pass
+                      receipt['observations'][label] = observation
+                      native = observation['readelf']
+                      guards[label + '_safe_file'] = observation['safe_regular_file']
+                      guards[label + '_readelf_return_zero'] = native['return_code'] == 0 and not native['timed_out']
+                      guards[label + '_readelf_stderr_empty'] = native['stderr_bytes'] == 0 and native['error_code'] is None
+                      guards[label + '_readelf_output_bounded'] = native['output_bounded']
+                      guards[label + '_readelf_single_id'] = native['build_id_count'] == 1
+                      guards[label + '_readelf_expected_id'] = native['valid_id'] == expected_id
+                      guards[label + '_collector_expected_id'] = observation['collector']['build_id'] == expected_id and observation['collector']['error_code'] is None
+                  receipt['failed_guards'] = sorted(name for name, value in guards.items() if not value)
+                  verified = failure is None and guards and all(guards.values())
+                  receipt['state'] = 'verified' if verified else 'needs_review'
+                  receipt['phase'] = 'complete' if verified else 'build_identity' if failure is None else phase
+                  target = root / 'native-debug-symbols-preparation.json'
+                  fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+                  try:
+                      os.write(fd, (json.dumps(receipt, sort_keys=True) + '\n').encode())
+                      os.fchmod(fd, 0o644)
+                  finally:
+                      os.close(fd)
+                  print(json.dumps(receipt, sort_keys=True))
+              else:
+                  print(json.dumps({'schema': receipt['schema'], 'state': 'needs_review', 'phase': 'namespace', 'resource_acceptance': False}))
+          raise SystemExit(0 if receipt['state'] == 'verified' else 1)
+          PYTHON
+      - name: Upload only the finite native metadata receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-symbol-identity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PINOVA_FPM_CAMPAIGN_ROOT }}/native-debug-symbols-preparation.json
+          if-no-files-found: error
+          retention-days: 7

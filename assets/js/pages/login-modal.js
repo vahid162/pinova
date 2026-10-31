@@ -1,5 +1,5 @@
 import pinovaAlpine from './../alpine.min.js';
-import { createAuthState } from './auth-state.js?ver=8';
+import { createAuthState } from './auth-state.js?ver=9';
 
 pinovaAlpine.prefix('pinova-');
 pinovaAlpine.data('pinovaLoginModal', () => ({
@@ -14,38 +14,13 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
     inertedElements: [],
     init() {
         window.addEventListener('beforeunload', () => {
+            this.cancelRequest();
             this.stopTimer();
             this.unlockPageInteraction();
         });
 
-        if ('OTPCredential' in window) {
-            window.addEventListener('DOMContentLoaded', () => {
-                navigator.credentials.get({
-                    otp: { transport: ['sms'] },
-                }).then(otp => {
-                    if (!this.modalIsOpen || !otp.code) {
-                        return;
-                    }
+        this.initWebOtpLifecycle();
 
-                    switch (this.stepName) {
-                        case 'loginByOtp':
-                            this.forms.loginByOtp.inputs.code.value = pinovaCleanNumericInput(otp.code);
-                            this.handleOtpInput('loginByOtp');
-                            break;
-                        case 'signIn':
-                            this.forms.signIn.inputs.code.value = pinovaCleanNumericInput(otp.code);
-                            this.handleOtpInput('signIn');
-                            break;
-                        case 'forgotPassword':
-                            this.forms.forgotPassword.inputs.code.value = pinovaCleanNumericInput(otp.code);
-                            this.handleOtpInput('forgotPassword');
-                            break;
-                    }
-                }).catch(error => {
-                    console.log(error);
-                });
-            });
-        }
     },
 
     submit() {
@@ -124,23 +99,25 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
                 this.forms.loginByPassword.inputs.identifier.value = this.forms.authenticate.inputs.identifier.value;
 
                 if (nextStepName === 'forgotPassword') {
-                    this.changeStep('forgotPassword');
+                    this.changeStep('forgotPassword', {fromRequest: true});
                     this.forms.forgotPassword.inputs.jwt.value = responseData.jwt;
                     this.forms.forgotPassword.inputs.code.value = '';
                     this.resetOtpAutoSubmit('forgotPassword');
                     this.forms.forgotPassword.msg = result.message;
                     this.time.duration = responseData.ttl * 1000;
                     this.startTime();
+                    this.startWebOtp(this.stepName);
                 } else if (nextStepName === 'loginByOtp' || responseData.login_method === 'otp') {
-                    this.changeStep('loginByOtp');
+                    this.changeStep('loginByOtp', {fromRequest: true});
                     this.forms.loginByOtp.inputs.jwt.value = responseData.jwt;
                     this.forms.loginByOtp.inputs.code.value = '';
                     this.resetOtpAutoSubmit('loginByOtp');
                     this.forms.loginByOtp.msg = result.message;
                     this.time.duration = responseData.ttl * 1000;
                     this.startTime();
+                    this.startWebOtp(this.stepName);
                 } else if (responseData.login_method === 'password') {
-                    this.changeStep('loginByPassword');
+                    this.changeStep('loginByPassword', {fromRequest: true});
                 }
             } else {
                 if (result.data && result.data.native_login_url) {
@@ -153,7 +130,6 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
             if (!this.requestIsCurrent(request)) {
                 return;
             }
-            console.error('Pinova authentication request failed:', error);
             this.handleRequestException(error);
         } finally {
             this.endRequest(request);
@@ -207,7 +183,6 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
             if (!this.requestIsCurrent(request)) {
                 return;
             }
-            console.error('Pinova OTP login request failed:', error);
             this.handleRequestException(error);
         } finally {
             this.endRequest(request);
@@ -257,7 +232,6 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
             if (!this.requestIsCurrent(request)) {
                 return;
             }
-            console.error('Pinova password login request failed:', error);
             this.handleRequestException(error);
         } finally {
             this.endRequest(request);
@@ -295,7 +269,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
 
             if (result.success) {
                 const responseData = result.data || {};
-                this.changeStep('changePassword');
+                this.changeStep('changePassword', {fromRequest: true});
                 this.forms.changePassword.inputs.jwt.value = responseData.jwt;
                 this.forms.changePassword.inputs.reset_key.value = responseData.reset_key;
             } else {
@@ -307,7 +281,6 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
             if (!this.requestIsCurrent(request)) {
                 return;
             }
-            console.error('Pinova password recovery request failed:', error);
             this.handleRequestException(error);
         } finally {
             this.endRequest(request);
@@ -353,7 +326,6 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
             if (!this.requestIsCurrent(request)) {
                 return;
             }
-            console.error('Pinova password change request failed:', error);
             this.handleRequestException(error);
         } finally {
             this.endRequest(request);
@@ -371,6 +343,7 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
             signal: controller ? controller.signal : null,
         };
 
+        this.stopWebOtp();
         this.clearStatus();
         this.pageLoaderIsActive = true;
         this.activeRequestId = request.id;
@@ -391,9 +364,11 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
         this.activeRequestId = 0;
         this.activeRequestAbort = null;
         this.pageLoaderIsActive = false;
+        this.resumeWebOtp();
     },
 
     cancelRequest() {
+        this.stopWebOtp();
         const abort = this.activeRequestAbort;
         this.activeRequestId = 0;
         this.activeRequestAbort = null;
@@ -447,6 +422,11 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
         if (!this.allowedSteps.includes(newStep)) {
             return;
         }
+
+        if (!options.fromRequest) {
+            this.cancelRequest();
+        }
+        this.stopWebOtp();
 
         if (this.stepName !== newStep) {
             this.clearStepSecrets(this.stepName);

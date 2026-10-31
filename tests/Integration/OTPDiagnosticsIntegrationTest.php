@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pinova\Tests\Integration;
 
 use Pinova\Install;
+use Illuminate\Contracts\Events\Dispatcher;
 use Pinova\Helpers\JWT;
 use Pinova\Logging\DiagnosticContext;
 use Pinova\Logging\EventThrottle;
@@ -14,6 +15,23 @@ use Pinova\Services\OTPQueueStore;
 use Pinova\Services\OTPService;
 use Pinova\Services\RateLimitService;
 use WP_UnitTestCase;
+
+/** Preserve native autocommit SQL while observing the return from GET_LOCK itself. */
+final class DiagnosticClaimDatabase extends \wpdb {
+	public string $watched_flow = '';
+	public ?\Closure $after_acquire = null;
+
+	public function get_var( $query = null, $x = 0, $y = 0 ) {
+		$value = parent::get_var( $query, $x, $y );
+		if ( null !== $this->after_acquire && is_string( $query ) && str_starts_with( $query, 'SELECT GET_LOCK(' )
+			&& str_contains( $query, 'pinova_otp_' . $this->watched_flow ) && '1' === (string) $value ) {
+			$observe = $this->after_acquire;
+			$this->after_acquire = null;
+			$observe();
+		}
+		return $value;
+	}
+}
 
 /** Real queue/adapter/logger boundaries with nonbillable, intercepted providers. */
 final class OTPDiagnosticsIntegrationTest extends WP_UnitTestCase {
@@ -199,6 +217,155 @@ final class OTPDiagnosticsIntegrationTest extends WP_UnitTestCase {
 			self::assertSame( 0, OTP::query()->where( 'flow_id', $flow )->count() );
 			self::assertStringStartsWith( 'processing:', $this->queue_row( $database, $flow )['payload'] );
 		} );
+	}
+
+	/** @dataProvider early_lost_lease_seams */
+	public function test_early_lost_lease_preserves_the_unattempted_processing_reservation_for_safe_recovery( string $seam ): void {
+		update_option( 'pinova_messengers', [] );
+		$this->with_flow( '+989120000141', function ( string $flow, int $deadline, \wpdb $database ) use ( $seam ): void {
+			$before = $this->queue_row( $database, $flow );
+			$reconnected = false;
+			$reconnect = static function () use ( $database, &$reconnected ): void {
+				if ( ! $reconnected ) {
+					$reconnected = true;
+					$original_connection = (string) $database->get_var( 'SELECT CONNECTION_ID()' );
+					self::assertTrue( $database->close() );
+					self::assertTrue( $database->db_connect( false ) );
+					self::assertNotSame( $original_connection, (string) $database->get_var( 'SELECT CONNECTION_ID()' ) );
+				}
+			};
+			$before_create = static function ( string $query ) use ( $reconnect, $seam ): string {
+				$functions = array_column( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 20 ), 'function' );
+				if ( 'before_create' === $seam && str_contains( $query, 'AS flow_holder' ) && in_array( 'deliver_queued', $functions, true )
+					&& ! in_array( 'create', $functions, true ) && ! in_array( 'provider_timeout', $functions, true ) ) {
+					$reconnect();
+				}
+				return $query;
+			};
+			add_filter( 'query', $before_create );
+			try {
+				if ( 'after_create' === $seam ) {
+					$this->with_created_hook( $reconnect, static fn() => OTPService::deliver_queued( $flow ) );
+				} else {
+					OTPService::deliver_queued( $flow );
+				}
+			} finally {
+				remove_filter( 'query', $before_create );
+			}
+			self::assertTrue( $reconnected, 'The selected early seam must actually lose its original connection lease.' );
+			self::assertCount( 0, $this->http_calls );
+			self::assertSame( 0, $this->mail_calls );
+			self::assertSame( 0, OTP::query()->where( 'flow_id', $flow )->count(), 'Only a freshly created, proven never-attempted OTP may be removed.' );
+			$after = $this->queue_row( $database, $flow );
+			self::assertSame( $before['reset_at'], $after['reset_at'] );
+			self::assertStringStartsWith( 'processing:', (string) $after['payload'], 'Loss or an unknown read is not a terminal delivery result.' );
+			self::assertStringEndsWith( ':' . $before['payload'], $after['payload'], 'Retain the exact acknowledged ciphertext without premature READY, delivered or NULL.' );
+			self::assertSame( $deadline, (int) strtotime( $after['reset_at'] . ' UTC' ) );
+
+			// Existing crash recovery still requires the old lease to become stale.
+			self::assertSame( 1, $database->update( $database->prefix . 'pinova_rate_limits', [ 'updated_at' => gmdate( 'Y-m-d H:i:s', time() - 61 ) ], [ 'scope' => $flow ] ) );
+			OTPService::deliver_queued( $flow );
+			self::assertCount( 1, $this->http_calls );
+			self::assertSame( 1, OTP::query()->where( 'flow_id', $flow )->count() );
+			self::assertSame( $deadline, OTP::query()->where( 'flow_id', $flow )->first()->expires_at->getTimestamp() );
+			self::assertSame( 'delivered', $this->queue_row( $database, $flow )['payload'] );
+			OTPService::deliver_queued( $flow );
+			self::assertCount( 1, $this->http_calls, 'Recovery may send once, and another pass must never resend it.' );
+		} );
+	}
+
+	public static function early_lost_lease_seams(): array {
+		return [ [ 'before_create' ], [ 'after_create' ] ];
+	}
+
+	public function test_reentrant_acknowledgement_cannot_flush_diagnostics_inside_an_in_flight_flow_lock_acquisition(): void {
+		update_option( 'pinova_messengers', [] );
+		$database = new DiagnosticClaimDatabase( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$this->with_flow( '+989120000142', function ( string $flow, int $deadline, \wpdb $database ): void {
+			$this->with_diagnostics( function () use ( $flow, $database ): void {
+				[ $inner ] = RateLimitService::decoy_flow( 'preclaim-diagnostic-ack@example.test', 'authenticate', '192.0.2.242', null, true );
+				$observed = [ 'configuration' => [], 'budget' => [], 'handler' => [] ];
+				$reentered = false;
+				$held = static function () use ( $database, $flow ): bool {
+					return null !== $database->get_var( $database->prepare( 'SELECT IS_USED_LOCK(%s)', 'pinova_otp_' . $flow ) );
+				};
+				$inspect_sql = static function ( string $query ) use ( &$observed, $held ): string {
+					if ( str_starts_with( $query, 'UPDATE ' ) && str_contains( $query, EventThrottle::diagnostic_bucket_key() ) ) {
+						$observed['budget'][] = $held();
+					}
+					if ( str_starts_with( $query, 'INSERT INTO ' ) && str_contains( $query, 'otp.diagnostic' ) ) {
+						$observed['handler'][] = $held();
+					}
+					return $query;
+				};
+				$inspect_config = static function ( $value ) use ( &$observed, $held ) {
+					foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 32 ) as $frame ) {
+						if ( \Pinova\Logging\Logger::class === ( $frame['class'] ?? '' ) && 'diagnostic' === ( $frame['function'] ?? '' ) ) {
+							$observed['configuration'][] = $held();
+							break;
+						}
+					}
+					return $value;
+				};
+				$database->watched_flow = $flow;
+				$database->after_acquire = static function () use ( &$reentered, $inner, $held ): void {
+					$reentered = true;
+					self::assertTrue( $held(), 'The independent native GET_LOCK must already be held before reentry.' );
+					self::assertTrue( RateLimitService::acknowledge_queued_otp( $inner ) );
+				};
+				add_filter( 'query', $inspect_sql );
+				add_filter( 'pre_option_pinova_logging', $inspect_config, 9 );
+				try {
+					OTPService::deliver_queued( $flow );
+				} finally {
+					remove_filter( 'query', $inspect_sql );
+					remove_filter( 'pre_option_pinova_logging', $inspect_config, 9 );
+					$database->after_acquire = null;
+					RateLimitService::delete_queued_for_identifiers( [ 'preclaim-diagnostic-ack@example.test' ] );
+				}
+				self::assertTrue( $reentered );
+				self::assertCount( 1, $this->http_calls );
+				foreach ( $observed as $kind => $facts ) {
+					self::assertNotEmpty( $facts, $kind . ' must really execute after release.' );
+					self::assertNotContains( true, $facts, 'New diagnostic ' . $kind . ' must not run under an in-flight outer flow lock.' );
+				}
+				$inner_rows = $this->diagnostic_rows( $database, $inner );
+				self::assertCount( 1, $inner_rows );
+				self::assertSame( 'queue_accepted', $inner_rows[0]['context']['stage'] );
+				$database->delete( $database->prefix . 'pinova_logs', [ 'flow_id' => $inner ] );
+			} );
+		}, $database );
+	}
+
+	private function with_created_hook( callable $created, callable $operation ): void {
+		$original = OTP::getEventDispatcher();
+		$dispatcher = new class( $original, $created ) implements Dispatcher {
+			public function __construct( private ?Dispatcher $original, private $created ) {}
+			public function listen( $events, $listener = null ) { $this->original?->listen( $events, $listener ); }
+			public function hasListeners( $eventName ) { return $this->original?->hasListeners( $eventName ) ?? false; }
+			public function subscribe( $subscriber ) { $this->original?->subscribe( $subscriber ); }
+			public function until( $event, $payload = [] ) { return $this->dispatch( $event, $payload, true ); }
+			public function dispatch( $event, $payload = [], $halt = false ) {
+				if ( 'eloquent.created: ' . OTP::class === $event ) {
+					( $this->created )();
+				}
+				return $this->original ? $this->original->dispatch( $event, $payload, $halt ) : ( $halt ? null : [] );
+			}
+			public function push( $event, $payload = [] ) { $this->original?->push( $event, $payload ); }
+			public function flush( $event ) { $this->original?->flush( $event ); }
+			public function forget( $event ) { $this->original?->forget( $event ); }
+			public function forgetPushed() { $this->original?->forgetPushed(); }
+		};
+		OTP::setEventDispatcher( $dispatcher );
+		try {
+			$operation();
+		} finally {
+			if ( null === $original ) {
+				OTP::unsetEventDispatcher();
+			} else {
+				OTP::setEventDispatcher( $original );
+			}
+		}
 	}
 
 	/** @dataProvider native_identifiers */
@@ -542,10 +709,10 @@ final class OTPDiagnosticsIntegrationTest extends WP_UnitTestCase {
 		};
 	}
 
-	private function with_flow( string $identifier, callable $operation ): void {
+	private function with_flow( string $identifier, callable $operation, ?\wpdb $connection = null ): void {
 		global $wpdb;
 		$original = $wpdb;
-		$database = new \wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$database = $connection ?? new \wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
 		$database->set_prefix( $original->prefix );
 		$flow = null;
 		$user_id = null;

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
@@ -14,6 +14,51 @@ const fixtureOption = `pinova_logs_browser_${suffix}`;
 const failureCode = 'otp.channel_send_failed:provider_returned_false';
 const secret = `pinova-private-${suffix}`;
 const fingerprint = randomBytes(16).toString('hex');
+const attachmentFixtureName = `pinova-logs-attachment-${suffix}.php`;
+const attachmentFixtureSource = String.raw`<?php
+// Run-owned Linux WPE presentation fixture; never part of Pinova runtime.
+if (!defined('ABSPATH') || PHP_SAPI === 'cli' || 'local' !== wp_get_environment_type()
+    || !in_array(untrailingslashit(home_url()), ['http://localhost:8890', 'http://127.0.0.1:8890'], true)
+    || 'POST' !== ($_SERVER['REQUEST_METHOD'] ?? '') || 'pinova_export_issues' !== ($_POST['action'] ?? '')) {
+    return;
+}
+$pinova_attachment = get_option('${fixtureOption}');
+if (!is_array($pinova_attachment) || '${suffix}' !== ($pinova_attachment['attachment_owner'] ?? '')
+    || '${process.env.GITHUB_RUN_ID}:${process.env.GITHUB_RUN_ATTEMPT}' !== ($pinova_attachment['attachment_run'] ?? '')
+    || hash_file('sha256', __FILE__) !== ($pinova_attachment['attachment_sha256'] ?? '')) {
+    return;
+}
+header_register_callback(static function (): void {
+    $saved = get_option('${fixtureOption}');
+    if (!is_array($saved) || '${suffix}' !== ($saved['attachment_owner'] ?? '')) { return; }
+    $observations = $saved['attachment_witnesses'] ?? [];
+    if (!is_array($observations) || count($observations) >= 2) { return; }
+    $headers = ['content-type' => [], 'content-disposition' => [], 'x-content-type-options' => []];
+    foreach (headers_list() as $line) {
+        $parts = explode(':', $line, 2);
+        $name = strtolower(trim($parts[0]));
+        if (isset($headers[$name]) && isset($parts[1])) { $headers[$name][] = trim($parts[1]); }
+    }
+    $witness = [
+        'status' => (int)http_response_code(),
+        'json' => count($headers['content-type']) === 1 && preg_match('/^application\/json(?:;|$)/i', $headers['content-type'][0]) === 1,
+        'attachment' => $headers['content-disposition'] === ['attachment; filename="pinova-issues.json"'],
+        'nosniff' => $headers['x-content-type-options'] === ['nosniff'],
+        'actor' => current_user_can('manage_options') && (int)$saved['user_id'] === get_current_user_id()
+            && '${suffix}' === get_user_meta(get_current_user_id(), '_pinova_logs_browser_owner', true),
+        'nonce' => is_string($_POST['_wpnonce'] ?? null) && false !== wp_verify_nonce($_POST['_wpnonce'], 'pinova_export_issues'),
+        'adapted' => false,
+    ];
+    if ($witness['status'] === 200 && $witness['json'] && $witness['attachment'] && $witness['nosniff'] && $witness['actor'] && $witness['nonce']) {
+        header('Content-Type: application/octet-stream');
+        $witness['adapted'] = true;
+    }
+    $saved['attachment_witnesses'][] = $witness;
+    update_option('${fixtureOption}', $saved, false);
+});
+unset($pinova_attachment);
+`;
+const attachmentFixtureHash = createHash('sha256').update(attachmentFixtureSource).digest('hex');
 let fixture;
 
 async function cli(script) {
@@ -119,6 +164,14 @@ echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode([
 
 test.afterAll(async () => {
     await cli(String.raw`
+$attachment_path = WPMU_PLUGIN_DIR . '/${attachmentFixtureName}';
+if (file_exists($attachment_path) || is_link($attachment_path)) {
+    if (is_link($attachment_path) || !is_file($attachment_path) || basename($attachment_path) !== '${attachmentFixtureName}'
+        || hash_file('sha256', $attachment_path) !== '${attachmentFixtureHash}') {
+        throw new RuntimeException('Refusing cleanup of an unowned attachment fixture');
+    }
+    if (!unlink($attachment_path)) { throw new RuntimeException('Could not remove owned attachment fixture'); }
+}
 $saved = get_option('${fixtureOption}');
 if (false === $saved) { return; }
 $id = (int)$saved['user_id'];
@@ -229,41 +282,52 @@ echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode($id);
     expect(reopened.observed_count).toBe(failure.observed_count + 1);
     expect((await eventSnapshot()).count).toBe(5);
 
-    const adaptedBodies = [];
     const adaptAttachment = browserName === 'webkit' && process.platform === 'linux';
     if (adaptAttachment) {
-        // Playwright's Linux WPE embedder explicitly displays supported MIME
-        // types, ignoring attachment disposition. Verify the genuine response
-        // first, then change only its presentation for the native download API.
-        // This does not establish unmodified Safari download acceptance.
+        // WPE displays JSON attachments, and its intercepted responses cannot
+        // reliably become downloads. A run-owned MU fixture verifies the real
+        // precommit headers, then changes MIME on the native HTTP response only.
+        // It never reads or transforms the export body. Safari remains separate.
         testInfo.annotations.push({ type: 'platform-limitation', description:
-            'Linux WebKit attachment MIME adapter; original JSON headers/body are asserted. '
+            'Linux WPE native-HTTP MIME fixture; genuine JSON headers are witnessed and export parity is asserted. '
             + 'https://github.com/microsoft/playwright/blob/v1.64.1/browser_patches/webkit/patches/bootstrap.diff' });
-        await page.route('**/wp-admin/admin-post.php', async route => {
-            const request = route.request();
-            if (request.method() !== 'POST' || new URLSearchParams(request.postData() || '').get('action') !== 'pinova_export_issues') {
-                await route.continue();
-                return;
-            }
-            const original = await route.fetch({ maxRedirects: 0 });
-            const headers = original.headers();
-            expect(original.status()).toBe(200);
-            expect(headers['content-type']).toMatch(/^application\/json(?:;|$)/i);
-            expect(headers['content-disposition']).toBe('attachment; filename="pinova-issues.json"');
-            expect(headers['x-content-type-options']).toBe('nosniff');
-            const body = await original.body();
-            expect(body.byteLength).toBeLessThanOrEqual(2 * 1024 * 1024);
-            expect(adaptedBodies.length).toBeLessThan(2);
-            adaptedBodies.push(body);
-            const forwarded = { ...headers, 'content-type': 'application/octet-stream' };
-            // APIResponse supplies decoded bytes; let fulfillment derive the
-            // matching length and avoid carrying a stale transport encoding.
-            delete forwarded['content-length'];
-            delete forwarded['content-encoding'];
-            delete forwarded['transfer-encoding'];
-            await route.fulfill({ response: original, headers: forwarded, body });
-        });
+        await cli(String.raw`
+$saved = get_option('${fixtureOption}');
+if (!is_array($saved) || '${suffix}' !== get_user_meta((int)$saved['user_id'], '_pinova_logs_browser_owner', true)) {
+    throw new RuntimeException('Attachment fixture requires its owned administrator');
+}
+// The Cron boundary uses this same wp-env CLI/MU-directory installation path.
+if (!wp_mkdir_p(WPMU_PLUGIN_DIR) || is_link(WPMU_PLUGIN_DIR) || !is_writable(WPMU_PLUGIN_DIR)
+    || realpath(WPMU_PLUGIN_DIR) !== realpath(ABSPATH . 'wp-content/mu-plugins')) {
+    throw new RuntimeException('Disposable MU fixture directory is unavailable');
+}
+$path = WPMU_PLUGIN_DIR . '/${attachmentFixtureName}';
+if (file_exists($path) || is_link($path)) { throw new RuntimeException('Attachment fixture ownership collision'); }
+$source = base64_decode('${Buffer.from(attachmentFixtureSource).toString('base64')}', true);
+if (!is_string($source) || hash('sha256', $source) !== '${attachmentFixtureHash}') { throw new RuntimeException('Invalid attachment fixture source'); }
+$file = fopen($path, 'x');
+if (false === $file) { throw new RuntimeException('Could not create owned attachment fixture'); }
+try { $written = fwrite($file, $source); } finally { fclose($file); }
+if ($written !== strlen($source) || hash_file('sha256', $path) !== '${attachmentFixtureHash}') {
+    throw new RuntimeException('Incomplete attachment fixture installation');
+}
+$saved['attachment_owner'] = '${suffix}';
+$saved['attachment_run'] = '${process.env.GITHUB_RUN_ID}:${process.env.GITHUB_RUN_ATTEMPT}';
+$saved['attachment_sha256'] = '${attachmentFixtureHash}';
+$saved['attachment_witnesses'] = [];
+if (!update_option('${fixtureOption}', $saved, false)) { throw new RuntimeException('Could not record attachment fixture ownership'); }
+`);
     }
+    const expectAttachmentWitnesses = async count => {
+        if (!adaptAttachment) return;
+        const observations = await readData(String.raw`
+$saved = get_option('${fixtureOption}');
+echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode($saved['attachment_witnesses'] ?? []);
+`);
+        expect(observations).toEqual(Array.from({ length: count }, () => ({
+            status: 200, json: true, attachment: true, nosniff: true, actor: true, nonce: true, adapted: true,
+        })));
+    };
 
     const downloaded = page.waitForEvent('download');
     await issues.getByRole('button', { name: 'دریافت گزارش مشکلات برای بررسی', exact: true }).click();
@@ -271,10 +335,7 @@ echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode($id);
     expect(download.suggestedFilename()).toBe('pinova-issues.json');
     expect(await download.failure()).toBeNull();
     const json = await readFile(await download.path(), 'utf8');
-    if (adaptAttachment) {
-        expect(adaptedBodies).toHaveLength(1);
-        expect(Buffer.from(json)).toEqual(adaptedBodies[0]);
-    }
+    await expectAttachmentWitnesses(1);
     const exported = JSON.parse(json);
     expect(exported.schema).toBe('pinova.issues.v1');
     expect(exported.selected_range).toEqual(expected.selected_range);
@@ -306,10 +367,7 @@ echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode(\Pinova\Logging\IssueMonitor::
     const timelineFile = await timelineDownload;
     expect(await timelineFile.failure()).toBeNull();
     const timelineJson = await readFile(await timelineFile.path(), 'utf8');
-    if (adaptAttachment) {
-        expect(adaptedBodies).toHaveLength(2);
-        expect(Buffer.from(timelineJson)).toEqual(adaptedBodies[1]);
-    }
+    await expectAttachmentWitnesses(2);
     const timelineExport = JSON.parse(timelineJson);
     expect(timelineExport.mode).toBe('timeline');
     expect(timelineExport.timeline).toEqual(timeline.timeline);

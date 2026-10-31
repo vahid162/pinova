@@ -50,7 +50,48 @@ jobs:
       - run: npm run lint:js
       - run: npm run test:js
       - name: Verify bounded log-observation behavior
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/ops -p 'test_log_cursor.py' -v
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/ops -p 'test_*.py' -v
+
+  native-events:
+    name: Native MariaDB event allocation witness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mariadb:
+        image: mariadb:10.11.10@sha256:41d89394db8e777d96058d4cf5cf4daf1ed87f76192154f3d89572676f1e2327
+        env:
+          MARIADB_ROOT_PASSWORD: fixture-only
+          MARIADB_DATABASE: pinova_witness_${{ github.run_id }}_${{ github.run_attempt }}
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PINOVA_NATIVE_DB_HOST: 127.0.0.1
+      PINOVA_NATIVE_DB_PORT: '3307'
+      PINOVA_NATIVE_DB_NAME: pinova_witness_${{ github.run_id }}_${{ github.run_attempt }}
+      PINOVA_NATIVE_DB_PASSWORD: fixture-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: mysqli
+      - name: Verify native allocation, transactions and finite projection
+        if: ${{ !cancelled() }}
+        run: php tests/ops/mariadb_event_snapshot.php
+      - name: Retain bounded nonpersonal native observations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-event-witness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pinova-native-event-witness-${{ github.run_id }}-${{ github.run_attempt }}.json
+          if-no-files-found: error
+          retention-days: 7
 
   repository-lint:
     name: Workflow and shell lint
@@ -545,6 +586,7 @@ jobs:
     needs:
       - project-guidance
       - javascript
+      - native-events
       - repository-lint
       - dependency-review
       - supply-chain
@@ -562,6 +604,7 @@ jobs:
         env:
           PROJECT_GUIDANCE: ${{ needs.project-guidance.result }}
           JAVASCRIPT: ${{ needs.javascript.result }}
+          NATIVE_EVENTS: ${{ needs.native-events.result }}
           REPOSITORY_LINT: ${{ needs.repository-lint.result }}
           DEPENDENCY_REVIEW: ${{ needs.dependency-review.result }}
           SUPPLY_CHAIN: ${{ needs.supply-chain.result }}
@@ -576,6 +619,7 @@ jobs:
         run: |
           test "${PROJECT_GUIDANCE}" = success
           test "${JAVASCRIPT}" = success
+          test "${NATIVE_EVENTS}" = success
           test "${REPOSITORY_LINT}" = success
           test "${SUPPLY_CHAIN}" = success
           if [[ "${EVENT_NAME}" == pull_request ]]; then

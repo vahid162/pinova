@@ -730,6 +730,7 @@ final class OTPQueueStore {
 				$previous = self::$diagnostic_immediate_slots[ $name ] ?? null;
 				// wpdb can reenter after GET_LOCK succeeds but before a lease is returned.
 				self::$diagnostic_immediate_slots[ $name ] = null;
+
 				$acquired = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) );
 				if ( self::database_read_failed() ) {
 					return null;

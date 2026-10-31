@@ -58,7 +58,7 @@ jobs:
           [[ "${native_pkg_version}" =~ ^8\.4\.27-[A-Za-z0-9.+:~_-]+$ ]]
           sudo apt-get install -y --no-install-recommends "php8.4-fpm=${native_pkg_version}" "php8.4-cli=${native_pkg_version}" "php8.4-common=${native_pkg_version}" "php8.4-curl=${native_pkg_version}" "php8.4-gd=${native_pkg_version}" "php8.4-mbstring=${native_pkg_version}" "php8.4-mysql=${native_pkg_version}" "php8.4-xml=${native_pkg_version}" "php8.4-zip=${native_pkg_version}" nginx gdb e2fsprogs util-linux
           [[ "$(/usr/bin/php8.4 -r 'echo PHP_VERSION;')" == 8.4.27 ]]
-          /usr/sbin/php-fpm8.4 -v | head -n 1 | rg '^PHP 8\.4\.27 '
+          /usr/sbin/php-fpm8.4 -v | head -n 1 | grep -E '^PHP 8\.4\.27 '
           sudo systemctl start mysql.service
           sudo install -d -m 0755 "${PINOVA_FPM_CAMPAIGN_ROOT}"
           sudo install -m 0600 /dev/null "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}"
@@ -96,6 +96,31 @@ jobs:
               python3 tests/Integration/native-fpm-crash-evidence.py cleanup \
               | sudo tee "${PINOVA_FPM_CAMPAIGN_ROOT}/receipt/native-cleanup-fallback.json" > /dev/null
             sudo chmod 0644 "${PINOVA_FPM_CAMPAIGN_ROOT}/receipt/native-cleanup-fallback.json"
+          else
+            sudo env GITHUB_RUN_ID="${GITHUB_RUN_ID}" GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}" GITHUB_SHA="${GITHUB_SHA}" \
+              PINOVA_FPM_CAMPAIGN_ROOT="${PINOVA_FPM_CAMPAIGN_ROOT}" python3 - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          expected = Path('/tmp/pinova-fpm-revisions-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'])
+          assert str(expected) == os.environ['PINOVA_FPM_CAMPAIGN_ROOT']
+          private = expected / 'private/native-capture'
+          route = Path('/proc/sys/kernel/core_pattern').read_text().strip()
+          inactive = not private.exists() and str(private) not in route
+          target = expected / 'receipt'
+          target.mkdir(mode=0o755, parents=True, exist_ok=True)
+          assert target.resolve() == target and target.stat().st_uid == 0
+          body = {'schema': 'pinova.native-capture-start-check.v1', 'source_commit': os.environ['GITHUB_SHA'],
+                  'state': 'not_started' if inactive else 'needs_review',
+                  'reason': 'owned_capture_state_absent', 'owned_core_route_active': str(private) in route,
+                  'resource_acceptance': False, 'production_coverage_acceptance': False}
+          path = target / 'native-start-check.json'
+          fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+          try:
+              os.write(fd, (json.dumps(body) + '\n').encode())
+              os.fchmod(fd, 0o644)
+          finally:
+              os.close(fd)
+          PYTHON
           fi
       - name: Retain only finite diagnostic receipts; never cores or private files
         if: always()

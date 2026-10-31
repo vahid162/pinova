@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="tests/integration-bootstrap.php" colors="true">
+  <testsuites>
+    <testsuite name="Controlled logging isolation proof">
+      <file>tests/Integration/OTPDiagnosticsIntegrationTest.php</file>
+      <file>tests/Integration/PasswordResetLoggingIntegrationTest.php</file>
+    </testsuite>
+  </testsuites>
+</phpunit>

@@ -46,3 +46,26 @@ tests_add_filter(
 );
 
 require $_tests_dir . '/includes/bootstrap.php';
+
+// Proof-branch-only synthetic salt; never part of the canonical plugin or a live site.
+if ( '1' === getenv( 'PINOVA_LOG_ISOLATION_PROOF' ) ) {
+    $proof_slot = static function ( string $ip, string $reason, string $salt ): int {
+        return hexdec( substr( hash_hmac( 'sha256', inet_pton( $ip ) . '|' . $reason, $salt ), 0, 4 ) ) % 1024;
+    };
+    $proof_salt = null;
+    for ( $proof_index = 0; $proof_index < 65536; ++$proof_index ) {
+        $candidate = 'pinova-isolated-collision-proof:' . $proof_index;
+        if ( $proof_slot( '192.0.2.232', 'invalid_code', $candidate ) === $proof_slot( '192.0.2.81', 'policy_rejected', $candidate ) ) {
+            $proof_salt = $candidate;
+            break;
+        }
+    }
+    if ( null === $proof_salt ) {
+        throw new RuntimeException( 'The controlled collision witness is unavailable.' );
+    }
+    add_filter( 'salt', static fn( $salt, $scheme ) => 'auth' === $scheme ? $proof_salt : $salt, PHP_INT_MAX, 2 );
+    if ( $proof_slot( '192.0.2.232', 'invalid_code', wp_salt( 'auth' ) ) !== $proof_slot( '192.0.2.81', 'policy_rejected', wp_salt( 'auth' ) ) ) {
+        throw new RuntimeException( 'The controlled collision witness was not installed.' );
+    }
+    echo "PINOVA_LOG_COLLISION_PROOF_READY=1" . PHP_EOL;
+}

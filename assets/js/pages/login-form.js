@@ -8,19 +8,27 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
         requestSequence: 0,
         activeRequestId: 0,
         activeRequestAbort: null,
+        windowLifecycleCleanup: null,
 
         init(){
+            this.windowLifecycleCleanup?.();
             this.changeStep(this.stepName, {replace: true, fromHistory: true, focus: false});
 
-            window.addEventListener('popstate', (event) => {
+            const onPopState = (event) => {
                 const targetStep = event.state && event.state.pinovaStep;
                 this.changeStep(
                     this.allowedSteps.includes(targetStep) ? targetStep : 'authenticate',
                     {fromHistory: true}
                 );
-            });
+            };
 
-            window.addEventListener('beforeunload', () => { this.cancelRequest(); this.stopTimer(); });
+            const onBeforeUnload = () => { this.cancelRequest(); this.stopTimer(); };
+            window.addEventListener('popstate', onPopState);
+            window.addEventListener('beforeunload', onBeforeUnload);
+            this.windowLifecycleCleanup = () => {
+                window.removeEventListener('popstate', onPopState);
+                window.removeEventListener('beforeunload', onBeforeUnload);
+            };
 
             this.initWebOtpLifecycle();
             this.initThemeWebOtpLifecycle();
@@ -28,6 +36,9 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
         },
 
         initThemeWebOtpLifecycle(){
+            this.themeWebOtpCleanup?.();
+            this.themeWebOtpCleanup = null;
+            this.themeWebOtpCheck = null;
             const root = this.authRoot;
             if(!root?.hasAttribute?.('data-pinova-theme-partial')){
                 return;
@@ -119,6 +130,12 @@ pinovaAlpine.data("pinovaLoginForm", ()=>({
             this.cancelRequest();
             this.stopTimer();
             this.themeWebOtpCleanup?.();
+            this.themeWebOtpCleanup = null;
+            this.themeWebOtpCheck = null;
+            this.webOtpLifecycleCleanup?.();
+            this.webOtpLifecycleCleanup = null;
+            this.windowLifecycleCleanup?.();
+            this.windowLifecycleCleanup = null;
         },
 
         submit(){

@@ -8,6 +8,7 @@ export function createAuthState() {
         themeWebOtpCleanup: null,
         webOtpSequence: 0,
         webOtpAbort: null,
+        webOtpLifecycleCleanup: null,
         pendingWebOtp: null,
         webOtpPageActive: true,
         pageLoaderIsActive: false,
@@ -176,16 +177,23 @@ export function createAuthState() {
         },
 
         initWebOtpLifecycle() {
+            this.webOtpLifecycleCleanup?.();
             this.authRoot = this.$root || this.$el || null;
-            window.addEventListener('pagehide', () => {
+            const onPageHide = () => {
                 this.webOtpPageActive = false;
                 this.cancelRequest();
                 this.stopWebOtp();
                 this.stopTimer();
-            });
-            window.addEventListener('pageshow', () => {
+            };
+            const onPageShow = () => {
                 this.webOtpPageActive = true;
-            });
+            };
+            window.addEventListener('pagehide', onPageHide);
+            window.addEventListener('pageshow', onPageShow);
+            this.webOtpLifecycleCleanup = () => {
+                window.removeEventListener('pagehide', onPageHide);
+                window.removeEventListener('pageshow', onPageShow);
+            };
         },
 
         stopWebOtp() {

@@ -163,6 +163,49 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_wordpress_diagnostic_filter_can_shorten_but_never_extend_persisted_authority(): void {
+		global $wpdb;
+		$flow = str_repeat( 'e', 32 );
+		$config = [ 'minimum_level' => 'error', 'retention_days' => 14, 'diagnostic_until' => time() - 1, 'diagnostic_scope' => [ 'type' => 'flow', 'value' => $flow ], 'diagnostic_budget_initialized' => true ];
+		$seed = static function ( array $value ) use ( $wpdb ): void {
+			$wpdb->update( $wpdb->options, [ 'option_value' => maybe_serialize( $value ) ], [ 'option_name' => 'pinova_logging' ] );
+			wp_cache_delete( 'pinova_logging', 'options' );
+			wp_cache_delete( 'alloptions', 'options' );
+		};
+		self::assertTrue( EventThrottle::initialize_diagnostics() );
+		$seed( $config );
+		$extend = static fn(): int => time() + 900;
+		add_filter( 'pinova/logging_diagnostic_until', $extend );
+		try {
+			$context = new DiagnosticContext( $flow, time() + 60 );
+			$context->observe( 'worker_started', [ 'execution_mode' => 'cron', 'result' => 'started' ] );
+			$context->flush();
+			self::assertSame( 'expired', Logger::diagnostics_status()['status'] );
+			self::assertSame( $config['diagnostic_until'], Logger::diagnostics_status()['until'] );
+			self::assertSame( 0, EventThrottle::diagnostics_snapshot()['admitted'] );
+			self::assertSame( 0, LogRepository::paginate()['total'] );
+			$config['diagnostic_until'] = time() + 2 * DAY_IN_SECONDS;
+			$seed( $config );
+			self::assertSame( 'invalid', Logger::diagnostics_status()['status'] );
+			self::assertSame( 0, Logger::diagnostics_status()['until'] );
+		} finally {
+			remove_filter( 'pinova/logging_diagnostic_until', $extend );
+		}
+		$config['diagnostic_until'] = time() + 900;
+		$seed( $config );
+		$shortened = time() + 30;
+		$shorten = static fn(): int => $shortened;
+		add_filter( 'pinova/logging_diagnostic_until', $shorten );
+		try {
+			$status = Logger::diagnostics_status();
+			self::assertSame( 'active', $status['status'] );
+			self::assertSame( $shortened, $status['until'] );
+			self::assertTrue( $status['initialization_locked'] );
+		} finally {
+			remove_filter( 'pinova/logging_diagnostic_until', $shorten );
+		}
+	}
+
 	public function test_admin_sms_test_is_audited_when_minimum_level_is_error(): void {
 		update_option(
 			'pinova_logging',

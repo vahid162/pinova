@@ -45,84 +45,85 @@ class ChannelService {
 
 		foreach ( $channels as $channel => &$success ) {
 
-			if ( in_array( $channel, [ 'sms', 'bale', 'call', 'email' ], true ) ) {
-				OTPQueueStore::set_provider_channel( $channel );
-				try {
-					if ( null !== $queue_claim_token ) {
-						OTPImmediateDelivery::guard( (string) $otp->flow_id, $queue_claim_token, [ $channel ] );
-						OTPQueueStore::guard_provider();
+			if ( ! in_array( $channel, [ 'sms', 'bale', 'call', 'email' ], true ) ) {
+				continue;
+			}
+			OTPQueueStore::set_provider_channel( $channel );
+			try {
+				if ( null !== $queue_claim_token ) {
+					OTPImmediateDelivery::guard( (string) $otp->flow_id, $queue_claim_token, [ $channel ] );
+					OTPQueueStore::guard_provider();
+				}
+				// Keep accepted channels if a preceding provider outlives the
+				// flow or an erasure cancels it, but never start another send.
+				if ( $otp->expires_at->lessThanOrEqualTo( Carbon::now() ) ) {
+					break;
+				}
+				if ( null !== $queue_claim_token ) {
+					$claim_state = OTPQueueStore::queued_claim_state( (string) $otp->flow_id, $queue_claim_token );
+					if ( 'unavailable' === $claim_state ) {
+						throw new OTPDeliveryDeferredException( 'Queued channel ownership is unavailable.' );
 					}
-					// Keep accepted channels if a preceding provider outlives the
-					// flow or an erasure cancels it, but never start another send.
-					if ( $otp->expires_at->lessThanOrEqualTo( Carbon::now() ) ) {
+					if ( 'active' !== $claim_state ) {
 						break;
 					}
-					if ( null !== $queue_claim_token ) {
-						$claim_state = OTPQueueStore::queued_claim_state( (string) $otp->flow_id, $queue_claim_token );
-						if ( 'unavailable' === $claim_state ) {
-							throw new OTPDeliveryDeferredException( 'Queued channel ownership is unavailable.' );
-						}
-						if ( 'active' !== $claim_state ) {
-							break;
-						}
-					}
-				} catch ( OTPDeliveryDeferredException $exception ) {
-					$attempted = null === $queue_claim_token ? null : OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token );
-					if ( false === $attempted ) {
-						throw $exception;
-					}
-					$uncertain = $uncertain || null === $attempted;
-					// Prior acceptance remains authoritative. An unattempted
-					// deferral must not become a terminal known provider failure.
-					break;
 				}
+			} catch ( OTPDeliveryDeferredException $exception ) {
+				$attempted = null === $queue_claim_token ? null : OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token );
+				if ( false === $attempted ) {
+					throw $exception;
+				}
+				$uncertain = $uncertain || null === $attempted;
+				// Prior acceptance remains authoritative. An unattempted
+				// deferral must not become a terminal known provider failure.
+				break;
+			}
 
-				$started   = microtime( true );
-				$monotonic = OTPService::diagnostic_clock();
-				$exception = null;
-				try {
-					$success = self::send_channel( $channel, $identifier, $code, $otp->type );
-				} catch ( OTPDeliveryDeferredException $e ) {
-					if ( null !== $queue_claim_token && false === OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token ) ) {
-						throw $e;
-					}
-					// This channel was not handed off. Preserve earlier true/false or
-					// uncertain results instead of inventing another provider outcome.
-					$uncertain = $uncertain || null === $queue_claim_token
-						|| null === OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token );
-					break;
-				} catch ( \Throwable $e ) {
-					$exception = $e;
-					$uncertain = true;
+			$started   = microtime( true );
+			$monotonic = OTPService::diagnostic_clock();
+			$exception = null;
+			try {
+				$success = self::send_channel( $channel, $identifier, $code, $otp->type );
+			} catch ( OTPDeliveryDeferredException $e ) {
+				if ( null !== $queue_claim_token && false === OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token ) ) {
+					throw $e;
 				}
-				$details  = [
-					'channel'    => $channel,
-					'result'     => null !== $exception ? 'unknown' : ( $success ? 'accepted' : 'rejected' ),
-					'error_code' => null !== $exception ? 'provider_exception' : ( $success ? 'none' : 'provider_returned_false' ),
-				];
-				$duration = OTPService::diagnostic_duration( $monotonic );
-				if ( null !== $duration ) {
-					$details['channel_duration_ms'] = $duration;
-				}
-				OTPQueueStore::observe_provider( 'channel_completed', $details );
-				if ( false === $success || null !== $exception ) {
-					Logger::instance()->warning(
-						'otp.channel_send_failed',
-						[
-							'user_id'                => $otp->user_id,
-							'flow_id'                => $otp->flow_id,
-							'otp_type'               => $otp->type,
-							'channel'                => $channel,
-							'reason'                 => null === $exception ? 'provider_returned_false' : 'provider_exception',
-							'duration_ms'            => min( 600000, max( 0, (int) round( ( microtime( true ) - $started ) * 1000 ) ) ),
-							'identifier_type'        => $identifier->get_type(),
-							'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
-							'exception'              => $exception,
-						]
-					);
-					if ( null !== $exception ) {
-						do_action( 'pinova/channel_send_failed', sanitize_key( (string) $channel ) );
-					}
+				// This channel was not handed off. Preserve earlier true/false or
+				// uncertain results instead of inventing another provider outcome.
+				$uncertain = $uncertain || null === $queue_claim_token
+					|| null === OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token );
+				break;
+			} catch ( \Throwable $e ) {
+				$exception = $e;
+				$uncertain = true;
+			}
+			$details  = [
+				'channel'    => $channel,
+				'result'     => null !== $exception ? 'unknown' : ( $success ? 'accepted' : 'rejected' ),
+				'error_code' => null !== $exception ? 'provider_exception' : ( $success ? 'none' : 'provider_returned_false' ),
+			];
+			$duration = OTPService::diagnostic_duration( $monotonic );
+			if ( null !== $duration ) {
+				$details['channel_duration_ms'] = $duration;
+			}
+			OTPQueueStore::observe_provider( 'channel_completed', $details );
+			if ( false === $success || null !== $exception ) {
+				Logger::instance()->warning(
+					'otp.channel_send_failed',
+					[
+						'user_id'                => $otp->user_id,
+						'flow_id'                => $otp->flow_id,
+						'otp_type'               => $otp->type,
+						'channel'                => $channel,
+						'reason'                 => null === $exception ? 'provider_returned_false' : 'provider_exception',
+						'duration_ms'            => min( 600000, max( 0, (int) round( ( microtime( true ) - $started ) * 1000 ) ) ),
+						'identifier_type'        => $identifier->get_type(),
+						'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
+						'exception'              => $exception,
+					]
+				);
+				if ( null !== $exception ) {
+					do_action( 'pinova/channel_send_failed', sanitize_key( (string) $channel ) );
 				}
 			}
 		}

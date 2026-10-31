@@ -3,6 +3,7 @@
 namespace Pinova\Admin;
 
 use Pinova\Logging\BuildMetadata;
+use Pinova\Logging\EventThrottle;
 use Pinova\Integrations\IntegrationSettings;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
@@ -42,8 +43,15 @@ final class Logs {
 			]
 			: LogRepository::paginate( $page, 50, $level, $filters );
 		$pages            = max( 1, (int) ceil( $data['total'] / 50 ) );
-		$minimum_level    = (string) Pinova::get_option( 'logging.minimum_level', LogLevel::WARNING );
-		$diagnostic_until = (int) Pinova::get_option( 'logging.diagnostic_until', 0 );
+		$minimum_level    = 'unavailable';
+		foreach ( [ 'info', 'notice', 'warning', 'error' ] as $candidate ) {
+			if ( Logger::instance()->is_enabled( $candidate ) ) {
+				$minimum_level = $candidate;
+				break;
+			}
+		}
+		$diagnostics      = Logger::diagnostics_status();
+		$diagnostic_budget = EventThrottle::diagnostics_snapshot();
 		$health           = LogRepository::health();
 		$table_exists     = $health['table_exists'];
 		$pagination       = paginate_links(
@@ -98,13 +106,28 @@ final class Logs {
 					sprintf(
 						/* translators: %s: configured minimum PSR-3 log level. */
 						__( 'حداقل سطح ثبت فعلی: %s', 'pinova' ),
-						$diagnostic_until > time() ? LogLevel::DEBUG : $minimum_level
+						$minimum_level
 					)
 				);
 				?>
 			</p>
+			<h3><?php esc_html_e( 'جزئیات تشخیصی محدود', 'pinova' ); ?></h3>
+			<p><?php echo esc_html( match ( $diagnostics['status'] ) {
+				'active' => __( 'پنجرهٔ تشخیصی فقط برای دامنهٔ انتخاب‌شده فعال است؛ سطح عادی گزارش‌ها تغییر نمی‌کند.', 'pinova' ),
+				'expired' => __( 'پنجرهٔ تشخیصی منقضی شده است.', 'pinova' ),
+				'legacy_unscoped' => __( 'پنجرهٔ قدیمی بدون دامنه وجود دارد؛ جزئیات جدید ثبت نمی‌شود. در تنظیمات، دامنهٔ مشخص انتخاب کنید.', 'pinova' ),
+				'off' => __( 'جزئیات تشخیصی خاموش است.', 'pinova' ),
+				default => __( 'وضعیت جزئیات تشخیصی نامشخص یا نامعتبر است؛ فعال‌بودن آن تأیید نشده است.', 'pinova' ),
+			} ); ?></p>
+			<?php if ( 'active' === $diagnostics['status'] ) : ?>
+				<p><code dir="ltr"><?php echo esc_html( $diagnostics['scope']['type'] . ':' . $diagnostics['scope']['value'] ); ?></code> — <?php echo esc_html( gmdate( 'Y-m-d H:i:s', $diagnostics['until'] ) ); ?> UTC</p>
+			<?php endif; ?>
 
 
+			<p>
+				<?php /* translators: 1: finite budget coverage status; 2: observed admission count or unknown. */ ?>
+				<?php echo esc_html( sprintf( __( 'پوشش بودجهٔ جزئیات: %1$s؛ پذیرش مشاهده‌شده در پنجره: %2$s. این تعداد، شمار ورود یا پیامک دریافت‌شده نیست.', 'pinova' ), $diagnostic_budget['coverage'], null === $diagnostic_budget['admitted'] ? __( 'نامشخص', 'pinova' ) : (string) $diagnostic_budget['admitted'] ) ); ?>
+			</p>
 			<p><?php esc_html_e( 'این بررسی فقط خواندن را می‌سنجد و تضمین ثبت رخدادهای بعدی نیست. وضعیت نگهداری نیز در صورت خرابی پایگاه‌داده ممکن است ذخیره نشود.', 'pinova' ); ?></p>
 			<?php if ( $health['cleanup_overdue'] ) : ?>
 				<div class="notice notice-warning inline"><p><?php esc_html_e( 'زمان پاک‌سازی گذشته است؛ اجرای cron را بررسی کنید.', 'pinova' ); ?></p></div>
@@ -134,7 +157,7 @@ final class Logs {
 
 			<?php if ( ! $table_exists ) : ?>
 				<div class="notice notice-error"><p><?php esc_html_e( 'جدول گزارش‌های پینوا در دسترس نیست. نصب یا ارتقای افزونه باید بررسی شود.', 'pinova' ); ?></p></div>
-			<?php elseif ( LogLevel::ERROR === $minimum_level && $diagnostic_until <= time() ) : ?>
+			<?php elseif ( LogLevel::ERROR === $minimum_level ) : ?>
 				<div class="notice notice-warning"><p><?php esc_html_e( 'سطح ثبت روی Error است؛ رخدادهای Info، Notice و Warning ذخیره نمی‌شوند. تست مدیریتی پیامک با وجود این تنظیم همیشه ثبت می‌شود.', 'pinova' ); ?></p></div>
 			<?php endif; ?>
 

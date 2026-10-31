@@ -10,17 +10,35 @@ pinovaAlpine.data('pinovaLoginModal', () => ({
     requestSequence: 0,
     activeRequestId: 0,
     activeRequestAbort: null,
+    windowLifecycleCleanup: null,
     previousBodyOverflow: '',
     inertedElements: [],
     init() {
-        window.addEventListener('beforeunload', () => {
+        this.windowLifecycleCleanup?.();
+        const onBeforeUnload = () => {
             this.cancelRequest();
             this.stopTimer();
             this.unlockPageInteraction();
-        });
+        };
+        window.addEventListener('beforeunload', onBeforeUnload);
+        this.windowLifecycleCleanup = () => window.removeEventListener('beforeunload', onBeforeUnload);
 
         this.initWebOtpLifecycle();
 
+    },
+
+    destroy() {
+        ++this.focusSequence;
+        this.cancelRequest();
+        this.stopTimer();
+        if (this.modalIsOpen || this.inertedElements.length) {
+            this.unlockPageInteraction();
+        }
+        this.modalIsOpen = false;
+        this.webOtpLifecycleCleanup?.();
+        this.webOtpLifecycleCleanup = null;
+        this.windowLifecycleCleanup?.();
+        this.windowLifecycleCleanup = null;
     },
 
     submit() {

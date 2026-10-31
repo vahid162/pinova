@@ -10,16 +10,33 @@ const scripts = Object.fromEntries(await Promise.all(['form', 'modal'].map(async
         .replace(/^import [^\n]+\n/gm, '').replace('export function pinovaOpenModal', 'function pinovaOpenModal'),
 ])));
 
-function harness(kind, respond = () => ({ success: true, data: { login_method: 'otp', jwt: 'new-flow', ttl: 180 } })) {
-    let factory;
+function windowEvents() {
+    const callbacks = new Map();
     const listeners = {};
+    return {
+        listeners,
+        count: name => callbacks.get(name)?.size || 0,
+        addEventListener(name, callback) {
+            if (!callbacks.has(name)) callbacks.set(name, new Set());
+            callbacks.get(name).add(callback);
+            listeners[name] = (...args) => [...callbacks.get(name)].forEach(listener => listener(...args));
+        },
+        removeEventListener(name, callback) {
+            callbacks.get(name)?.delete(callback);
+        },
+    };
+}
+
+function harness(kind, respond = () => ({ success: true, data: { login_method: 'otp', jwt: 'new-flow', ttl: 180 } }), events = windowEvents()) {
+    let factory;
+    const listeners = events.listeners;
     const credentials = [];
     const submissions = [];
     const calls = [];
     const focus = { focus() {}, querySelector() { return this; } };
     const document = { body: { style: {}, classList: { add() {} } }, getElementById: () => focus, querySelector: () => null };
     const history = { state: null, pushState(state) { this.state = state; }, replaceState(state) { this.state = state; }, back() {} };
-    const window = { addEventListener(name, callback) { listeners[name] = callback; }, history,
+    const window = { addEventListener: events.addEventListener, removeEventListener: events.removeEventListener, history,
         location: { origin: 'https://example.test', href: 'https://example.test/login/' }, parent: { document }, OTPCredential: function () {} };
     const context = vm.createContext({
         AbortController, URL, document, history, window, location: window.location,
@@ -44,6 +61,51 @@ function harness(kind, respond = () => ({ success: true, data: { login_method: '
 const settled = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
 for (const kind of ['form', 'modal']) {
+    test(`${kind}: destroying a detached controller releases only its own window listeners`, async () => {
+        const events = windowEvents();
+        const names = ['pagehide', 'pageshow', 'beforeunload', ...(kind === 'form' ? ['popstate'] : [])];
+        const unrelated = {};
+        for (const name of names) {
+            unrelated[name] = 0;
+            events.addEventListener(name, () => { ++unrelated[name]; });
+        }
+        const removed = harness(kind, undefined, events);
+        const live = harness(kind, undefined, events);
+        await removed.state.authenticate();
+        await live.state.authenticate();
+        for (const name of names) assert.equal(events.count(name), 3);
+
+        removed.state.authRoot.isConnected = false;
+        removed.state.destroy?.();
+        removed.state.destroy?.();
+        for (const name of names) {
+            assert.equal(events.count(name), 2, `destroy must release only the removed controller's ${name} listener`);
+        }
+        assert.equal(removed.credentials[0].options.signal.aborted, true);
+        const snapshot = () => ({
+            pageActive: removed.state.webOtpPageActive,
+            sequence: removed.state.webOtpSequence,
+            step: removed.state.stepName,
+            request: removed.state.activeRequestId,
+        });
+        const destroyed = snapshot();
+
+        live.state.initWebOtpLifecycle();
+        live.state.initWebOtpLifecycle();
+        for (const name of names) assert.equal(events.count(name), 2, `${name} must remain singly owned after reinitialization`);
+        for (const name of names) {
+            events.listeners[name]({ state: { pinovaStep: 'loginByPassword' } });
+            assert.deepEqual(snapshot(), destroyed, `${name} must not mutate the destroyed controller`);
+            assert.equal(unrelated[name], 1, `${name} must preserve unrelated listeners`);
+            if (name === 'pagehide') {
+                assert.equal(live.state.webOtpPageActive, false);
+                assert.equal(live.credentials[0].options.signal.aborted, true);
+            }
+            if (name === 'pageshow') assert.equal(live.state.webOtpPageActive, true);
+        }
+        assert.equal(live.state.stepName, kind === 'form' ? 'loginByPassword' : 'loginByOtp');
+    });
+
     test(`${kind}: WebOTP callback from an earlier accepted flow cannot fill or submit its replacement`, async () => {
         let flow = 0;
         const h = harness(kind, () => ({ success: true, data: { login_method: 'otp', jwt: `flow-${++flow}`, ttl: 180 } }));

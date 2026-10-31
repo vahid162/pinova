@@ -166,6 +166,78 @@ final class LoggingTest extends TestCase {
 		self::assertStringNotContainsString( 'secret-token', (string) $encoded );
 	}
 
+	public function test_anonymous_exception_names_cannot_persist_a_null_byte_or_source_path(): void {
+		$exception = new class( 'private-exception-message', 23 ) extends \RuntimeException {};
+		$class     = get_class( $exception );
+		self::assertStringContainsString( '@anonymous', $class );
+		self::assertStringContainsString( __FILE__, $class );
+
+		foreach ( [ [ 'exception' => $exception ], [ 'exception_class' => $class, 'exception_code' => 23 ] ] as $input ) {
+			$safe = ( new SafeContext() )->sanitize( $input );
+			self::assertArrayNotHasKey( 'exception_class', $safe );
+			self::assertSame( '23', $safe['exception_code'] );
+			$encoded = (string) json_encode( $safe );
+			foreach ( [ '@anonymous', __FILE__, 'private-exception-message', '\u0000' ] as $forbidden ) {
+				self::assertStringNotContainsString( $forbidden, $encoded );
+			}
+		}
+	}
+
+	/** @dataProvider exception_class_names */
+	public function test_exception_class_names_are_validated_without_stripping_or_truncating( string $class, bool $valid ): void {
+		$safe = ( new SafeContext() )->sanitize( [ 'exception_class' => $class, 'exception_code' => 'E-17' ] );
+		self::assertSame( 'E-17', $safe['exception_code'] );
+		if ( $valid ) {
+			self::assertSame( $class, $safe['exception_class'] );
+		} else {
+			self::assertArrayNotHasKey( 'exception_class', $safe );
+		}
+	}
+
+	public static function exception_class_names(): array {
+		return [
+			'ordinary class' => [ 'RuntimeException', true ],
+			'namespaced class' => [ 'Vendor\\Domain\\NamedError', true ],
+			'fully qualified class' => [ '\\Vendor\\Domain\\NamedError', true ],
+			'case and underscore' => [ 'Vendor_2\\_NamedError42', true ],
+			'exact byte limit' => [ str_repeat( 'A', 160 ), true ],
+			'over byte limit' => [ str_repeat( 'A', 161 ), false ],
+			'empty' => [ '', false ],
+			'leading digit' => [ '9RuntimeException', false ],
+			'empty namespace segment' => [ 'Vendor\\\\NamedError', false ],
+			'trailing separator' => [ 'Vendor\\', false ],
+			'newline' => [ "RuntimeException\n", false ],
+			'null byte' => [ "RuntimeException\0private-source", false ],
+			'leading whitespace' => [ ' RuntimeException', false ],
+			'path suffix' => [ 'RuntimeException/private/source.php:42', false ],
+			'absolute path' => [ '/private/source/RuntimeException', false ],
+			'Windows path' => [ 'C:\\private\\source.php', false ],
+			'non-ASCII symbol' => [ 'Vendor\\NämédError', false ],
+			'hyphen' => [ 'Vendor\\Named-Error', false ],
+		];
+	}
+
+	public function test_named_throwables_remain_exact_and_explicit_names_do_not_trigger_autoloading(): void {
+		$sanitizer = new SafeContext();
+		foreach ( [ new \RuntimeException( 'private-runtime-message', 17 ), new LoggingNamedException( 'private-namespaced-message', 29 ) ] as $exception ) {
+			$safe = $sanitizer->sanitize( [ 'exception' => $exception ] );
+			self::assertSame( get_class( $exception ), $safe['exception_class'] );
+			self::assertSame( (string) $exception->getCode(), $safe['exception_code'] );
+		}
+		// Preload the ordinary sanitizer's existing catalogue dependency first.
+		$sanitizer->sanitize( [] );
+		$autoloads = 0;
+		$loader = static function ( string $class ) use ( &$autoloads ): void { ++$autoloads; };
+		spl_autoload_register( $loader, true, true );
+		try {
+			$safe = $sanitizer->sanitize( [ 'exception_class' => 'NotLoaded\\ExactCaseError' ] );
+		} finally {
+			spl_autoload_unregister( $loader );
+		}
+		self::assertSame( 'NotLoaded\\ExactCaseError', $safe['exception_class'] );
+		self::assertSame( 0, $autoloads );
+	}
+
 	public function test_flow_id_is_a_strict_top_level_field_not_arbitrary_context(): void {
 		$handler = new class() implements HandlerInterface {
 			public array $records = [];
@@ -312,3 +384,5 @@ final class LoggingTest extends TestCase {
 		self::assertSame( '', $logger->fingerprint( 'private-value', 'test' ) );
 	}
 }
+
+final class LoggingNamedException extends \RuntimeException {}

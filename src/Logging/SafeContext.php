@@ -126,16 +126,19 @@ final class SafeContext {
 		}
 
 		if ( isset( $context['exception'] ) && $context['exception'] instanceof Throwable ) {
-			$safe['exception_class'] = get_class( $context['exception'] );
-			$code                    = $this->sanitize_exception_code( $context['exception']->getCode() );
+			$class = $this->sanitize_exception_class( get_class( $context['exception'] ) );
+			if ( '' !== $class ) {
+				$safe['exception_class'] = $class;
+			}
+			$code = $this->sanitize_exception_code( $context['exception']->getCode() );
 			if ( '' !== $code ) {
 				$safe['exception_code'] = $code;
 			}
 		} else {
 			if ( isset( $context['exception_class'] ) && is_string( $context['exception_class'] ) ) {
-				$class = preg_replace( '/[^A-Za-z0-9_\\\\]/', '', $context['exception_class'] );
-				if ( is_string( $class ) && '' !== $class ) {
-					$safe['exception_class'] = substr( $class, 0, 160 );
+				$class = $this->sanitize_exception_class( $context['exception_class'] );
+				if ( '' !== $class ) {
+					$safe['exception_class'] = $class;
 				}
 			}
 
@@ -180,6 +183,23 @@ final class SafeContext {
 		$value = is_string( $value ) ? trim( $value, '_.-' ) : '';
 
 		return substr( $value, 0, 100 );
+	}
+
+	/** Reject anonymous/path-bearing names without resolving or autoloading symbols. */
+	private function sanitize_exception_class( string $class ): string {
+		if ( '' === $class || 160 < strlen( $class ) ) {
+			return '';
+		}
+		$segments = explode( '\\', $class );
+		if ( '' === $segments[0] ) {
+			array_shift( $segments );
+		}
+		foreach ( $segments as $segment ) {
+			if ( 1 !== preg_match( '/\A[A-Za-z_][A-Za-z0-9_]*\z/D', $segment ) ) {
+				return '';
+			}
+		}
+		return $class;
 	}
 
 	/** @param mixed $code */

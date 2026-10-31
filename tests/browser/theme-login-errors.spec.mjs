@@ -100,8 +100,10 @@ for (const kind of ['woodmart', 'flatsome']) {
 
     test(`${kind}: incorrect OTP, throttling and invalid response preserve visible safe feedback`, async ({ page }) => {
         let phase = 'init';
+        let verificationCalls = 0;
         const root = await openTheme(page, kind, route => {
             if (phase === 'init') return json(route, { success: true, message: 'درخواست پذیرفته شد.', data: { login_method: 'otp', jwt: 'synthetic-browser-flow', ttl: 180 } });
+            ++verificationCalls;
             if (phase === 'wrong') return json(route, { success: false, message: 'کد واردشده درست نیست.', data: {} }, 401, { 'X-Pinova-Correlation-ID': reference });
             if (phase === 'limited') return json(route, { success: false, message: 'کمی بعد دوباره تلاش کنید.', data: {} }, 429, { 'Retry-After': '30', 'X-Pinova-Correlation-ID': reference });
             return route.fulfill({ status: 502, contentType: 'text/html', headers: { 'X-Pinova-Correlation-ID': reference }, body: '<p>synthetic invalid response</p>' });
@@ -111,9 +113,10 @@ for (const kind of ['woodmart', 'flatsome']) {
         await expect(root.locator('[data-pinova-step="loginByOtp"] [data-pinova-step-heading]')).toBeFocused();
         const code = root.getByLabel('کد تأیید', { exact: true });
         const length = await page.evaluate(() => Number(pinova.code_length));
-        for (const next of ['wrong', 'limited', 'invalid']) {
+        for (const [index, next] of ['wrong', 'limited', 'invalid'].entries()) {
             phase = next;
-            await code.fill('123456'.slice(0, length));
+            const entered = ['123456', '234567', '345678'][index].slice(0, length);
+            await code.fill(entered);
             const feedback = root.getByRole('status');
             if (next === 'wrong') await expect(feedback).toContainText('کد واردشده درست نیست.');
             if (next === 'limited') await expect(feedback).toContainText('30');
@@ -121,6 +124,15 @@ for (const kind of ['woodmart', 'flatsome']) {
             await expect(root.locator('[pinova-text="status.reference"]')).toHaveText(reference);
             // An invalid response is an exception, so the user edits the same code before trying again.
             if (next !== 'invalid') await expect(code).toHaveValue('');
+            if (next === 'wrong') {
+                // Identical automatic retry is suppressed, but an explicit manual
+                // Enter action remains available on the same accepted flow.
+                const before = verificationCalls;
+                await code.fill(entered);
+                await code.press('Enter');
+                await expect.poll(() => verificationCalls).toBe(before + 1);
+                await expect(code).toHaveValue('');
+            }
         }
     });
 

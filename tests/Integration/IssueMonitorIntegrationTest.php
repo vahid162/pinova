@@ -81,12 +81,13 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		};
 		add_filter( 'query', $watch );
 		try {
-			$report = IssueMonitor::report();
+			[ $report, $report_window ] = $this->observe_queue_read( static fn(): array => IssueMonitor::report() );
 		} finally {
 			remove_filter( 'query', $watch );
 		}
 		self::assertSame( [], $writes );
-		self::assertSame( RateLimitService::queue_health(), $report['queue_health'] );
+		[ $current_queue, $current_window ] = $this->observe_queue_read( static fn(): array => RateLimitService::queue_health() );
+		$this->assert_queue_parity( $report['queue_health'], $report_window, $current_queue, $current_window );
 		self::assertTrue( $report['queue_health']['read_success'] );
 		self::assertSame( IntegrationSettings::snapshot()['wpforo'], $report['integrations']['wpforo'] );
 		self::assertSame( IntegrationSettings::snapshot()['dokan'], $report['integrations']['dokan'] );
@@ -129,6 +130,7 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 	public function test_current_queue_snapshot_is_separate_from_history_and_exposes_no_payload_or_ids(): void {
 		global $wpdb;
 		$before = RateLimitService::queue_health();
+		$fixture_now = $this->queue_utc_seconds();
 		$private = base64_encode( 'private-queue-identifier-and-ciphertext' );
 		foreach ( [
 			'pending' => [ 'ready:' . $private, 600 ],
@@ -142,13 +144,13 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 				'bucket_key' => $key,
 				'scope' => md5( 'issue-monitor-flow-' . $label ),
 				'hits' => 1,
-				'reset_at' => gmdate( 'Y-m-d H:i:s', time() + $seconds ),
-				'updated_at' => gmdate( 'Y-m-d H:i:s' ),
+				'reset_at' => gmdate( 'Y-m-d H:i:s', $fixture_now + $seconds ),
+				'updated_at' => gmdate( 'Y-m-d H:i:s', $fixture_now - ( 'processing' === $label ? 61 : 0 ) ),
 				'payload' => $payload,
 			] ) );
 			$this->queue_fixture_keys[] = $key;
 		}
-		$report = IssueMonitor::report();
+		[ $report, $queue_window ] = $this->observe_queue_read( static fn(): array => IssueMonitor::report() );
 		$queue = $report['queue_health'];
 		self::assertTrue( $queue['read_success'] );
 		self::assertFalse( $queue['truncated'] );
@@ -157,11 +159,14 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		}
 		self::assertSame( [], $report['issues'], 'A snapshot must not fabricate historical events or manual review state.' );
 		$yesterday = gmdate( 'Y-m-d', time() - DAY_IN_SECONDS );
-		self::assertSame( $queue, IssueMonitor::report( [ 'created_from' => $yesterday, 'created_to' => $yesterday ] )['queue_health'] );
-		self::assertSame( $queue, IssueMonitor::report( [ 'created_from' => 'invalid', 'created_to' => 'invalid' ] )['queue_health'] );
+		[ $historical, $historical_window ] = $this->observe_queue_read( static fn(): array => IssueMonitor::report( [ 'created_from' => $yesterday, 'created_to' => $yesterday ] ) );
+		$this->assert_queue_parity( $queue, $queue_window, $historical['queue_health'], $historical_window );
+		[ $invalid, $invalid_window ] = $this->observe_queue_read( static fn(): array => IssueMonitor::report( [ 'created_from' => 'invalid', 'created_to' => 'invalid' ] ) );
+		$this->assert_queue_parity( $queue, $queue_window, $invalid['queue_health'], $invalid_window );
 		$this->post( 'pinova_export_issues' );
-		$export = json_decode( $this->invoke( 'export_response', false ), true );
-		self::assertSame( $queue, $export['queue_health'] );
+		[ $json, $export_window ] = $this->observe_queue_read( fn(): string => $this->invoke( 'export_response', false ) );
+		$export = json_decode( $json, true );
+		$this->assert_queue_parity( $queue, $queue_window, $export['queue_health'], $export_window );
 		ob_start();
 		Issues::render();
 		$html = (string) ob_get_clean();
@@ -183,7 +188,7 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		global $wpdb;
 		$table = $wpdb->prefix . 'pinova_rate_limits';
 		$private = base64_encode( 'private-bounded-queue-identifier-and-ciphertext' );
-		$now = time();
+		$now = $this->queue_utc_seconds();
 		$states = [ 'pending', 'expired', 'reserved', 'processing', 'legacy' ];
 		$rows = [];
 		for ( $index = 0; $index < 1001; ++$index ) {
@@ -196,7 +201,7 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 				'processing' => 'processing:' . str_repeat( 'c', 16 ) . ':ready:' . $private,
 				'legacy' => $private,
 			][ $state ];
-			$rows[] = [ $key, md5( 'issue-monitor-boundary-flow-' . $index ), 1, gmdate( 'Y-m-d H:i:s', $now + ( 'expired' === $state ? -600 : 600 ) ), gmdate( 'Y-m-d H:i:s', $now ), $payload ];
+			$rows[] = [ $key, md5( 'issue-monitor-boundary-flow-' . $index ), 1, gmdate( 'Y-m-d H:i:s', $now + ( 'expired' === $state ? -600 : 600 ) ), gmdate( 'Y-m-d H:i:s', $now - ( 'processing' === $state ? 61 : 0 ) ), $payload ];
 			$this->queue_fixture_keys[] = $key;
 		}
 		foreach ( array_chunk( $rows, 100 ) as $batch ) {
@@ -216,10 +221,10 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		};
 		add_filter( 'query', $watch );
 		try {
-			$queue = RateLimitService::queue_health();
-			$report = IssueMonitor::report();
+			[ $queue, $queue_window ] = $this->observe_queue_read( static fn(): array => RateLimitService::queue_health() );
+			[ $report, $report_window ] = $this->observe_queue_read( static fn(): array => IssueMonitor::report() );
 			$this->post( 'pinova_export_issues' );
-			$json = $this->invoke( 'export_response', false );
+			[ $json, $export_window ] = $this->observe_queue_read( fn(): string => $this->invoke( 'export_response', false ) );
 			$export = json_decode( $json, true );
 			ob_start();
 			try {
@@ -234,7 +239,27 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 			remove_filter( 'query', $watch );
 		}
 		self::assertSame( [], $writes, 'Reading or exporting a truncated snapshot must not repair or delete queue rows.' );
-		self::assertSame( [ 'read_success', 'truncated', 'pending', 'expired', 'reserved', 'processing', 'legacy' ], array_keys( $queue ) );
+		self::assertSame(
+			[
+				'read_success',
+				'truncated',
+				'pending',
+				'expired',
+				'reserved',
+				'processing',
+				'legacy',
+				'timing_unknown',
+				'oldest_pending_age_seconds',
+				'earliest_pending_remaining_seconds',
+				'processing_held',
+				'processing_free_stale',
+				'processing_free_recent',
+				'processing_lock_unknown',
+				'processing_age_unknown',
+				'oldest_processing_age_seconds',
+			],
+			array_keys( $queue )
+		);
 		self::assertTrue( $queue['read_success'] );
 		self::assertTrue( $queue['truncated'] );
 		self::assertSame( 1000, array_sum( array_intersect_key( $queue, array_flip( $states ) ) ) );
@@ -243,8 +268,8 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 			self::assertGreaterThanOrEqual( 199, $queue[ $state ] );
 			self::assertLessThanOrEqual( 201, $queue[ $state ] );
 		}
-		self::assertSame( $queue, $report['queue_health'] );
-		self::assertSame( $queue, $export['queue_health'] );
+		$this->assert_queue_parity( $queue, $queue_window, $report['queue_health'], $report_window );
+		$this->assert_queue_parity( $queue, $queue_window, $export['queue_health'], $export_window );
 		self::assertTrue( $report['coverage']['complete'], 'Current queue truncation must not imply that the separate retained-event report was truncated.' );
 		self::assertSame( [], $report['issues'], 'A current snapshot must not fabricate a historical incident.' );
 		self::assertStringContainsString( 'خواندن صف به سقف بررسی رسیده است؛ شمارش‌ها ممکن است کمتر از مقدار واقعی باشند.', $html );
@@ -518,6 +543,56 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 101, $report['coverage']['rows_examined'] );
 		self::assertSame( 101, $report['issues'][0]['observed_count'] );
 		self::assertSame( 102, IssueMonitor::report()['issues'][0]['observed_count'] );
+	}
+
+	/** @return array{mixed,array{int,int}} */
+	private function observe_queue_read( callable $read ): array {
+		$from = $this->queue_utc_seconds();
+		$value = $read();
+		return [ $value, [ $from, $this->queue_utc_seconds() ] ];
+	}
+
+	private function queue_utc_seconds(): int {
+		global $wpdb;
+		$value = $wpdb->get_var( "SELECT TIMESTAMPDIFF(SECOND, '1970-01-01 00:00:00', UTC_TIMESTAMP())" );
+		self::assertSame( '', (string) $wpdb->last_error );
+		self::assertMatchesRegularExpression( '/\A[0-9]{10}\z/D', (string) $value );
+		return (int) $value;
+	}
+
+	/**
+	 * All stable facts stay byte-identical; relative times must advance only by
+	 * the actual SQL UTC interval bracketing the two separate observations.
+	 *
+	 * @param array{int,int} $expected_window
+	 * @param array{int,int} $actual_window
+	 */
+	private function assert_queue_parity( array $expected, array $expected_window, array $actual, array $actual_window ): void {
+		$timings = [
+			'oldest_pending_age_seconds' => [ 1, 180 ],
+			'earliest_pending_remaining_seconds' => [ -1, 180 ],
+			'oldest_processing_age_seconds' => [ 1, 7 * DAY_IN_SECONDS ],
+		];
+		$stable_expected = array_diff_key( $expected, $timings );
+		$stable_actual = array_diff_key( $actual, $timings );
+		self::assertSame( $stable_expected, $stable_actual );
+		self::assertSame( array_keys( $expected ), array_keys( $actual ) );
+		$minimum_elapsed = $actual_window[0] - $expected_window[1];
+		$maximum_elapsed = $actual_window[1] - $expected_window[0];
+		foreach ( $timings as $key => [ $direction, $maximum ] ) {
+			if ( null === $expected[ $key ] ) {
+				self::assertNull( $actual[ $key ], $key );
+				continue;
+			}
+			self::assertIsInt( $expected[ $key ], $key );
+			self::assertIsInt( $actual[ $key ], $key );
+			self::assertGreaterThanOrEqual( 0, $actual[ $key ], $key );
+			self::assertLessThanOrEqual( $maximum, $actual[ $key ], $key );
+			$first = $expected[ $key ] + $direction * $minimum_elapsed;
+			$last = $expected[ $key ] + $direction * $maximum_elapsed;
+			self::assertGreaterThanOrEqual( min( $first, $last ), $actual[ $key ], $key );
+			self::assertLessThanOrEqual( max( $first, $last ), $actual[ $key ], $key );
+		}
 	}
 
 	private function review( array $report, string $state ): bool {

@@ -18,6 +18,9 @@ final class OTPQueueStore {
 	/** @var array{flow:string,token:string}|null */
 	private static ?array $provider_scope           = null;
 	private static bool $diagnostic_release_unknown = false;
+	/** @var array<string,true> A flush gate only, never claim or provider permission. */
+	private static array $diagnostic_flow_locks      = [];
+	private static int $diagnostic_lock_acquisitions = 0;
 
 	/**
 	 * Reserve a durable, opaque decoy flow for the same lifetime as a real OTP.
@@ -227,7 +230,7 @@ final class OTPQueueStore {
 
 	/** Read-only bounded state facts; never decode or return queued identities. */
 	public static function queue_health(): array {
-		$health = [
+		$health  = [
 			'read_success'                       => false,
 			'truncated'                          => false,
 			'pending'                            => 0,
@@ -283,8 +286,8 @@ final class OTPQueueStore {
 						++$health['timing_unknown'];
 						continue;
 					}
-					$age                                          = JWT::DEFAULT_TTL - $remaining;
-					$health['oldest_pending_age_seconds']         = null === $health['oldest_pending_age_seconds'] ? $age : max( $health['oldest_pending_age_seconds'], $age );
+					$age                                  = JWT::DEFAULT_TTL - $remaining;
+					$health['oldest_pending_age_seconds'] = null === $health['oldest_pending_age_seconds'] ? $age : max( $health['oldest_pending_age_seconds'], $age );
 					$health['earliest_pending_remaining_seconds'] = null === $health['earliest_pending_remaining_seconds'] ? $remaining : min( $health['earliest_pending_remaining_seconds'], $remaining );
 				} elseif ( 'processing' === $state ) {
 					// updated_at is only the current claim age, never request or acknowledgement time.
@@ -482,7 +485,7 @@ final class OTPQueueStore {
 			'channel'    => null,
 			'diagnostic' => null,
 		];
-		$decoded = $decoded ?? self::decode_queued_payload( $cipher, $flow_id, $row['reset_at'] );
+		$decoded                           = $decoded ?? self::decode_queued_payload( $cipher, $flow_id, $row['reset_at'] );
 		if ( null === $decoded ) {
 			self::finish_queued_otp( $flow_id, $claim_token );
 			unset( self::$claim_snapshots[ $flow_id ] );
@@ -561,29 +564,57 @@ final class OTPQueueStore {
 
 	/** One compound observation prevents reconnect/replay of an otherwise live token. */
 	private static function active_claim( string $flow_id, string $claim_token, ?array $lease = null ): bool {
+		return 'active' === self::claim_state( $flow_id, $claim_token, $lease );
+	}
+
+	/**
+	 * Retain ownership evidence even when the bounded row window is empty or expired.
+	 * Unavailable observations never establish a terminal cancellation or a permission.
+	 *
+	 * @return 'active'|'inactive'|'unavailable'
+	 */
+	private static function claim_state( string $flow_id, string $claim_token, ?array $lease = null ): string {
 		global $wpdb;
 		$connection = self::$claim_snapshots[ $flow_id ]['connection'] ?? '';
 		if ( '' === $connection || ( self::$held_claims[ $flow_id ] ?? null ) !== $claim_token
 			|| ( null !== $lease && ( ( $lease['connection'] ?? null ) !== $connection || ! is_string( $lease['name'] ?? null )
 				|| 1 !== preg_match( '/\Apinova_otp_fast_[a-f0-9]{24}_[01]\z/D', $lease['name'] ) ) ) ) {
-			return false;
+			return 'unavailable';
 		}
-		$rows = $wpdb->get_results(
-			$wpdb->prepare(
-				'SELECT CONNECTION_ID() AS connection_id, IS_USED_LOCK(%s) AS immediate_slot_holder, IS_USED_LOCK(%s) AS flow_holder, `payload` FROM %i WHERE `scope` = %s AND `reset_at` > UTC_TIMESTAMP() LIMIT 2',
-				$lease['name'] ?? 'pinova_otp_' . $flow_id,
-				'pinova_otp_' . $flow_id,
-				$wpdb->prefix . 'pinova_rate_limits',
-				$flow_id
-			),
-			ARRAY_A
-		);
-		if ( $wpdb->last_error || ! is_array( $rows ) || 1 !== count( $rows ) ) {
-			return false;
+		try {
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					'SELECT CONNECTION_ID() AS connection_id, IS_USED_LOCK(%s) AS immediate_slot_holder,
+					IS_USED_LOCK(%s) AS flow_holder, queued.bucket_key, queued.payload,
+					IF(queued.reset_at > UTC_TIMESTAMP(), 1, 0) AS unexpired
+					FROM (SELECT 1) AS delivery_guard
+					LEFT JOIN (SELECT bucket_key, LEFT(payload, 28) AS payload, reset_at FROM %i WHERE scope = %s LIMIT 2) AS queued ON 1 = 1',
+					$lease['name'] ?? 'pinova_otp_' . $flow_id,
+					'pinova_otp_' . $flow_id,
+					$wpdb->prefix . 'pinova_rate_limits',
+					$flow_id
+				),
+				ARRAY_A
+			);
+			if ( self::database_read_failed() || ! is_array( $rows ) || 1 !== count( $rows ) ) {
+				return 'unavailable';
+			}
+			$row = $rows[0];
+			if ( $connection !== (string) ( $row['connection_id'] ?? '' ) || $connection !== (string) ( $row['immediate_slot_holder'] ?? '' )
+				|| $connection !== (string) ( $row['flow_holder'] ?? '' ) || ! array_key_exists( 'bucket_key', $row ) ) {
+				return 'unavailable';
+			}
+			if ( null === $row['bucket_key'] ) {
+				return 'inactive';
+			}
+			if ( ! in_array( (string) ( $row['unexpired'] ?? '' ), [ '0', '1' ], true ) || ! array_key_exists( 'payload', $row ) ) {
+				return 'unavailable';
+			}
+			return '1' === (string) $row['unexpired'] && is_string( $row['payload'] ) && 'processing:' . $claim_token . ':' === $row['payload'] ? 'active' : 'inactive';
+		} catch ( \Throwable $throwable ) {
+			unset( $throwable );
+			return 'unavailable';
 		}
-		$row = $rows[0];
-		return $connection === (string) $row['connection_id'] && $connection === (string) $row['immediate_slot_holder']
-			&& $connection === (string) $row['flow_holder'] && str_starts_with( (string) $row['payload'], 'processing:' . $claim_token . ':' );
 	}
 
 	/** Pure request-local evidence; an absent/mismatched claim is unknown, not unattempted. */
@@ -606,7 +637,7 @@ final class OTPQueueStore {
 	 * @return array{flow:string,token:string}|null
 	 */
 	public static function set_provider_scope( ?array $scope ): ?array {
-		$previous = self::$provider_scope;
+		$previous             = self::$provider_scope;
 		self::$provider_scope = $scope;
 		return $previous;
 	}
@@ -645,7 +676,8 @@ final class OTPQueueStore {
 	 * @phpstan-impure
 	 */
 	public static function has_held_claims(): bool {
-		return self::$diagnostic_release_unknown || [] !== self::$held_claims;
+		return self::$diagnostic_release_unknown || 0 < self::$diagnostic_lock_acquisitions
+			|| [] !== self::$diagnostic_flow_locks || [] !== self::$held_claims;
 	}
 
 	/** Pure attachment to the exact existing in-memory claim. */
@@ -729,7 +761,7 @@ final class OTPQueueStore {
 	private static function release_named_lock_observed( string $name, ?string $connection ): bool {
 		global $wpdb;
 		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT CONNECTION_ID() AS connection_id, IS_USED_LOCK(%s) AS holder', $name ), ARRAY_A );
-		if ( $wpdb->last_error || ! is_array( $row ) || ! array_key_exists( 'holder', $row )
+		if ( self::database_read_failed() || ! is_array( $row ) || ! array_key_exists( 'holder', $row )
 			|| ! isset( $row['connection_id'] ) || ! ctype_digit( (string) $row['connection_id'] )
 			|| ( null !== $row['holder'] && ( ! ctype_digit( (string) $row['holder'] ) || 0 >= (int) $row['holder'] ) ) ) {
 			return false;
@@ -752,11 +784,11 @@ final class OTPQueueStore {
 			return false;
 		}
 		$released = $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) );
-		if ( $wpdb->last_error || '1' !== (string) $released ) {
+		if ( self::database_read_failed() || '1' !== (string) $released ) {
 			return false;
 		}
 		$holder = $wpdb->get_var( $wpdb->prepare( 'SELECT IS_USED_LOCK(%s)', $name ) );
-		return ! $wpdb->last_error && ( null === $holder || ( ctype_digit( (string) $holder ) && 0 < (int) $holder && $connection !== (string) $holder ) );
+		return ! self::database_read_failed() && ( null === $holder || ( ctype_digit( (string) $holder ) && 0 < (int) $holder && $connection !== (string) $holder ) );
 	}
 
 	/** Allow another initiation to retry a failed delivery without changing its signed flow. */
@@ -788,19 +820,28 @@ final class OTPQueueStore {
 		$finished       = $wpdb->query(
 			$wpdb->prepare( 'UPDATE %i SET `payload` = %s WHERE `scope` = %s AND `payload` LIKE %s', $table, 'delivered', $flow_id, $pattern )
 		);
-		$cancelled = $wpdb->query(
+		$cancelled      = $wpdb->query(
 			$wpdb->prepare( 'DELETE FROM %i WHERE `scope` = %s AND `payload` LIKE %s', $table, $flow_id, $cancel_pattern )
 		);
 		self::unlock_claim( $flow_id, $claim_token );
 		return false !== $finished && false !== $cancelled;
 	}
 
-	/** A cancelled or missing claim must fail closed before provider delivery. */
+	/** A cancelled, missing, expired or unowned claim must fail closed before delivery. */
 	public static function queued_otp_is_active( string $flow_id, string $claim_token ): bool {
+		return 'active' === self::queued_claim_state( $flow_id, $claim_token );
+	}
+
+	/**
+	 * Internal outcome for safe pre-provider deferral; the public bool API remains.
+	 *
+	 * @return 'active'|'inactive'|'unavailable'
+	 */
+	public static function queued_claim_state( string $flow_id, string $claim_token ): string {
 		if ( ! preg_match( '/\A[a-f0-9]{32}\z/', $flow_id ) || ! preg_match( '/\A[a-f0-9]{16}\z/', $claim_token ) ) {
-			return false;
+			return 'unavailable';
 		}
-		return self::active_claim( $flow_id, $claim_token );
+		return self::claim_state( $flow_id, $claim_token );
 	}
 
 	/** Retire a consumed flow without dropping an in-flight delivery barrier. */
@@ -914,14 +955,36 @@ final class OTPQueueStore {
 		if ( $wpdb->last_error || null !== $holder ) {
 			return false;
 		}
-		$acquired = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) );
-		return '1' === (string) $acquired;
+		// Cover the native query's own post-query hooks before a return value or
+		// claim exists, then retain the gate through CAS, decryption and release.
+		++self::$diagnostic_lock_acquisitions;
+		try {
+			$acquired = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) );
+			if ( ! self::database_read_failed() && '1' === (string) $acquired ) {
+				self::$diagnostic_flow_locks[ $flow_id ] = true;
+				return true;
+			}
+			if ( self::database_read_failed() || '0' !== (string) $acquired ) {
+				self::$diagnostic_release_unknown       = true;
+				self::$diagnostic_flow_locks[ $flow_id ] = true;
+			}
+			return false;
+		} catch ( \Throwable $throwable ) {
+			self::$diagnostic_release_unknown       = true;
+			self::$diagnostic_flow_locks[ $flow_id ] = true;
+			throw $throwable;
+		} finally {
+			--self::$diagnostic_lock_acquisitions;
+		}
 	}
 
 	private static function unlock_queued_otp( string $flow_id ): bool {
 		$released = false;
 		try {
 			$released = self::release_named_lock_observed( 'pinova_otp_' . $flow_id, self::$claim_snapshots[ $flow_id ]['connection'] ?? null );
+			if ( $released ) {
+				unset( self::$diagnostic_flow_locks[ $flow_id ] );
+			}
 			return $released;
 		} finally {
 			if ( ! $released ) {

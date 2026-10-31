@@ -369,17 +369,17 @@ final class OTPImmediateDeliveryIntegrationTest extends WP_UnitTestCase {
 	}
 
 	private function dispatch( string $flow ): void {
-		$headroom = new \ReflectionMethod( OTPImmediateDelivery::class, 'has_headroom' );
+		$headroom = new \ReflectionMethod( OTPImmediateDelivery::class, 'headroom_decline_reason' );
 		$headroom->setAccessible( true );
 		$deadline = microtime( true ) + 15;
 		do {
-			$eligible = $headroom->invoke( null );
-			if ( true === $eligible ) {
+			$decline_reason = $headroom->invoke( null );
+			if ( null === $decline_reason ) {
 				break;
 			}
 			usleep( 250000 );
 		} while ( microtime( true ) < $deadline );
-		self::assertTrue( $eligible, 'Isolated immediate delivery tests require actual host headroom; do not bypass the pressure guard.' );
+		self::assertNull( $decline_reason, 'Isolated immediate delivery tests require actual host headroom; do not bypass the pressure guard.' );
 		$method = new \ReflectionMethod( OTPImmediateDelivery::class, 'dispatch' );
 		$method->setAccessible( true );
 		$method->invoke( null, $flow );

@@ -63,7 +63,7 @@ class UserAPI extends RestAPI {
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'identifier' ],
 					],
-					'password' => [
+					'password'   => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'password' ],
 					],
@@ -84,7 +84,7 @@ class UserAPI extends RestAPI {
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'state' ],
 					],
-					'code' => [
+					'code'     => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'code' ],
 					],
@@ -105,7 +105,7 @@ class UserAPI extends RestAPI {
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'state' ],
 					],
-					'code' => [
+					'code'     => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'code' ],
 					],
@@ -121,12 +121,12 @@ class UserAPI extends RestAPI {
 				'callback'            => [ $this, 'forgot_change' ],
 				'permission_callback' => [ $this, 'permission_callback' ],
 				'args'                => [
-					'back_url' => [ 'validate_callback' => [ ValidationService::class, 'scalar' ] ],
-					'jwt'      => [
+					'back_url'   => [ 'validate_callback' => [ ValidationService::class, 'scalar' ] ],
+					'jwt'        => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'state' ],
 					],
-					'reset_key' => [
+					'reset_key'  => [
 						'required'          => true,
 						'validate_callback' => [ ValidationService::class, 'reset_key' ],
 					],
@@ -173,9 +173,9 @@ class UserAPI extends RestAPI {
 		$message = __( 'اگر ادامه با این شناسه مجاز باشد، کد تأیید ارسال می‌شود.', 'pinova' );
 		try {
 			RateLimitService::otp( IP::get(), $identifier->get_value() );
-			$decoy_flow = RateLimitService::decoy_flow( $identifier->get_value(), $forget ? 'forget' : 'authenticate', IP::get(), null, true );
+			$decoy_flow                    = RateLimitService::decoy_flow( $identifier->get_value(), $forget ? 'forget' : 'authenticate', IP::get(), null, true );
 			[ $data['jwt'], $data['ttl'] ] = self::decoy_otp_state( $decoy_flow );
-			$response = self::response( true, $message, $data );
+			$response                      = self::response( true, $message, $data );
 			OTPService::schedule_queued_delivery( $decoy_flow[0] );
 			\Pinova\Services\OTPImmediateDelivery::arm( $decoy_flow[0], $response, $request, $decoy_flow[1] );
 			add_action( 'shutdown', [ OTPService::class, 'spawn_queued_delivery' ], 100 );
@@ -417,7 +417,7 @@ class UserAPI extends RestAPI {
 		$valid_state      = false;
 		try {
 			[ $user_id, $flow_id, $origin ] = UserService::parse_jwt_with_flow( $jwt );
-			$valid_state = true;
+			$valid_state                    = true;
 		} catch ( Exception $e ) {
 			unset( $e );
 		}

@@ -19,7 +19,7 @@ class Email implements ChannelInterface {
 		$site_name = sanitize_text_field( wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES ) );
 		$copy      = self::get_purpose_copy( $purpose, $site_name );
 		$tags      = [
-			'{{logo_url}}' => esc_url(
+			'{{logo_url}}'            => esc_url(
 				(string) Pinova::get_option( 'design.logo', admin_url( 'images/wordpress-logo.svg' ) )
 			),
 			'{{site_url}}'            => esc_url( site_url() ),
@@ -66,8 +66,8 @@ class Email implements ChannelInterface {
 		switch ( $purpose ) {
 			case OTP::TYPE_REGISTER:
 				return [
-					'title' => __( 'کد ثبت‌نام', 'pinova' ),
-					'intro' => sprintf(
+					'title'       => __( 'کد ثبت‌نام', 'pinova' ),
+					'intro'       => sprintf(
 						/* translators: %s: Site name. */
 						__( 'برای تکمیل ثبت‌نام خود در %s، کد یک‌بارمصرف زیر را وارد کنید.', 'pinova' ),
 						$site_name
@@ -81,8 +81,8 @@ class Email implements ChannelInterface {
 				];
 			case OTP::TYPE_FORGET:
 				return [
-					'title' => __( 'کد بازیابی رمز عبور', 'pinova' ),
-					'intro' => sprintf(
+					'title'       => __( 'کد بازیابی رمز عبور', 'pinova' ),
+					'intro'       => sprintf(
 						/* translators: %s: Site name. */
 						__( 'برای بازیابی رمز عبور حساب خود در %s، کد یک‌بارمصرف زیر را وارد کنید.', 'pinova' ),
 						$site_name
@@ -97,8 +97,8 @@ class Email implements ChannelInterface {
 			case OTP::TYPE_LOGIN:
 			default:
 				return [
-					'title' => __( 'کد ورود', 'pinova' ),
-					'intro' => sprintf(
+					'title'       => __( 'کد ورود', 'pinova' ),
+					'intro'       => sprintf(
 						/* translators: %s: Site name. */
 						__( 'برای ورود به حساب کاربری خود در %s، کد یک‌بارمصرف زیر را وارد کنید.', 'pinova' ),
 						$site_name

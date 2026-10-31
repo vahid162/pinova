@@ -84,8 +84,10 @@ class OTPService {
 		}
 		self::$draining_diagnostics = true;
 		try {
-			for ( $flushed = 0; 12 > $flushed && [] !== self::$deferred_diagnostics
-				&& ! OTPQueueStore::has_held_claims() && ! OTPImmediateDelivery::is_active(); ++$flushed ) {
+			for ( $flushed = 0; 12 > $flushed; ++$flushed ) {
+				if ( [] === self::$deferred_diagnostics || OTPQueueStore::has_held_claims() || OTPImmediateDelivery::is_active() ) {
+					break;
+				}
 				$diagnostic = array_shift( self::$deferred_diagnostics );
 				$diagnostic->flush();
 			}
@@ -267,7 +269,15 @@ class OTPService {
 				'expires_at' => null === $state_deadline ? null : Carbon::createFromTimestampUTC( $state_deadline ),
 			]
 		);
-		if ( null !== $queue_claim_token && ( null === $flow_id || ! RateLimitService::queued_otp_is_active( $flow_id, $queue_claim_token ) ) ) {
+
+		$claim_state = null !== $queue_claim_token && null !== $flow_id ? OTPQueueStore::queued_claim_state( $flow_id, $queue_claim_token ) : null;
+		if ( null !== $queue_claim_token && 'unavailable' === $claim_state ) {
+			if ( false === OTPQueueStore::provider_was_attempted( (string) $flow_id, $queue_claim_token ) ) {
+				$otp->delete();
+			}
+			throw new OTPDeliveryDeferredException( 'Queued delivery ownership is unavailable.' );
+		}
+		if ( null !== $queue_claim_token && 'active' !== $claim_state ) {
 			$otp->delete();
 			if ( null !== $flow_id ) {
 				self::observe_delivery_skipped( $flow_id, 'claim_unavailable' );
@@ -361,7 +371,7 @@ class OTPService {
 				'result'         => 'started',
 				'error_code'     => 'none',
 			];
-			$age = time() - ( $queued['deadline'] - JWT::DEFAULT_TTL );
+			$age        = time() - ( $queued['deadline'] - JWT::DEFAULT_TTL );
 			if ( 0 <= $age && JWT::DEFAULT_TTL >= $age ) {
 				$details['request_to_worker_seconds'] = $age;
 				$details['remaining_seconds']         = JWT::DEFAULT_TTL - $age;
@@ -442,7 +452,11 @@ class OTPService {
 				self::observe_delivery_skipped( $flow_id, 'policy_rejected' );
 				return;
 			}
-			if ( ! RateLimitService::queued_otp_is_active( $flow_id, $queued['claim_token'] ) ) {
+			$claim_state = OTPQueueStore::queued_claim_state( $flow_id, $queued['claim_token'] );
+			if ( 'unavailable' === $claim_state ) {
+				throw new OTPDeliveryDeferredException( 'Queued delivery ownership is unavailable.' );
+			}
+			if ( 'active' !== $claim_state ) {
 				$diagnostic_code = 'claim_unavailable';
 				self::observe_delivery_skipped( $flow_id, 'claim_unavailable' );
 				return;
@@ -626,7 +640,7 @@ class OTPService {
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
-		$diagnostic = is_string( $record_flow ) && null !== $otp->expires_at
+		$diagnostic        = is_string( $record_flow ) && null !== $otp->expires_at
 			? self::diagnostic_context( $record_flow, $otp->expires_at->getTimestamp(), OTP::TYPE_VERIFY_MOBILE === $otp->type ? 'verify_mobile' : 'verify_otp' ) : null;
 		$diagnostic_result = 'failed';
 		$diagnostic_code   = 'operation_failed';

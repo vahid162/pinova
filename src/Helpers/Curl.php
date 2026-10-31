@@ -47,7 +47,7 @@ class Curl {
 		try {
 			$response = wp_remote_post( $url, $arguments );
 		} finally {
-			$details = [
+			$details  = [
 				'result'     => is_array( $response ) ? 'completed' : 'unknown',
 				'error_code' => is_array( $response ) ? 'none' : 'provider_outcome_unknown',
 			];
@@ -122,7 +122,7 @@ class Curl {
 			if ( ! is_scalar( $credential ) ) {
 				continue;
 			}
-			$value = trim( (string) $credential );
+			$value    = trim( (string) $credential );
 			$values[] = $value;
 			$values[] = preg_replace( '/^(?:bearer|basic)\s+/i', '', $value ) ?? '';
 		}

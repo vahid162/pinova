@@ -86,7 +86,7 @@ class ChannelService {
 					$exception = $e;
 					$uncertain = true;
 				}
-				$details = [
+				$details  = [
 					'channel'    => $channel,
 					'result'     => null !== $exception ? 'unknown' : ( $success ? 'accepted' : 'rejected' ),
 					'error_code' => null !== $exception ? 'provider_exception' : ( $success ? 'none' : 'provider_returned_false' ),

@@ -217,7 +217,7 @@ final class OTPImmediateDelivery {
 		try {
 			OTPService::deliver_queued( $flow_id );
 		} finally {
-			if ( ! self::$context['admission_observed'] && null !== $diagnostic ) {
+			if ( ! self::admission_was_observed() && null !== $diagnostic ) {
 				$diagnostic->observe(
 					'immediate_admission',
 					[
@@ -245,10 +245,6 @@ final class OTPImmediateDelivery {
 	}
 
 	/** Unknown host pressure retains cron; this does not tune the shared PHP pool. */
-	private static function has_headroom(): bool {
-		return null === self::headroom_decline_reason();
-	}
-
 	private static function headroom_decline_reason(): ?string {
 		if ( 'Linux' !== PHP_OS_FAMILY || ! function_exists( 'sys_getloadavg' ) ) {
 			return 'headroom_unavailable';
@@ -256,7 +252,7 @@ final class OTPImmediateDelivery {
 		$load = sys_getloadavg();
 		// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Bounded local procfs observation; unavailable pressure data silently retains cron.
 		$memory = @file_get_contents( '/proc/meminfo', false, null, 0, 8192 );
-		if ( ! is_array( $load ) || ! isset( $load[0] ) || ! is_numeric( $load[0] ) || ! is_finite( (float) $load[0] ) || 0 > $load[0]
+		if ( ! is_array( $load ) || ! is_finite( (float) $load[0] ) || 0 > $load[0]
 			|| ! is_string( $memory ) || 1 !== preg_match( '/^MemAvailable:\s+(\d+)\s+kB$/m', $memory ) ) {
 			return 'headroom_unavailable';
 		}
@@ -268,8 +264,22 @@ final class OTPImmediateDelivery {
 			&& is_string( $memory ) && 1 === preg_match( '/^MemAvailable:\s+(\d+)\s+kB$/m', $memory, $matches ) && 1048576 <= (int) $matches[1];
 	}
 
+	/**
+	 * Request-local state may change through a nested delivery callback.
+	 *
+	 * @phpstan-impure
+	 */
 	public static function is_active( ?string $flow_id = null ): bool {
 		return null !== self::$context && ( null === $flow_id || self::$context['flow'] === $flow_id );
+	}
+
+	/**
+	 * Admission callbacks mutate this request-local observation.
+	 *
+	 * @phpstan-impure
+	 */
+	private static function admission_was_observed(): bool {
+		return true === ( self::$context['admission_observed'] ?? false );
 	}
 
 	/** Validate supported selected channels before changing durable READY state. */
@@ -310,7 +320,7 @@ final class OTPImmediateDelivery {
 	private static function observe_active_admission( string $reason ): void {
 		if ( null !== self::$context ) {
 			self::$context['admission_observed'] = true;
-			$diagnostic = self::$context['diagnostic'] ?? null;
+			$diagnostic                          = self::$context['diagnostic'] ?? null;
 			if ( $diagnostic instanceof DiagnosticContext ) {
 				$diagnostic->observe(
 					'immediate_admission',

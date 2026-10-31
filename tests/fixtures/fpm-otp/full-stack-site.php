@@ -31,6 +31,9 @@ $logging_observation = static function () use ( $logging_profile ): array {
 		'debug_enabled' => Logger::instance()->is_enabled( 'debug' ),
 		'info_enabled' => Logger::instance()->is_enabled( 'info' ),
 		'warning_enabled' => Logger::instance()->is_enabled( 'warning' ),
+		'diagnostic_mode' => 'diagnostic' !== $logging_profile ? 'off' : ( is_file( PINOVA_DIR . '/src/Logging/DiagnosticContext.php' ) ? 'scoped_queued_otp' : 'legacy_global' ),
+		'scope_matches' => [ 'type' => 'operation', 'value' => 'queued_otp' ] === ( $config['diagnostic_scope'] ?? null ),
+		'budget_initialized' => true === ( $config['diagnostic_budget_initialized'] ?? false ),
 	];
 };
 global $wpdb;
@@ -49,12 +52,21 @@ switch ( $action ) {
 		// Existing acceptance jobs retain their original info profile. Only the
 		// separate baseline workflow opts into normal or existing global debug.
 		$logging = [ 'minimum_level' => '' === $logging_profile ? 'info' : 'warning', 'retention_days' => 14 ];
-		update_option( 'pinova_logging', $logging );
-		if ( 'diagnostic' === $logging_profile ) {
-			// The real settings sanitizer accepts a duration, then stores its
-			// deadline. Persist the base first: add_option can sanitize twice.
-			$logging['diagnostic_until'] = HOUR_IN_SECONDS;
+		$previous_actor = get_current_user_id();
+		$settings_actor = get_user_by( 'login', 'fixture_admin' );
+		if ( ! $settings_actor || ! user_can( $settings_actor, 'manage_options' ) ) { throw new RuntimeException( 'Synthetic settings actor unavailable.' ); }
+		wp_set_current_user( $settings_actor->ID );
+		try {
 			update_option( 'pinova_logging', $logging );
+			if ( 'diagnostic' === $logging_profile ) {
+				// Same duration action in both revisions; candidate additionally
+				// selects the explicit operation through its real authorization.
+				$logging['diagnostic_until'] = HOUR_IN_SECONDS;
+				$logging['diagnostic_scope'] = [ 'type' => 'operation', 'value' => 'queued_otp' ];
+				update_option( 'pinova_logging', $logging );
+			}
+		} finally {
+			wp_set_current_user( $previous_actor );
 		}
 		$logging_proof = '' !== $logging_profile ? $logging_observation() : null;
 		for ( $i = 1; $i <= 80; ++$i ) {
@@ -110,6 +122,7 @@ switch ( $action ) {
 			}
 			$result['logging'] = $logging_observation();
 			$result['log_storage'] = [ 'rows' => (int) $storage['rows_count'], 'context_bytes' => (int) $storage['context_bytes'] ];
+			$result['diagnostic_rows'] = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE event = %s', $wpdb->prefix . 'pinova_logs', 'otp.diagnostic' ) );
 		}
 		break;
 	case 'nonce':

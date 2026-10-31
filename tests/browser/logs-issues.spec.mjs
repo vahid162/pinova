@@ -5,9 +5,6 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
-// Use the full Chromium renderer for WordPress's cross-document admin transitions.
-test.use({ channel: 'chromium' });
-
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const suffix = randomBytes(8).toString('hex');
@@ -148,7 +145,7 @@ delete_option('${fixtureOption}');
 `);
 });
 
-test('Logs and Issues explains evidence, preserves manual reviews, reopens recurrence and downloads redacted JSON', async ({ page }) => {
+test('Logs and Issues explains evidence, preserves manual reviews, reopens recurrence and downloads redacted JSON', async ({ browserName, page }, testInfo) => {
     test.setTimeout(120_000);
     await page.goto(fixture.login, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#user_login')).toHaveValue('');
@@ -232,12 +229,52 @@ echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode($id);
     expect(reopened.observed_count).toBe(failure.observed_count + 1);
     expect((await eventSnapshot()).count).toBe(5);
 
+    const adaptedBodies = [];
+    const adaptAttachment = browserName === 'webkit' && process.platform === 'linux';
+    if (adaptAttachment) {
+        // Playwright's Linux WPE embedder explicitly displays supported MIME
+        // types, ignoring attachment disposition. Verify the genuine response
+        // first, then change only its presentation for the native download API.
+        // This does not establish unmodified Safari download acceptance.
+        testInfo.annotations.push({ type: 'platform-limitation', description:
+            'Linux WebKit attachment MIME adapter; original JSON headers/body are asserted. '
+            + 'https://github.com/microsoft/playwright/blob/v1.64.1/browser_patches/webkit/patches/bootstrap.diff' });
+        await page.route('**/wp-admin/admin-post.php', async route => {
+            const request = route.request();
+            if (request.method() !== 'POST' || new URLSearchParams(request.postData() || '').get('action') !== 'pinova_export_issues') {
+                await route.continue();
+                return;
+            }
+            const original = await route.fetch({ maxRedirects: 0 });
+            const headers = original.headers();
+            expect(original.status()).toBe(200);
+            expect(headers['content-type']).toMatch(/^application\/json(?:;|$)/i);
+            expect(headers['content-disposition']).toBe('attachment; filename="pinova-issues.json"');
+            expect(headers['x-content-type-options']).toBe('nosniff');
+            const body = await original.body();
+            expect(body.byteLength).toBeLessThanOrEqual(2 * 1024 * 1024);
+            expect(adaptedBodies.length).toBeLessThan(2);
+            adaptedBodies.push(body);
+            const forwarded = { ...headers, 'content-type': 'application/octet-stream' };
+            // APIResponse supplies decoded bytes; let fulfillment derive the
+            // matching length and avoid carrying a stale transport encoding.
+            delete forwarded['content-length'];
+            delete forwarded['content-encoding'];
+            delete forwarded['transfer-encoding'];
+            await route.fulfill({ response: original, headers: forwarded, body });
+        });
+    }
+
     const downloaded = page.waitForEvent('download');
     await issues.getByRole('button', { name: 'دریافت گزارش مشکلات برای بررسی', exact: true }).click();
     const download = await downloaded;
     expect(download.suggestedFilename()).toBe('pinova-issues.json');
     expect(await download.failure()).toBeNull();
     const json = await readFile(await download.path(), 'utf8');
+    if (adaptAttachment) {
+        expect(adaptedBodies).toHaveLength(1);
+        expect(Buffer.from(json)).toEqual(adaptedBodies[0]);
+    }
     const exported = JSON.parse(json);
     expect(exported.schema).toBe('pinova.issues.v1');
     expect(exported.selected_range).toEqual(expected.selected_range);
@@ -269,6 +306,10 @@ echo 'PINOVA_LOGS_BROWSER_DATA ' . wp_json_encode(\Pinova\Logging\IssueMonitor::
     const timelineFile = await timelineDownload;
     expect(await timelineFile.failure()).toBeNull();
     const timelineJson = await readFile(await timelineFile.path(), 'utf8');
+    if (adaptAttachment) {
+        expect(adaptedBodies).toHaveLength(2);
+        expect(Buffer.from(timelineJson)).toEqual(adaptedBodies[1]);
+    }
     const timelineExport = JSON.parse(timelineJson);
     expect(timelineExport.mode).toBe('timeline');
     expect(timelineExport.timeline).toEqual(timeline.timeline);

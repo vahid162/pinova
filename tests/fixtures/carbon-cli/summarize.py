@@ -12,13 +12,25 @@ SETTINGS = {'opcache.enable': '1', 'opcache.enable_cli': '1', 'opcache.optimizat
             'opcache.validate_timestamps': '1', 'opcache.file_update_protection': '2', 'opcache.revalidate_freq': '2'}
 
 
+def observed(value, case):
+    fields = {'case', 'ok', 'checks', 'iterations', 'php', 'sapi', 'settings', 'jit_enabled', 'jit_on', 'buffer_size'}
+    checks = {'class_exact', 'instant_expected', 'utc_offset_zero'}
+    return (isinstance(value, dict) and set(value) == fields and value['case'] == case
+            and type(value['ok']) is bool and type(value['iterations']) is int and 0 <= value['iterations'] <= 100000
+            and isinstance(value['php'], str) and re.fullmatch(r'8[.][0-9]{1,2}[.][0-9]{1,3}', value['php']) is not None
+            and value['sapi'] in ('cli', 'cli-server', 'fpm-fcgi')
+            and isinstance(value['checks'], dict) and set(value['checks']) == checks
+            and all(type(item) is bool for item in value['checks'].values())
+            and isinstance(value['settings'], dict) and set(value['settings']) == set(SETTINGS)
+            and all(isinstance(item, str) and re.fullmatch(r'[A-Za-z0-9_.+-]{0,32}', item) is not None for item in value['settings'].values())
+            and type(value['jit_enabled']) is bool and type(value['jit_on']) is bool
+            and type(value['buffer_size']) is int and 0 <= value['buffer_size'] <= 1073741824)
+
+
 def valid(value, case):
-    return (isinstance(value, dict) and set(value) == {'case', 'ok', 'iterations', 'php', 'sapi', 'settings',
-            'jit_enabled', 'jit_on', 'buffer_size'} and value['case'] == case and value['ok'] is True
-            and type(value['iterations']) is int and value['iterations'] == 1000
-            and value['php'] == '8.4.27' and value['sapi'] == 'cli' and value['settings'] == SETTINGS
-            and value['jit_enabled'] is True and value['jit_on'] is True
-            and type(value['buffer_size']) is int
+    return (observed(value, case) and value['ok'] is True and all(value['checks'].values())
+            and value['iterations'] == 1000 and value['php'] == '8.4.27' and value['sapi'] == 'cli'
+            and value['settings'] == SETTINGS and value['jit_enabled'] is True and value['jit_on'] is True
             and 256 * 1024 * 1024 - 4096 <= value['buffer_size'] <= 256 * 1024 * 1024 + 4096)
 
 
@@ -26,7 +38,7 @@ def main():
     source = os.environ.get('GITHUB_SHA', '')
     assert re.fullmatch('[a-f0-9]{40}', source)
     root, target = Path(sys.argv[1]), Path(sys.argv[2])
-    report = {'schema': 'pinova.carbon-cli-diagnostic.v1', 'source': source, 'mode': 'cli_only',
+    report = {'schema': 'pinova.carbon-cli-diagnostic.v2', 'source': source, 'mode': 'cli_only',
               'resource_acceptance': False, 'same_native_stack_verified': False,
               'fpm_acceptance': False, 'cases': []}
     for case in CASES:
@@ -42,6 +54,8 @@ def main():
                         if output.stat().st_size > 16384:
                             raise ValueError()
                         value = json.loads(output.read_bytes())
+                        if observed(value, case):
+                            row['observation'] = value
                         if valid(value, case):
                             row.update(state='passed', observation=value)
                             row.pop('reason')

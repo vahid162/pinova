@@ -2,7 +2,7 @@ name: Quality
 
 on:
   push:
-    branches-ignore: ['proof/carbon-cli-diagnostic']
+    branches-ignore: ['proof/carbon-cli-utc-checks']
   pull_request:
   workflow_dispatch:
 

@@ -4,6 +4,7 @@ import { createServer, request } from 'node:http';
 import { chmodSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { createOrdinaryHTTP, proofSerialization, ordinaryRuntimeVersion } from './ordinary-http-worker.mjs';
 import { PHPProcessSampler, inspectProcess } from './php-process-sampler.mjs';
 import { revisionWorkload } from './otp-fpm-revision-workload.mjs';
 import { DIAGNOSTIC_CASES, readDiagnosticEvidence, sanitizeCheckpoint } from './otp-fpm-diagnostic-evidence.mjs';
@@ -63,6 +64,7 @@ const checkpointStarted = performance.now();
 let checkpointFailed = false;
 let lastCheckpoint = null;
 let measuring = false;
+let ordinaryHTTP = null;
 function checkpoint(phaseName, flowIndex = null) {
     const value = sanitizeCheckpoint({ phase: phaseName, flow_index: flowIndex, arm: process.env.PINOVA_FPM_REVISION_ARM,
         at_ms: Date.now(), elapsed_ms: Math.round(performance.now() - checkpointStarted), pid: process.pid });
@@ -98,7 +100,7 @@ const providerMobile = index => mobile(index).replace(/^0/, '+98');
 function sanitizedReceipt(name, value) {
     ensure(['frozen-resource-gates.json', 'full-stack-result.json'].includes(name), 'Unexpected sanitized receipt target.');
     const target = path.join(receiptRoot, name);
-    writeFileSync(target, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
+    writeFileSync(target, JSON.stringify(proofSerialization(name, value), null, 2) + '\n', { mode: 0o600 });
     // The shell's private umask also applies to Node's requested creation mode.
     // Widen only these allowlisted, sanitized receipts, never logs or WP config.
     chmodSync(target, 0o644);
@@ -556,17 +558,29 @@ try {
         ensure(target.origin === base && !target.username && !target.password, 'Setup page escaped the exact fixture origin.');
         return target.href;
     });
-    const ordinary = (index, label) => http(pagePaths[index % 3], {
-        label, category: ['ordinary', 'shop', 'cart'][index % 3], redirects: 3,
-    });
+    const ordinary = async (index, label) => {
+        const requestPhase = phase;
+        const record = diagnostics => {
+            for (const row of diagnostics || []) {
+                httpDiagnostics.push({ phase: requestPhase, ...row });
+                if (httpDiagnostics.length > 24) httpDiagnostics.shift();
+            }
+        };
+        try {
+            const result = await ordinaryHTTP.request({ url: pagePaths[index % 3], label,
+                category: ['ordinary', 'shop', 'cart'][index % 3] });
+            record(result.diagnostics);
+            return result;
+        } catch (error) { record(error.diagnostics); throw error; }
+    };
+    // Readiness is outside warmup and every measured resource window.
+    ordinaryHTTP = await createOrdinaryHTTP({ base, phpMinor: selectedPhp });
     phase = 'warmup';
     checkpoint('ordinary_warmup');
     for (let round = 0; round < 5; round++) {
         const warm = await Promise.all(Array.from({ length: 8 }, (_, index) => ordinary(index, 'warm')));
         ensure(warm.every(response => response.status === 200), 'Representative-profile warm-up page failed.');
-        ensure(warm.every(response => matchesPhp(response.headers['x-pinova-fixture-php'])),
-            'Actual full-stack FPM request is not running the selected native PHP runtime.');
-        receipt.profile.php_fpm = warm[0].headers['x-pinova-fixture-php'];
+        receipt.profile.php_fpm = ordinaryRuntimeVersion(warm, selectedPhp);
     }
     await quiescent();
 
@@ -989,6 +1003,16 @@ try {
     await new Promise(resolve => provider.close(resolve));
     codes.clear();
     mobileCases.clear();
+    if (ordinaryHTTP) {
+        receipt.ordinary_http_worker = await ordinaryHTTP.close();
+        if (!receipt.ordinary_http_worker.complete) {
+            receipt.state = 'failed';
+            receipt.failure ||= 'Ordinary HTTP worker lifecycle or cleanup incomplete.';
+            process.exitCode = 1;
+        }
+    } else {
+        receipt.ordinary_http_worker = { complete: false, lifecycle_failure: 'worker_not_initialized' };
+    }
     if (probeCase) {
         receipt.resource_acceptance = false;
         receipt.diagnostic_checkpoint_failed = checkpointFailed;
@@ -997,5 +1021,7 @@ try {
         receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), last_phase: lastCheckpoint,
             checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
     }
+    receipt.resource_acceptance = false;
+    receipt.runtime_source_commit = '09e9d334ead9b06d0888736fb467915ecb272230';
     sanitizedReceipt('full-stack-result.json', receipt);
 }

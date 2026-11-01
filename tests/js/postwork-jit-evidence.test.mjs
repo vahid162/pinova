@@ -431,13 +431,16 @@ test('retained unknown native facts require primary/startup/source binding and c
         assert.equal(validateActiveFailureEvidence(value, options), true);
         assert.equal(validateActiveProfile(value, options), false);
         for (const mutate of [v => { v.primary_receipt_sha256 = 'a'.repeat(64); }, v => { v.bound_native.master_pid++; },
-            v => { v.bound_native.master_start_ticks++; }, v => { v.bound_native.binary_sha256 = 'a'.repeat(64); },
+            v => { v.bound_native.master_start_ticks++; }, v => { v.bound_native.binary_sha256 = '0'.repeat(64); },
             v => { v.bound_native.contract_sha256 = 'a'.repeat(64); }, v => { v.bound_native.source_sha256 = 'a'.repeat(64); },
             v => { v.bound_native.runtime_identity.application_source = 'f'.repeat(40); },
             v => { v.bound_native.runtime_identity.private = 'SECRET'; }, v => { v.bound_native.ini.private = 'SECRET'; },
             v => { v.bound_native.extensions.pcov_loaded = 'SECRET'; }, v => { v.private = 'SECRET'; },
             v => { v.failure_stage = 'transport'; }, v => { v.resource_acceptance = true; }, v => { v.shipping_fix = true; }]) {
-            const wrong = failureWitness(minor); mutate(wrong); assert.equal(validateActiveFailureEvidence(wrong, options), false);
+            const wrong = failureWitness(minor), before = JSON.stringify(wrong, null, 2) + '\n';
+            mutate(wrong);
+            assert.notEqual(JSON.stringify(wrong, null, 2) + '\n', before, 'Negative binding control did not change its fixture.');
+            assert.equal(validateActiveFailureEvidence(wrong, options), false);
         }
         const falselyUnknown = { ...value, bound_native: boundMode(minor, true) };
         assert.equal(validateActiveFailureEvidence(falselyUnknown, options), false);

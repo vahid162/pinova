@@ -577,8 +577,13 @@ test('checkout modal remains dismissible while an authentication request is pend
     const requestGate = new Promise(resolve => {
         releaseRequest = resolve;
     });
+    let markRequestArrived;
+    const requestArrived = new Promise(resolve => {
+        markRequestArrived = resolve;
+    });
 
     await page.route(authenticateRoute, async route => {
+        markRequestArrived();
         await requestGate;
         try {
             await route.fulfill({
@@ -604,8 +609,15 @@ test('checkout modal remains dismissible while an authentication request is pend
 
     try {
         await opener.click();
-        await page.locator('#pinova-modal-identifier').fill('buyer@example.test');
+        await expect(page.locator('#pinova-modal-authenticate [data-pinova-step-heading]')).toBeFocused();
+        const identifier = page.locator('#pinova-modal-identifier');
+        await identifier.fill('buyer@example.test');
+        await expect(identifier).toHaveValue('buyer@example.test');
+        await expect.poll(() => page.evaluate(() =>
+            document.querySelector('#pinovaLoginModal')._x_dataStack[0].forms.authenticate.inputs.identifier.value,
+        )).toBe('buyer@example.test');
         await page.locator('#pinova-modal-authenticate button[type="submit"]').click();
+        await requestArrived;
 
         await expect(page.locator('#pinovaLoginModal .pinova-auth-layout')).toHaveAttribute('aria-busy', 'true');
         await expect.poll(() => modalMain.evaluate(element => element.inert)).toBe(true);
@@ -696,7 +708,7 @@ test('checkout modal fills the supported mobile viewport without horizontal over
 });
 
 for (const codeLength of [4, 5, 6]) {
-    test(`one ${codeLength}-digit normalized entry produces exactly one OTP request`, async ({ context, page }) => {
+    test(`one ${codeLength}-digit normalized entry produces exactly one OTP request`, async ({ browserName, context, page }) => {
         setCodeLength(codeLength);
         await mockOtpStart(page);
         let otpRequests = 0;
@@ -730,11 +742,21 @@ for (const codeLength of [4, 5, 6]) {
         expect(otpRequests).toBe(0);
         try {
             if (codeLength === 6) {
-                await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+                // WebKit exposes clipboard-read in Playwright, but has no
+                // clipboard-write permission; its native writeText still works.
+                await context.grantPermissions(browserName === 'webkit'
+                    ? ['clipboard-read'] : ['clipboard-read', 'clipboard-write']);
                 await page.evaluate(value => navigator.clipboard.writeText(value), localized);
+                await codeInput.evaluate(element => {
+                    element.dataset.pinovaNativePaste = 'false';
+                    element.addEventListener('paste', event => {
+                        element.dataset.pinovaNativePaste = String(event.isTrusted);
+                    }, { once: true });
+                });
                 await codeInput.focus();
                 await codeInput.selectText();
                 await page.keyboard.press('Control+V');
+                await expect(codeInput).toHaveAttribute('data-pinova-native-paste', 'true');
             } else {
                 await codeInput.fill(localized);
             }

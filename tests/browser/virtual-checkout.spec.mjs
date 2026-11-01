@@ -4,7 +4,6 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
-test.use({ channel: 'chromium' });
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const suffix = randomBytes(8).toString('hex');

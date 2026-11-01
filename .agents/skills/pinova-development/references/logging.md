@@ -140,6 +140,8 @@ Settings audit observes successful WordPress option updates for first-party Pino
 
 Construction and `observe()` perform only bounded in-memory work and pure clock checks. They must not read options, call WordPress, acquire a database connection or invoke a logger. Capture facts during delivery, then call `flush()` only after both the queue claim and any immediate-delivery lease have been released. Apply this boundary to cron/CLI as well as FPM; a cron claim is not protected by the immediate-only final HTTP guard. No diagnostic database operation belongs between a final ownership check and provider HTTP. One context buffers at most twelve observations, drains once and cannot reopen after flushing.
 
+Prepare verification diagnostics from the record's raw original canonical UTC expiry without invoking Eloquent date casts. Bound and validate the stored text before deriving its timestamp, contain preparation failures, and omit unavailable detail. Preserve the existing authentication policy, expiry and consumption decisions independently of this optional observation.
+
 The request-local diagnostic gate starts before native flow-lock acquisition enters `wpdb`, including reentrant callbacks before claim registration. A changed connection ID alone does not prove release. Flush requires positively observed release or a positively observed free/other-owner lock; an unknown, silent or throwing release leaves detail buffered and bounded. Nested delivery restores the previous diagnostic context and provider scope without lending an outer claim to an inner or nonqueued call. Neither a diagnostic latch nor its deferred buffer authorizes sending.
 
 | Stage | Component | Symbolic source reference |

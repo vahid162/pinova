@@ -268,7 +268,7 @@ final class IssueMonitor {
 			$stage              = $event['context']['stage'] ?? '';
 			if ( DiagnosticContext::EVENT === $event['event'] && '' !== $stage ) {
 				$result['observed_stages'][] = $stage;
-				if ( 'provider_completed' === $stage ) {
+				if ( 'provider_completed' === $stage && 'completed' === ( $event['context']['result'] ?? '' ) ) {
 					$result['observed_facts']['transport_completed'] = true;
 				} elseif ( 'channel_completed' === $stage ) {
 					$key = match ( $event['context']['result'] ?? '' ) {

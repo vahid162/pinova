@@ -6,10 +6,14 @@ namespace Pinova\Tests\Integration;
 
 use Pinova\Admin\Issues;
 use Pinova\Admin\Logs;
+use Pinova\Helpers\Curl;
 use Pinova\Install;
 use Pinova\Integrations\IntegrationSettings;
+use Pinova\Logging\DiagnosticContext;
+use Pinova\Logging\EventThrottle;
 use Pinova\Logging\IssueMonitor;
 use Pinova\Logging\LogRepository;
+use Pinova\Services\OTPQueueStore;
 use Pinova\Services\RateLimitService;
 use WP_UnitTestCase;
 
@@ -131,7 +135,7 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 	public function test_exact_flow_timeline_is_redacted_ordered_and_cannot_review_global_issues(): void {
 		global $wpdb;
 		$flow = str_repeat( 'a', 32 );
-		$first = $this->insert_event( 'otp.diagnostic', [ 'stage' => 'provider_completed', 'observed_at' => time() - 5, 'provider_duration_ms' => 53, 'result' => 'accepted', 'password' => 'private-secret' ] );
+		$first = $this->insert_event( 'otp.diagnostic', [ 'stage' => 'provider_completed', 'observed_at' => time() - 5, 'provider_duration_ms' => 53, 'result' => 'completed', 'password' => 'private-secret' ] );
 		$second = $this->insert_event( 'otp.verified' );
 		$unrelated = $this->insert_event();
 		foreach ( [ $first, $second ] as $id ) {
@@ -166,6 +170,84 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertStringContainsString( 'curl.post', $html );
 		self::assertStringNotContainsString( 'pinova_review_issue', $html );
 		self::assertStringNotContainsString( 'private-secret', $html );
+	}
+
+	/** @dataProvider http_outcomes */
+	public function test_real_http_observations_preserve_unknown_results_in_the_timeline( string $outcome, bool $completed ): void {
+		update_option( 'pinova_logging', [ 'minimum_level' => 'warning', 'diagnostic_until' => 900, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ] );
+		self::assertTrue( EventThrottle::initialize_diagnostics() );
+		$identifier = 'timeline-http-' . $outcome . '@example.test';
+		[ $flow, $deadline ] = RateLimitService::decoy_flow( $identifier, 'authenticate', '192.0.2.240', null, true );
+		$claim = null;
+		$previous_scope = OTPQueueStore::provider_scope();
+		$http_calls = 0;
+		$intercept = static function ( $preempt, array $arguments, string $url ) use ( $outcome, &$http_calls ) {
+			++$http_calls;
+			self::assertSame( 'https://provider.example.test/send', $url );
+			if ( 'wp_error' === $outcome ) {
+				return new \WP_Error( 'http_request_failed', 'private-http-secret' );
+			}
+			if ( 'throw' === $outcome ) {
+				throw new \RuntimeException( 'private-http-secret' );
+			}
+			return [ 'headers' => [], 'body' => '{"private-http-secret":false}', 'response' => [ 'code' => 'http_error' === $outcome ? 503 : 200 ] ];
+		};
+		try {
+			self::assertTrue( RateLimitService::acknowledge_queued_otp( $flow ) );
+			$claim = RateLimitService::claim_queued_otp( $flow );
+			self::assertIsArray( $claim );
+			self::assertSame( $deadline, $claim['deadline'] );
+			$diagnostic = new DiagnosticContext( $flow, $claim['deadline'] );
+			OTPQueueStore::attach_diagnostic( $flow, $claim['claim_token'], $diagnostic );
+			OTPQueueStore::set_provider_scope( [ 'flow' => $flow, 'token' => $claim['claim_token'] ] );
+			add_filter( 'pre_http_request', $intercept, 10, 3 );
+			$threw = false;
+			try {
+				Curl::post( 'https://provider.example.test/send', [ 'synthetic' => true ] );
+			} catch ( \Exception $exception ) {
+				unset( $exception );
+				$threw = true;
+			} finally {
+				remove_filter( 'pre_http_request', $intercept );
+				OTPQueueStore::set_provider_scope( $previous_scope );
+				self::assertTrue( RateLimitService::finish_queued_otp( $flow, $claim['claim_token'] ) );
+				$claim = null;
+			}
+			self::assertSame( ! $completed, $threw );
+			self::assertSame( 1, $http_calls, 'Every transport call must be intercepted, never sent or retried.' );
+			$diagnostic->flush();
+			$report = IssueMonitor::report( [ 'flow_id' => $flow ] );
+			$transports = array_values( array_filter( $report['timeline']['events'], static fn( array $event ): bool => 'provider_completed' === ( $event['context']['stage'] ?? '' ) ) );
+			self::assertCount( 1, $transports, 'The finally observation must survive errors and throwing transports.' );
+			self::assertSame( $completed ? 'completed' : 'unknown', $transports[0]['context']['result'] );
+			self::assertSame( 'curl.post', $transports[0]['context']['source_ref'] );
+			self::assertSame( $completed, $report['timeline']['observed_facts']['transport_completed'] );
+			self::assertFalse( $report['timeline']['observed_facts']['channel_accepted'] );
+			self::assertFalse( $report['timeline']['observed_facts']['otp_verified'] );
+			self::assertFalse( $report['timeline']['observed_facts']['session_created'] );
+			self::assertSame( 'not_verified', $report['timeline']['physical_delivery'] );
+			self::assertStringNotContainsString( 'private-http-secret', wp_json_encode( $report ) );
+			$this->post( 'pinova_export_issues', [ 'flow_id' => $flow ] );
+			$export = json_decode( $this->invoke( 'export_response', false ), true );
+			self::assertSame( $report['timeline'], $export['timeline'] );
+		} finally {
+			remove_filter( 'pre_http_request', $intercept );
+			OTPQueueStore::set_provider_scope( $previous_scope );
+			if ( is_array( $claim ) ) {
+				RateLimitService::finish_queued_otp( $flow, $claim['claim_token'] );
+			}
+			RateLimitService::retire_queued_otp( $flow );
+			RateLimitService::delete_queued_for_identifiers( [ $identifier ] );
+		}
+	}
+
+	public static function http_outcomes(): array {
+		return [
+			'HTTP success response' => [ 'success', true ],
+			'HTTP error response' => [ 'http_error', true ],
+			'WordPress transport error' => [ 'wp_error', false ],
+			'throwing transport' => [ 'throw', false ],
+		];
 	}
 
 	public function test_correlation_expands_only_a_sole_valid_flow_and_keeps_request_only_rows(): void {

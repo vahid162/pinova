@@ -89,7 +89,7 @@ echo $custom_styles;
 
 					<div pinova-bind:inert="pageLoaderIsActive">
 					<!-- static -->
-					<div class="relative mb-8">
+					<div class="relative h-6 mb-8">
 						<div class="h-full absolute top-0 right-0 flex items-center py-4">
 							<button type="button" aria-label="بازگشت به مرحله قبل"
 								pinova-cloak

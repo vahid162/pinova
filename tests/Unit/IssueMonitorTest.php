@@ -212,7 +212,7 @@ final class IssueMonitorTest extends TestCase {
 
 	public function test_timeline_separates_transport_acceptance_verification_and_session_observations(): void {
 		$now = time();
-		$transport = $this->row( 2, 'otp.diagnostic', [ 'stage' => 'provider_completed', 'observed_at' => $now - 5, 'result' => 'accepted', 'provider_duration_ms' => 53, 'password' => 'private-password' ] );
+		$transport = $this->row( 2, 'otp.diagnostic', [ 'stage' => 'provider_completed', 'observed_at' => $now - 5, 'result' => 'completed', 'provider_duration_ms' => 53, 'password' => 'private-password' ] );
 		$started = $this->row( 1, 'otp.diagnostic', [ 'stage' => 'provider_started', 'observed_at' => $now - 6 ] );
 		$verified = $this->row( 3, 'otp.verified' );
 		$timeline = IssueMonitor::timeline( [ $verified, $transport, $started ] );
@@ -237,6 +237,30 @@ final class IssueMonitorTest extends TestCase {
 		self::assertTrue( $timeline['observed_facts']['session_created'] );
 		self::assertFalse( $timeline['observed_facts']['otp_verified'] );
 		self::assertSame( 'not_verified', $timeline['physical_delivery'] );
+	}
+
+	/** @dataProvider transport_observations */
+	public function test_timeline_requires_a_completed_http_result_for_its_transport_fact( array $details, bool $completed ): void {
+		$row = $this->row( 1, 'otp.diagnostic', array_merge( [ 'stage' => 'provider_completed', 'observed_at' => time() ], $details ) );
+		$timeline = IssueMonitor::timeline( [ $row ] );
+		self::assertSame( $completed, $timeline['observed_facts']['transport_completed'] );
+		self::assertContains( 'provider_completed', $timeline['observed_stages'], 'Retain the observed call ending even when its HTTP result is unknown.' );
+		self::assertCount( 1, $timeline['events'] );
+		self::assertFalse( $timeline['observed_facts']['channel_accepted'] );
+		self::assertFalse( $timeline['observed_facts']['otp_verified'] );
+		self::assertFalse( $timeline['observed_facts']['session_created'] );
+		self::assertSame( 'not_verified', $timeline['physical_delivery'] );
+		self::assertStringNotContainsString( 'private-result', json_encode( $timeline ) );
+	}
+
+	public static function transport_observations(): array {
+		return [
+			'returned HTTP error response' => [ [ 'result' => 'completed', 'http_status' => 503 ], true ],
+			'unknown HTTP outcome' => [ [ 'result' => 'unknown', 'error_code' => 'provider_outcome_unknown' ], false ],
+			'missing historical result' => [ [], false ],
+			'adapter acceptance is a separate fact' => [ [ 'result' => 'accepted' ], false ],
+			'untrusted historical result' => [ [ 'result' => 'private-result' ], false ],
+		];
 	}
 
 	public function test_timeline_is_bounded_and_does_not_fabricate_legacy_stages(): void {

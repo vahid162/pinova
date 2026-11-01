@@ -5,6 +5,7 @@ namespace Pinova\Admin;
 use Pinova\Integrations\IntegrationSettings;
 use Pinova\Integrations\Woocommerce\VirtualCheckout;
 use Pinova\Integrations\Wordpress\NativeLoginGate;
+use Pinova\Logging\DiagnosticContext;
 use Pinova\Logging\EventThrottle;
 use Pinova\Services\SMSService;
 use Pinova\Services\UserService;
@@ -650,7 +651,7 @@ class Settings extends \Nabik\Utils\V1\Settings {
 		if ( ! is_array( $scope ) || 2 !== count( $scope ) || ! is_string( $scope['value'] ?? null ) ) {
 			return [];
 		}
-		if ( 'operation' === ( $scope['type'] ?? '' ) && in_array( $scope['value'], [ 'queued_otp', 'verify_otp', 'verify_mobile' ], true ) ) {
+		if ( 'operation' === ( $scope['type'] ?? '' ) && in_array( $scope['value'], DiagnosticContext::OPERATIONS, true ) ) {
 			return [
 				'type'  => 'operation',
 				'value' => $scope['value'],

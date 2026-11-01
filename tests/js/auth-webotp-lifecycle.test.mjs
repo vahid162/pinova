@@ -27,7 +27,7 @@ function windowEvents() {
     };
 }
 
-function harness(kind, respond = () => ({ success: true, data: { login_method: 'otp', jwt: 'new-flow', ttl: 180 } }), events = windowEvents()) {
+function harness(kind, respond = () => ({ success: true, data: { login_method: 'otp', jwt: 'new-flow', ttl: 180 } }), events = windowEvents(), sidebar = null) {
     let factory;
     const listeners = events.listeners;
     const credentials = [];
@@ -38,6 +38,8 @@ function harness(kind, respond = () => ({ success: true, data: { login_method: '
     const history = { state: null, pushState(state) { this.state = state; }, replaceState(state) { this.state = state; }, back() {} };
     const window = { addEventListener: events.addEventListener, removeEventListener: events.removeEventListener, history,
         location: { origin: 'https://example.test', href: 'https://example.test/login/' }, parent: { document }, OTPCredential: function () {} };
+    if (sidebar) Object.assign(window, { jQuery: sidebar.jQuery, innerWidth: 1024, innerHeight: 768,
+        getComputedStyle: () => ({ visibility: sidebar.visible ? 'visible' : 'hidden' }) });
     const context = vm.createContext({
         AbortController, URL, document, history, window, location: window.location,
         navigator: { credentials: { get(options) { return new Promise(resolve => credentials.push({ options, resolve })); } } },
@@ -52,6 +54,11 @@ function harness(kind, respond = () => ({ success: true, data: { login_method: '
     const state = factory();
     state.$nextTick = callback => callback();
     state.$root = {isConnected: true, querySelector: () => focus};
+    if (sidebar) Object.assign(state.$root, {
+        hasAttribute: name => name === 'data-pinova-theme-partial',
+        closest: selector => selector === '.login-form-side' ? sidebar.owner : null,
+        getClientRects: () => sidebar.visible ? [{ width: 320, height: 400, top: 0, left: 0, bottom: 400, right: 320 }] : [],
+    });
     state.modalIsOpen = kind === 'modal' ? true : undefined;
     state.submit = () => submissions.push({ step: state.stepName, jwt: state.forms[state.stepName].inputs.jwt?.value });
     state.forms.authenticate.inputs.identifier.value = 'buyer@example.test';
@@ -59,6 +66,109 @@ function harness(kind, respond = () => ({ success: true, data: { login_method: '
     return { state, listeners, credentials, submissions, calls };
 }
 const settled = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+
+function sidebarEvents() {
+    const owner = {};
+    let handlers = [];
+    const target = {
+        on(name, callback) { handlers.push({ name, callback }); return this; },
+        off(name, callback) {
+            const [event, namespace] = name.split('.');
+            handlers = handlers.filter(handler => {
+                const [boundEvent, boundNamespace] = handler.name.split('.');
+                return boundEvent !== event || (namespace && namespace !== boundNamespace)
+                    || (callback && callback !== handler.callback);
+            });
+            return this;
+        },
+        trigger(event) {
+            for (const handler of [...handlers]) {
+                if (handler.name.split('.')[0] === event) handler.callback.call(owner);
+            }
+        },
+        count: () => handlers.length,
+    };
+    return { owner, target, visible: true,
+        jQuery(element) { assert.equal(element, owner); return target; } };
+}
+
+test('sidebar: native close aborts pending REST and preserves the reopened flow after its late response', async () => {
+    const sidebar = sidebarEvents();
+    let resolveOld;
+    let requests = 0;
+    const h = harness('form', () => ++requests === 1 ? new Promise(resolve => { resolveOld = resolve; })
+        : { success: true, data: { login_method: 'otp', jwt: 'reopened-flow', ttl: 180 } }, undefined, sidebar);
+    const pending = h.state.authenticate();
+    assert.equal(h.calls[0][1].signal.aborted, false);
+    sidebar.visible = false;
+    sidebar.target.trigger('wdCloseSide');
+    sidebar.visible = true;
+    assert.equal(h.calls[0][1].signal.aborted, true, 'native sidebar close must abort its pending REST request');
+    await h.state.authenticate();
+    assert.equal(h.state.forms.loginByOtp.inputs.jwt.value, 'reopened-flow');
+    resolveOld({ success: true, data: { login_method: 'otp', jwt: 'obsolete-flow', ttl: 180 } });
+    await pending;
+    assert.equal(h.state.forms.loginByOtp.inputs.jwt.value, 'reopened-flow');
+    assert.equal(h.credentials.length, 1, 'late REST success must not create another credential wait');
+    assert.equal(h.state.forms.loginByOtp.inputs.code.value, '');
+    assert.equal(h.submissions.length, 0);
+});
+
+test('sidebar: native rapid close/reopen invalidates an accepted credential before another flow starts', async () => {
+    const sidebar = sidebarEvents();
+    const h = harness('form', undefined, undefined, sidebar);
+    await h.state.authenticate();
+    const earlier = h.credentials[0];
+    sidebar.visible = false;
+    sidebar.target.trigger('wdCloseSide');
+    sidebar.visible = true;
+    assert.equal(earlier.options.signal.aborted, true, 'native sidebar close must abort the accepted credential wait');
+    earlier.resolve({ code: '1111' });
+    await settled();
+    assert.equal(h.state.forms.loginByOtp.inputs.code.value, '');
+    assert.equal(h.submissions.length, 0, 'a reopened visible sidebar must not revive the previous wait');
+    await h.state.authenticate();
+    h.credentials[1].resolve({ code: '2222' });
+    await settled();
+    assert.equal(h.state.forms.loginByOtp.inputs.code.value, '2222');
+    assert.equal(h.submissions.length, 1);
+});
+
+test('sidebar: destroy and reinitialize remove only the owning mount native close handler', async () => {
+    const sidebar = sidebarEvents();
+    const events = windowEvents();
+    const unrelated = { sameNamespace: 0, otherNamespace: 0 };
+    sidebar.target.on('wdCloseSide.pinovaAuth', () => { ++unrelated.sameNamespace; });
+    sidebar.target.on('wdCloseSide.otherFeature', () => { ++unrelated.otherNamespace; });
+    const removed = harness('form', undefined, events, sidebar);
+    const live = harness('form', undefined, events, sidebar);
+    await removed.state.authenticate();
+    await live.state.authenticate();
+    assert.equal(sidebar.target.count(), 4);
+    removed.state.authRoot.isConnected = false;
+    removed.state.destroy();
+    removed.state.destroy();
+    assert.equal(sidebar.target.count(), 3, 'destroy must preserve the other mount and unrelated close handlers');
+    const destroyedSequence = removed.state.webOtpSequence;
+    sidebar.target.trigger('wdCloseSide');
+    assert.equal(removed.state.webOtpSequence, destroyedSequence, 'native close must leave the destroyed mount inert');
+    assert.equal(live.credentials[0].options.signal.aborted, true, 'the other mount must still receive native close');
+    assert.deepEqual(unrelated, { sameNamespace: 1, otherNamespace: 1 });
+
+    removed.state.authRoot.isConnected = true;
+    removed.state.init();
+    removed.state.init();
+    assert.equal(sidebar.target.count(), 4, 'reinitialization must replace, rather than accumulate, the owned close handler');
+    await removed.state.authenticate();
+    await live.state.authenticate();
+    sidebar.target.trigger('wdCloseSide');
+    assert.equal(removed.credentials[1].options.signal.aborted, true);
+    assert.equal(live.credentials[1].options.signal.aborted, true);
+    assert.deepEqual(unrelated, { sameNamespace: 2, otherNamespace: 2 });
+    removed.state.destroy();
+    live.state.destroy();
+    assert.equal(sidebar.target.count(), 2);
+});
 
 for (const kind of ['form', 'modal']) {
     test(`${kind}: destroying a detached controller releases only its own window listeners`, async () => {

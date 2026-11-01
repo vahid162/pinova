@@ -1,0 +1,16 @@
+{
+  "schema": "pinova.revision-campaign.v1",
+  "baseline_source": "96386b9fdd803086e9ecfe2af421034976dc185d",
+  "order": ["a1", "b1", "b2", "a2", "a3", "b3"],
+  "pairs": [["a1", "b1"], ["a2", "b2"], ["a3", "b3"]],
+  "php": ["8.3", "8.4"],
+  "logging_profiles": ["normal", "diagnostic"],
+  "ordinary_responses_per_arm": 100,
+  "completed_stub_flows_per_arm": 10,
+  "runner_opportunities_per_arm": 10,
+  "maximum_median_cpu_pss_ratio": 1.10,
+  "p95_ratio": 1.10,
+  "p95_allowance_ms": 20,
+  "maximum_baseline_spread": 1.10,
+  "maximum_individual_pair_ratio": 1.20
+}

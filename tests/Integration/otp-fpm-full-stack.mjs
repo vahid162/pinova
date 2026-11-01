@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { PHPProcessSampler, inspectProcess } from './php-process-sampler.mjs';
 import { revisionWorkload } from './otp-fpm-revision-workload.mjs';
+import { captureStartupLaunch, preserveOutcomeAndObserve, readPostworkJit } from './postwork-jit-evidence.mjs';
 import { DIAGNOSTIC_CASES, readDiagnosticEvidence, sanitizeCheckpoint } from './otp-fpm-diagnostic-evidence.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -56,7 +57,11 @@ const selectedPhp = process.env.PINOVA_FPM_PHP_VERSION || '8.3';
 ensure(['8.3', '8.4'].includes(selectedPhp), 'Unexpected selected native PHP runtime.');
 const matchesPhp = value => new RegExp(`^${selectedPhp.replace('.', '\\.')}\\.[0-9]+$`).test(value || '');
 const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
-const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
+const startupProof = process.env.PINOVA_FPM_STARTUP_JIT_PROOF === '1';
+const probeCase = startupProof ? { id: 'startup-jit', php: '8.4', logging: 'diagnostic', arm: process.env.PINOVA_FPM_REVISION_ARM }
+    : DIAGNOSTIC_CASES.find(item => item.id === probeId);
+ensure(!startupProof || (probeId === 'startup-jit' && process.env.GITHUB_REF === 'refs/heads/proof/diagnostics-startup-jit'),
+    'Wrong startup JIT proof identity.');
 ensure(!probeId || (probeCase && probeCase.php === selectedPhp && probeCase.logging === process.env.PINOVA_FPM_LOGGING_PROFILE &&
     probeCase.arm === process.env.PINOVA_FPM_REVISION_ARM), 'Invalid focused diagnostic case.');
 const checkpointStarted = performance.now();
@@ -70,7 +75,7 @@ function checkpoint(phaseName, flowIndex = null) {
     // Ordinary campaigns update memory during measurement. Sparse preceding
     // checkpoints survive an outer timeout without measured-window file I/O.
     if (measuring) return;
-    if (!probeCase && !(process.env.PINOVA_FPM_REVISION_ARM &&
+    if ((!probeCase || startupProof) && !(process.env.PINOVA_FPM_REVISION_ARM &&
         ['controller_start', 'readiness', 'ordinary_warmup', 'headroom_wait', 'revision_warmup',
             'revision_measurement', 'revision_postmeasurement'].includes(phaseName))) return;
     try {
@@ -96,7 +101,7 @@ const mobile = index => `0910000${String(index).padStart(4, '0')}`;
 const providerMobile = index => mobile(index).replace(/^0/, '+98');
 
 function sanitizedReceipt(name, value) {
-    ensure(['frozen-resource-gates.json', 'full-stack-result.json'].includes(name), 'Unexpected sanitized receipt target.');
+    ensure(['frozen-resource-gates.json', 'full-stack-result.json', 'postwork-jit-mode.json'].includes(name), 'Unexpected sanitized receipt target.');
     const target = path.join(receiptRoot, name);
     writeFileSync(target, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
     // The shell's private umask also applies to Node's requested creation mode.
@@ -532,6 +537,8 @@ let receipt = {
     tests,
 };
 try {
+    if (startupProof) receipt.startup_jit_launch = captureStartupLaunch({ root, master, tick,
+        binary: process.env.PINOVA_FPM_BIN, mode: process.env.PINOVA_FPM_STARTUP_JIT_MODE });
     phase = 'readiness';
     checkpoint('readiness');
     await new Promise(resolve => provider.listen(providerPort, '127.0.0.1', resolve));
@@ -997,5 +1004,7 @@ try {
         receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), last_phase: lastCheckpoint,
             checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
     }
-    sanitizedReceipt('full-stack-result.json', receipt);
+    if (startupProof) await preserveOutcomeAndObserve(receipt, sanitizedReceipt, signal => readPostworkJit({
+        root, master, tick, expectedMode: process.env.PINOVA_FPM_STARTUP_JIT_MODE, signal }));
+    else sanitizedReceipt('full-stack-result.json', receipt);
 }

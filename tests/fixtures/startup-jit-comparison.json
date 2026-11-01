@@ -1,0 +1,109 @@
+{
+  "schema": "pinova.cold-start-jit-comparison.v1",
+  "resource_acceptance": false,
+  "shipping_fix": false,
+  "application_source": "09e9d334ead9b06d0888736fb467915ecb272230",
+  "application_tree": "09ca0560d8febcc0d1ba6688244903ee1e0459e3",
+  "baseline_source": "09e9d334ead9b06d0888736fb467915ecb272230",
+  "application_pins": {
+    "src/Services/OTPService.php": "0269aa90e2acbe7bf25f5a72c22126407c4286e0e80569a9dd777eb4e607495c",
+    "src/Logging/DiagnosticContext.php": "27a17162f9fafc1d10d145d76d4fb2ea743482c3a7d536339a81f768ee33c931",
+    "src/Logging/Logger.php": "bdd3b5542205281fa8af34293480a980e87350a0053d6fb0348bdaa4d97ee4a2",
+    "src/Logging/SafeContext.php": "4beee4f715880518c1760bd9150948782dcd22ff2463409b7424ab36dede5014"
+  },
+  "order": [
+    "a1",
+    "b1",
+    "b2",
+    "a2",
+    "a3",
+    "b3"
+  ],
+  "variants": {
+    "a1": "A",
+    "b1": "B",
+    "b2": "B",
+    "a2": "A",
+    "a3": "A",
+    "b3": "B"
+  },
+  "startup_modes": {
+    "A": "1235",
+    "B": "disable"
+  },
+  "common_jit_buffer_bytes": 268435456,
+  "common_launch_flags": [
+    "-d",
+    "opcache.jit_buffer_size=256M"
+  ],
+  "php": [
+    "8.4"
+  ],
+  "logging_profiles": [
+    "diagnostic"
+  ],
+  "workload": "original_complete_revision_warmup_only",
+  "expected_completed": {
+    "warm_flows_completed": 10,
+    "runner_opportunities": 10,
+    "verification_workers": 10,
+    "provider_attempts_observed": 10
+  },
+  "retries": 0,
+  "only_AB_difference": "cold_master_startup_opcache.jit_value",
+  "all_application_logging_retained": true,
+  "native_CLI_unchanged": true,
+  "retained_marker_limit": 256,
+  "mode_observation_timeout_ms": 3000,
+  "mode_collection_boundary": "after_primary_receipt_before_fpm_teardown",
+  "expected_JSON_receipts": 13,
+  "unchanged_harness_sha256": {
+    "tests/Integration/otp-fpm-revision-workload.mjs": "d5f9055bac63befeb347105db7e075f05ff539b2ef555603e5beda7a19a15bd8",
+    "tests/fixtures/fpm-otp/full-stack-mu.php": "46b73f19b3c3ce6709990a05814f5de4e5e233d6a60f97c978df5b231b4bf1cb",
+    "tests/fixtures/fpm-otp/full-stack-site.php": "300a6b0443c33c0a4d5122dabc9617307b1498229feec6e2f392ca64dd6cb34e",
+    "tests/fixtures/diagnostics-campaign.json": "c585e1647f38c9c6d5acabd8625683ccb9333e296078459fc565ed336bd29ed9"
+  },
+  "baseline_shell_sha256": "fb4d6fd08acf2152a4ff882bf8f30e920d2c209bb0aa23ea9253acfa07780daf",
+  "proof_shell_sha256": "ae3872380a3d70678e39c573a78acd9d2b8d8e0898b72bc14d1b6f308cb50651",
+  "mode_helper_sha256": "ee74d96c5b8f86f68d3696ac62d9a8fe5db639db9f25c95911d8aa2b97c6937f",
+  "mode_endpoint_sha256": "7d831b50747bf65ec32a8325e00e19485ac59d013d69cfcb6e6405ae1d61e648",
+  "mode_limit": "post_failure_responder_may_be_replacement_not_signaled_worker",
+  "pairs": [
+    [
+      "a1",
+      "b1"
+    ],
+    [
+      "a2",
+      "b2"
+    ],
+    [
+      "a3",
+      "b3"
+    ]
+  ],
+  "declared_startup_argv": {
+    "A": [
+      "FPM",
+      "-d",
+      "opcache.jit=1235",
+      "-d",
+      "opcache.jit_buffer_size=256M",
+      "--allow-to-run-as-root",
+      "-F",
+      "-y",
+      "RUN/fpm.conf"
+    ],
+    "B": [
+      "FPM",
+      "-d",
+      "opcache.jit=disable",
+      "-d",
+      "opcache.jit_buffer_size=256M",
+      "--allow-to-run-as-root",
+      "-F",
+      "-y",
+      "RUN/fpm.conf"
+    ]
+  }
+}

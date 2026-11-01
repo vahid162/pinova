@@ -223,7 +223,16 @@ cleanup_processes() {
 }
 trap cleanup_processes EXIT
 diagnostic_checkpoint native_start
-"${fpm_bin}" --allow-to-run-as-root -F -y "${run_root}/fpm.conf" > "${run_root}/private/fpm-start.log" 2>&1 &
+fpm_launch=("${fpm_bin}" --allow-to-run-as-root -F -y "${run_root}/fpm.conf")
+if [[ "${PINOVA_FPM_STARTUP_JIT_PROOF:-}" == 1 ]]; then
+	[[ "${GITHUB_REF:-}" == refs/heads/proof/diagnostics-startup-jit && "${php_version}" == 8.4 \
+		&& "${PINOVA_FPM_LOGGING_PROFILE:-}" == diagnostic \
+		&& "${PINOVA_FPM_STARTUP_JIT_MODE:-}" =~ ^(1235|disable)$ ]]
+	cp "${fixture_root}/startup-jit-mode.php" "${run_root}/startup-jit-mode.php"
+	fpm_launch=("${fpm_bin}" -d "opcache.jit=${PINOVA_FPM_STARTUP_JIT_MODE}" -d opcache.jit_buffer_size=256M \
+		--allow-to-run-as-root -F -y "${run_root}/fpm.conf")
+fi
+"${fpm_launch[@]}" > "${run_root}/private/fpm-start.log" 2>&1 &
 fpm_pid=$!
 export PINOVA_FPM_MASTER_PID="${fpm_pid}"
 "${nginx_bin}" -p "${run_root}" -c "${run_root}/nginx.conf" > "${run_root}/private/nginx-start.log" 2>&1 &

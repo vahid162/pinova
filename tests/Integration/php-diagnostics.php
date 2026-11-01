@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use PinovaFixture\Browser\PHPDiagnostics;
+use Pinova\Tests\fixtures\browser\PHPDiagnostics;
 
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI || ! defined( 'PINOVA_THIRD_PARTY_BASELINE' ) || ! PINOVA_THIRD_PARTY_BASELINE ) {
 	throw new RuntimeException( 'PHP diagnostics require the disposable real-plugin fixture.' );

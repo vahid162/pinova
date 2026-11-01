@@ -91,6 +91,7 @@ SQL
 	[[ -f "${repo_root}/vendor/autoload.php" ]]
 	mkdir -p "${run_root}/wordpress/wp-content/mu-plugins" "${run_root}/wordpress/wp-content/plugins"
 	cp "${fixture_root}/full-stack-mu.php" "${run_root}/wordpress/wp-content/mu-plugins/pinova-fpm-fixture.php"
+	cp "${fixture_root}/jit-mode-facts.php" "${run_root}/wordpress/wp-content/mu-plugins/pinova-jit-mode-facts.php"
 	for plugin in woocommerce wpforo dokan-lite elementor; do
 		[[ ! -e "${run_root}/wordpress/wp-content/plugins/${plugin}" ]]
 		cp -a "${repo_root}/.build/third-party/${plugin}" "${run_root}/wordpress/wp-content/plugins/${plugin}"
@@ -223,7 +224,13 @@ cleanup_processes() {
 }
 trap cleanup_processes EXIT
 diagnostic_checkpoint native_start
-"${fpm_bin}" --allow-to-run-as-root -F -y "${run_root}/fpm.conf" > "${run_root}/private/fpm-start.log" 2>&1 &
+jit_args=()
+if [[ "${PINOVA_FPM_JIT_MODE_COMPARE:-}" == "1" ]]; then
+	[[ "${GITHUB_REF:-}" == "refs/heads/proof/php84-jit-mode-20261101" && "${PINOVA_FPM_JIT_MODE:-}" =~ ^(1235|1255)$ ]]
+	[[ "$(cat "${run_root}/jit-mode-comparison")" == "${PINOVA_FPM_JIT_MODE}" ]]
+	jit_args=(-d "opcache.jit=${PINOVA_FPM_JIT_MODE}")
+fi
+"${fpm_bin}" "${jit_args[@]}" --allow-to-run-as-root -F -y "${run_root}/fpm.conf" > "${run_root}/private/fpm-start.log" 2>&1 &
 fpm_pid=$!
 export PINOVA_FPM_MASTER_PID="${fpm_pid}"
 "${nginx_bin}" -p "${run_root}" -c "${run_root}/nginx.conf" > "${run_root}/private/nginx-start.log" 2>&1 &

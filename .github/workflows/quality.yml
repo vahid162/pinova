@@ -2,6 +2,7 @@ name: Quality
 
 on:
   push:
+    branches-ignore: ['proof/php84-jit-mode-20261101']
   pull_request:
   workflow_dispatch:
 

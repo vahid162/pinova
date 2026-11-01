@@ -25,6 +25,24 @@ namespace {
 	}
 	if ( 'fpm-fcgi' === PHP_SAPI ) {
 		header( 'X-Pinova-Fixture-PHP: ' . PHP_VERSION );
+        if (is_file($fixture_root . '/jit-mode-comparison')) {
+            require_once __DIR__ . '/pinova-jit-mode-facts.php';
+            $mode = trim((string) file_get_contents($fixture_root . '/jit-mode-comparison'));
+            $expected_ini = ['opcache.enable' => '1', 'opcache.enable_cli' => '0', 'opcache.optimization_level' => '0x7FFEBFFF', 'opcache.jit' => '1235', 'opcache.jit_buffer_size' => '256M', 'opcache.protect_memory' => '0', 'opcache.validate_timestamps' => '1', 'opcache.file_update_protection' => '2', 'opcache.revalidate_freq' => '2'];
+            $expected_ini['opcache.jit'] = in_array($mode, ['1235', '1255'], true) ? $mode : 'invalid';
+            $actual_ini = [];
+            foreach ($expected_ini as $key => $literal) $actual_ini[$key] = ini_get($key);
+            $status = function_exists('opcache_get_status') ? opcache_get_status(false) : false;
+            $facts = pinova_fixture_jit_facts($expected_ini, $actual_ini, $status, (bool) PHP_ZTS, (bool) PHP_DEBUG);
+            header('X-Pinova-Fixture-FPM-Settings: ' . json_encode($facts + [
+                'zend_only_opcache' => get_loaded_extensions(true) === ['Zend OPcache'],
+                'stock_ini' => php_ini_loaded_file() === '/etc/php/8.4/fpm/php.ini',
+                'pid' => getmypid(), 'php_version' => PHP_VERSION === '8.4.27' ? PHP_VERSION : null,
+                'sapi' => PHP_SAPI === 'fpm-fcgi' ? PHP_SAPI : null,
+            ], JSON_THROW_ON_ERROR));
+            unset($mode, $expected_ini, $actual_ini, $status, $facts, $key, $literal);
+        }
+
 	}
 
 	/** Only finite test labels, PID and timestamps enter the shared evidence. */

@@ -1,0 +1,77 @@
+{
+  "schema": "pinova.jit-mode-comparison.v1",
+  "resource_acceptance": false,
+  "runtime_source": "a1bb4a8985502e38498bb1df53b719868ced40b8",
+  "baseline_source": "a1bb4a8985502e38498bb1df53b719868ced40b8",
+  "proof_branch": "proof/php84-jit-mode-20261101",
+  "order": [
+    "a1",
+    "b1",
+    "b2",
+    "a2",
+    "a3",
+    "b3"
+  ],
+  "variants": {
+    "a1": "A",
+    "b1": "B",
+    "b2": "B",
+    "a2": "A",
+    "a3": "A",
+    "b3": "B"
+  },
+  "pairs": [
+    [
+      "a1",
+      "b1"
+    ],
+    [
+      "a2",
+      "b2"
+    ],
+    [
+      "a3",
+      "b3"
+    ]
+  ],
+  "php": [
+    "8.4"
+  ],
+  "logging_profiles": [
+    "diagnostic"
+  ],
+  "fpm_ini_expected_literals": {
+    "opcache.enable": "1",
+    "opcache.enable_cli": "0",
+    "opcache.optimization_level": "0x7FFEBFFF",
+    "opcache.jit": "1235",
+    "opcache.jit_buffer_size": "256M",
+    "opcache.protect_memory": "0",
+    "opcache.validate_timestamps": "1",
+    "opcache.file_update_protection": "2",
+    "opcache.revalidate_freq": "2"
+  },
+  "jit_modes": {
+    "A": "1235",
+    "B": "1255"
+  },
+  "php_version": "8.4.27",
+  "package_version": "8.4.27-1+ubuntu24.04.1+deb.sury.org+1",
+  "variant_B_only_change": "FPM command-line opcache.jit literal 1235 to 1255",
+  "workload": "unchanged_complete_revision_warmup_only",
+  "retries": 0,
+  "arm_timeout_ms": 420000,
+  "core_limit": 0,
+  "acceptance_claims": {
+    "resource": false,
+    "production": false,
+    "JIT_fix": false,
+    "same_compiled_path": false
+  },
+  "decision_boundaries": [
+    "tracing_request_correlated_native_failure_is_insufficient_even_if_other_arms_unknown",
+    "mode_association_only_if_all_identities_active_settings_cleanup_known_A_reproduces_and_all3B_complete",
+    "no_A_native_failure_is_inconclusive_control_nonreproduction",
+    "unrelated_assertions_502_without_native_witness_timeouts_or_unknown_identity_are_inconclusive"
+  ]
+}

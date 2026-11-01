@@ -2,7 +2,7 @@ name: Quality
 
 on:
   push:
-    branches-ignore: ['proof/diagnostics-native-crash-compiled-target']
+    branches-ignore: ['proof/diagnostics-expiry-red', 'proof/diagnostics-expiry-green']
   pull_request:
   workflow_dispatch:
 

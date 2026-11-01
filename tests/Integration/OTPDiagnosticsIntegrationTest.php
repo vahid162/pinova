@@ -6,6 +6,8 @@ namespace Pinova\Tests\Integration;
 
 use Pinova\Install;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Support\Facades\Date;
+use Pinova\Exceptions\BlockedException;
 use Pinova\Helpers\JWT;
 use Pinova\Logging\DiagnosticContext;
 use Pinova\Logging\EventThrottle;
@@ -695,6 +697,147 @@ final class OTPDiagnosticsIntegrationTest extends WP_UnitTestCase {
 				}
 			} );
 		} );
+	}
+
+	/** @dataProvider diagnostic_deadline_records */
+	public function test_diagnostic_deadline_reads_cannot_override_an_existing_firewall_denial( mixed $expiry, bool $detail, bool $legacy, string $timezone ): void {
+		global $wpdb;
+		$original = $wpdb;
+		$database = new \wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$database->set_prefix( $original->prefix );
+		$block_id = null;
+		$otp_id = null;
+		$deadline = time() + 120;
+		$stored = gmdate( 'Y-m-d H:i:s', $deadline );
+		$flow = $legacy ? null : bin2hex( random_bytes( 16 ) );
+		$ip = '192.0.2.245';
+		$old_ip = $_SERVER['REMOTE_ADDR'] ?? null;
+		$old_timezone = date_default_timezone_get();
+		try {
+			$wpdb = $database;
+			self::assertSame( 1, $database->insert( $database->prefix . 'pinova_blocks', [ 'identifier' => $ip, 'blocked_by' => null, 'blocked_until' => null ] ) );
+			$block_id = (int) $database->insert_id;
+			self::assertSame( 1, $database->insert( $database->prefix . 'pinova_otp', [
+				'user_id' => null, 'flow_id' => $flow, 'identifier' => 'diagnostic-expiry@example.test',
+				'code' => wp_hash_password( '123456' ), 'ip_address' => $ip, 'attempts' => 0,
+				'type' => OTP::TYPE_LOGIN, 'channels' => '{}', 'expires_at' => $stored, 'verified_at' => null,
+			] ) );
+			$otp_id = (int) $database->insert_id;
+			self::assertSame( $stored, $database->get_var( $database->prepare( 'SELECT expires_at FROM %i WHERE id = %d', $database->prefix . 'pinova_otp', $otp_id ) ) );
+			$raw_expiry = 'canonical' === $expiry ? $stored : ( 'date-object' === $expiry ? new \DateTimeImmutable( $stored, new \DateTimeZone( 'UTC' ) ) : $expiry );
+			$hydrations = 0;
+			$jwt = JWT::encode( [ 'otp_id' => $otp_id, 'flow_id' => $flow ], 120 );
+			$_SERVER['REMOTE_ADDR'] = $ip;
+			date_default_timezone_set( $timezone );
+			$this->with_retrieved_hook( static function ( OTP $record ) use ( $otp_id, $raw_expiry, &$hydrations ): void {
+				if ( $otp_id === (int) $record->id ) {
+					++$hydrations;
+					$attributes = $record->getAttributes();
+					$attributes['expires_at'] = $raw_expiry;
+					$record->setRawAttributes( $attributes, true );
+				}
+			}, function () use ( $database, $jwt, $flow, $deadline, $detail, $otp_id, &$hydrations ): void {
+				$this->with_diagnostics( function () use ( $database, $jwt, $flow, $deadline, $detail, $otp_id, &$hydrations ): void {
+					$casts = 0;
+					$failure = null;
+					Date::useCallable( static function ( $date ) use ( &$casts ): void {
+						unset( $date );
+						++$casts;
+						throw new \RuntimeException( 'Synthetic diagnostic date-cast failure.' );
+					} );
+					try {
+						try {
+							OTPService::verify_with_flow( $jwt, '123456', [ OTP::TYPE_LOGIN ] );
+						} catch ( \Throwable $throwable ) {
+							$failure = $throwable;
+						}
+					} finally {
+						Date::useDefault();
+					}
+					self::assertSame( 1, $hydrations, 'The public verifier must resolve the real stored OTP through native hydration.' );
+					self::assertInstanceOf( BlockedException::class, $failure, 'Diagnostic-only date work must preserve the firewall denial before core expiry is consulted.' );
+					self::assertSame( 'ip', $failure->get_identifier_type() );
+					self::assertSame( 0, $casts, 'Verification diagnostics must not add Eloquent/Carbon date casts before the policy decision.' );
+					$rows = null === $flow
+						? $database->get_results( $database->prepare( 'SELECT context FROM %i WHERE event = %s AND flow_id IS NULL', $database->prefix . 'pinova_logs', DiagnosticContext::EVENT ), ARRAY_A )
+						: $this->diagnostic_rows( $database, $flow );
+					self::assertCount( $detail ? 1 : 0, $rows );
+					if ( $detail ) {
+						self::assertSame( $deadline, $rows[0]['context']['flow_deadline'] );
+						self::assertSame( 'policy_rejected', $rows[0]['context']['error_code'] );
+					}
+					$unchanged = $database->get_row( $database->prepare( 'SELECT attempts, verified_at, expires_at FROM %i WHERE id = %d', $database->prefix . 'pinova_otp', $otp_id ), ARRAY_A );
+					self::assertSame( '0', (string) $unchanged['attempts'] );
+					self::assertNull( $unchanged['verified_at'] );
+					self::assertSame( gmdate( 'Y-m-d H:i:s', $deadline ), $unchanged['expires_at'] );
+					self::assertSame( [], $this->http_calls );
+					self::assertSame( 0, $this->mail_calls );
+				}, 'verify_otp' );
+			} );
+		} finally {
+			Date::useDefault();
+			date_default_timezone_set( $old_timezone );
+			if ( null === $old_ip ) {
+				unset( $_SERVER['REMOTE_ADDR'] );
+			} else {
+				$_SERVER['REMOTE_ADDR'] = $old_ip;
+			}
+			if ( null !== $block_id ) {
+				$database->delete( $database->prefix . 'pinova_blocks', [ 'id' => $block_id ] );
+			}
+			if ( null !== $otp_id ) {
+				$database->delete( $database->prefix . 'pinova_otp', [ 'id' => $otp_id ] );
+			}
+			if ( is_string( $flow ) ) {
+				$database->delete( $database->prefix . 'pinova_logs', [ 'flow_id' => $flow ] );
+			}
+			$wpdb = $original;
+			$database->close();
+		}
+	}
+
+	public static function diagnostic_deadline_records(): array {
+		return [
+			'canonical UTC' => [ 'canonical', true, false, 'UTC' ],
+			'canonical UTC under another PHP timezone' => [ 'canonical', true, false, 'Pacific/Honolulu' ],
+			'missing original deadline' => [ null, false, false, 'UTC' ],
+			'invalid calendar date' => [ '2026-02-30 12:00:00', false, false, 'UTC' ],
+			'noncanonical shape' => [ '2026-1-01 12:00:00', false, false, 'UTC' ],
+			'noncanonical timezone suffix' => [ '2026-01-01 12:00:00 UTC', false, false, 'UTC' ],
+			'date object instead of stored UTC text' => [ 'date-object', false, false, 'UTC' ],
+			'legacy record without flow' => [ 'canonical', false, true, 'UTC' ],
+		];
+	}
+
+	private function with_retrieved_hook( callable $retrieved, callable $operation ): void {
+		$original = OTP::getEventDispatcher();
+		$dispatcher = new class( $original, $retrieved ) implements Dispatcher {
+			public function __construct( private ?Dispatcher $original, private $retrieved ) {}
+			public function listen( $events, $listener = null ) { $this->original?->listen( $events, $listener ); }
+			public function hasListeners( $eventName ) { return $this->original?->hasListeners( $eventName ) ?? false; }
+			public function subscribe( $subscriber ) { $this->original?->subscribe( $subscriber ); }
+			public function until( $event, $payload = [] ) { return $this->dispatch( $event, $payload, true ); }
+			public function dispatch( $event, $payload = [], $halt = false ) {
+				if ( 'eloquent.retrieved: ' . OTP::class === $event && $payload instanceof OTP ) {
+					( $this->retrieved )( $payload );
+				}
+				return $this->original ? $this->original->dispatch( $event, $payload, $halt ) : ( $halt ? null : [] );
+			}
+			public function push( $event, $payload = [] ) { $this->original?->push( $event, $payload ); }
+			public function flush( $event ) { $this->original?->flush( $event ); }
+			public function forget( $event ) { $this->original?->forget( $event ); }
+			public function forgetPushed() { $this->original?->forgetPushed(); }
+		};
+		OTP::setEventDispatcher( $dispatcher );
+		try {
+			$operation();
+		} finally {
+			if ( null === $original ) {
+				OTP::unsetEventDispatcher();
+			} else {
+				OTP::setEventDispatcher( $original );
+			}
+		}
 	}
 
 	public function test_verification_detail_requires_a_matching_signed_record_and_purpose(): void {

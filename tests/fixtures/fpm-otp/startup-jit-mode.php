@@ -67,6 +67,7 @@ if ('creator-prefix-v1' === getenv('PINOVA_FPM_ACTIVE_JIT_PROOF')) {
                 'entry_semantics' => 'absolute_resolved_creator_prefix',
             ],
             // This checks cache membership without loading the file or resolving a class.
+            'extensions' => [ 'xdebug_loaded' => extension_loaded('xdebug'), 'pcov_loaded' => extension_loaded('pcov') ],
             'inventory_sha256' => hash_file('sha256', $inventory),
             'composer_lock_sha256' => hash_file('sha256', $lock),
             'cache' => [ 'creator_cached' => opcache_is_script_cached($creator) ],

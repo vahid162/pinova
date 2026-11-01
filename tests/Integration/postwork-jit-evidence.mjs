@@ -1,6 +1,6 @@
 /** Owned FPM startup identity and post-outcome profile evidence; import performs no I/O. */
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { constants, openSync, closeSync, fstatSync, readSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { inspectProcess } from './php-process-sampler.mjs';
 
@@ -176,6 +176,10 @@ export async function preserveOutcomeAndObserve(receipt, writeReceipt, observe) 
 }
 
 // Supplemental never-merge proof. The native-default functions above remain unchanged.
+
+const activeError = code => { const error = new Error('Active proof observation failed.'); error.proofCode = code; return error; };
+const activeFact = (condition, code) => { if (!condition) throw activeError(code); };
+
 export const ACTIVE_PROOF_SELECTOR = 'creator-prefix-v1';
 export const ACTIVE_PROOF_BRANCH = 'refs/heads/proof/diagnostics-active-jit-acceptance';
 export const ACTIVE_CANDIDATE = '117e434bf65f093ad9d05f15cd180d34b4193ba9';
@@ -185,18 +189,18 @@ const activePatches = { '8.3': '8.3.36', '8.4': '8.4.27' };
 const activeSharedKeys = [...sharedKeys, 'file_cache_empty', 'preload_empty'];
 export function activeProofSelected(env = process.env) {
     if (env.PINOVA_FPM_ACTIVE_JIT_PROOF === undefined || env.PINOVA_FPM_ACTIVE_JIT_PROOF === '') return false;
-    fact(env.PINOVA_FPM_ACTIVE_JIT_PROOF === ACTIVE_PROOF_SELECTOR && env.GITHUB_REF === ACTIVE_PROOF_BRANCH &&
+    activeFact(env.PINOVA_FPM_ACTIVE_JIT_PROOF === ACTIVE_PROOF_SELECTOR && env.GITHUB_REF === ACTIVE_PROOF_BRANCH &&
         env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted' && env.GITHUB_RUN_ATTEMPT === '1' &&
         !env.PINOVA_FPM_PROBE_CASE, 'active_proof_scope');
     return true;
 }
 export function expectedActiveFpmProfile(phpMinor) {
-    fact(Object.hasOwn(activePatches, phpMinor), 'active_profile_unsupported');
+    activeFact(Object.hasOwn(activePatches, phpMinor), 'active_profile_unsupported');
     return { php_minor: phpMinor, php_version: activePatches[phpMinor], mode: '1235', buffer_ini: '256M',
         buffer_bytes: 268435456, file_cache: '', preload: '', blacklist: 'resolved_owned_Creator_prefix' };
 }
 export function validateActiveContract(contract, original) {
-    fact(contract?.schema === 'pinova.active-jit-source-campaign.v1' && contract.proof_selector === ACTIVE_PROOF_SELECTOR &&
+    activeFact(contract?.schema === 'pinova.active-jit-source-campaign.v1' && contract.proof_selector === ACTIVE_PROOF_SELECTOR &&
         contract.proof_branch === ACTIVE_PROOF_BRANCH && contract.candidate_source === ACTIVE_CANDIDATE &&
         contract.candidate_tree === ACTIVE_CANDIDATE_TREE && contract.baseline_tree === ACTIVE_BASELINE_TREE &&
         contract.retries === 0 && contract.shipping_fix === false && contract.full_suite_logging === 'diagnostic' &&
@@ -204,15 +208,15 @@ export function validateActiveContract(contract, original) {
         contract.configuration_incremental_cost_attributed === false, 'active_contract_scope');
     for (const key of Object.keys(original)) {
         if (['schema', 'fpm_runtime_profiles'].includes(key)) continue;
-        fact(JSON.stringify(contract[key]) === JSON.stringify(original[key]), 'active_contract_gate_changed');
+        activeFact(JSON.stringify(contract[key]) === JSON.stringify(original[key]), 'active_contract_gate_changed');
     }
-    for (const minor of ['8.3', '8.4']) fact(JSON.stringify(contract.fpm_runtime_profiles[minor]) ===
+    for (const minor of ['8.3', '8.4']) activeFact(JSON.stringify(contract.fpm_runtime_profiles[minor]) ===
         JSON.stringify(expectedActiveFpmProfile(minor)), 'active_contract_profile_changed');
     return contract;
 }
 const fileHash = (file, limit) => {
-    const info = lstatSync(file); fact(info.isFile() && info.size <= limit, 'mode_file_bound');
-    const bytes = readFileSync(file); fact(bytes.length <= limit, 'mode_file_bound'); return hash(bytes);
+    const info = lstatSync(file); activeFact(info.isFile() && info.size <= limit, 'mode_file_bound');
+    const bytes = readFileSync(file); activeFact(bytes.length <= limit, 'mode_file_bound'); return hash(bytes);
 };
 const activeContractFile = new URL('../fixtures/diagnostics-active-jit-campaign.json', import.meta.url);
 const originalContractFile = new URL('../fixtures/diagnostics-campaign.json', import.meta.url);
@@ -221,10 +225,10 @@ export function readActiveContract() {
 }
 function runtimeIdentity(root) {
     const file = `${root}/runtime-identity.json`;
-    fact(realpathSync(file) === file && lstatSync(file).isFile() && lstatSync(file).size <= 2048, 'runtime_identity_bound');
+    activeFact(realpathSync(file) === file && lstatSync(file).isFile() && lstatSync(file).size <= 2048, 'runtime_identity_bound');
     const value = JSON.parse(readFileSync(file));
     const contract = readActiveContract();
-    fact(value.schema === 'pinova.active-runtime-source.v1' &&
+    activeFact(value.schema === 'pinova.active-runtime-source.v1' &&
         [contract.baseline_source, contract.candidate_source].includes(value.application_source) &&
         value.application_tree === (value.application_source === contract.candidate_source ? contract.candidate_tree : contract.baseline_tree) &&
         /^[a-f0-9]{40}$/.test(value.workflow_source || '') && value.workflow_source === process.env.GITHUB_SHA &&
@@ -246,7 +250,7 @@ export const declaredActiveArgv = () => ['FPM', '-d', 'opcache.jit=1235', '-d', 
 
 /** Only this resolved, run-owned source prefix is permitted; never a glob or runtime input. */
 export function expectedActiveBlacklistContents(root, variant, resolvedCreator) {
-    fact(variant === 'B' && /^\/tmp\/pinova-fpm-full-[0-9]+-[0-9]+$/.test(root) &&
+    activeFact(variant === 'B' && /^\/tmp\/pinova-fpm-full-[0-9]+-[0-9]+$/.test(root) &&
         resolvedCreator === `${root}/${CREATOR_RELATIVE}`, 'blacklist_input_scope');
     return variant === 'B' ? `${resolvedCreator}\n` : '';
 }
@@ -254,10 +258,10 @@ export function expectedActiveBlacklistContents(root, variant, resolvedCreator) 
 function inspectActiveBlacklist(root, variant) {
     const creator = realpathSync(`${root}/${CREATOR_RELATIVE}`), file = `${root}/${BLACKLIST_FILE}`;
     const expected = expectedActiveBlacklistContents(root, variant, creator);
-    fact(realpathSync(file) === file && lstatSync(file).isFile() && lstatSync(file).size <= 1024 &&
+    activeFact(realpathSync(file) === file && lstatSync(file).isFile() && lstatSync(file).size <= 1024 &&
         lstatSync(creator).isFile() && lstatSync(creator).size <= 131072, 'blacklist_file_bound');
     const bytes = readFileSync(file);
-    fact(bytes.equals(Buffer.from(expected)), 'blacklist_contents_mismatch');
+    activeFact(bytes.equals(Buffer.from(expected)), 'blacklist_contents_mismatch');
     return { variant, file_sha256: hash(bytes), file_bytes: bytes.length, configured_path_sha256: hash(file),
         creator_path_sha256: hash(creator), creator_source_sha256: hash(readFileSync(creator)),
         configured_path_matches_owned_file: true, entry_count: variant === 'B' ? 1 : 0,
@@ -265,26 +269,26 @@ function inspectActiveBlacklist(root, variant) {
 }
 
 export function parseActiveJitMode(text, phpMinor) {
-    fact(typeof text === 'string' && Buffer.byteLength(text) <= 4096 && Object.hasOwn(activePatches, phpMinor), 'mode_body_bound');
+    activeFact(typeof text === 'string' && Buffer.byteLength(text) <= 4096 && Object.hasOwn(activePatches, phpMinor), 'mode_body_bound');
     const value = JSON.parse(text);
-    fact(value?.schema === 'pinova.postwork-active-jit.v1' && value.state === 'observed' &&
+    activeFact(value?.schema === 'pinova.postwork-active-jit.v1' && value.state === 'observed' &&
         value.sapi === 'fpm-fcgi' && value.php_version === activePatches[phpMinor] &&
         integer(value.pid) && value.pid > 1 && value.opcache_enabled === true, 'mode_shape');
     const ini = value.ini, jit = value.jit;
-    fact(ini?.mode === '1235' && ini.buffer_bytes === 268435456 && ini.file_cache_empty === true && ini.preload_empty === true &&
+    activeFact(ini?.mode === '1235' && ini.buffer_bytes === 268435456 && ini.file_cache_empty === true && ini.preload_empty === true &&
         typeof ini.enable_cli === 'boolean' && integer(ini.optimization_level, 4294967295) &&
         ['hot_loop', 'hot_func', 'hot_return', 'hot_side_exit'].every(key => integer(ini[key], 65535)), 'mode_ini_shape');
-    fact(typeof jit?.enabled === 'boolean' && typeof jit.on === 'boolean' && integer(jit.kind, 5) &&
+    activeFact(typeof jit?.enabled === 'boolean' && typeof jit.on === 'boolean' && integer(jit.kind, 5) &&
         integer(jit.capacity_bytes, 268435456) && integer(jit.free_bytes, jit.capacity_bytes), 'mode_jit_shape');
-    fact(jit.enabled && jit.on && jit.kind === 3 && jit.capacity_bytes > 0, 'mode_active_mismatch');
+    activeFact(jit.enabled && jit.on && jit.kind === 3 && jit.capacity_bytes > 0, 'mode_active_mismatch');
     const blacklist = value.blacklist;
-    fact(blacklist?.variant === 'B' && blacklist.configured_path_matches_owned_file === true &&
+    activeFact(blacklist?.variant === 'B' && blacklist.configured_path_matches_owned_file === true &&
         blacklist.entry_semantics === 'absolute_resolved_creator_prefix' && blacklist.entry_count === 1 &&
         integer(blacklist.file_bytes, 1024) && blacklist.file_bytes > 0 &&
         ['file_sha256', 'configured_path_sha256', 'creator_path_sha256', 'creator_source_sha256'].every(key => sha256(blacklist[key])),
     'blacklist_shape');
-    fact(value.cache?.creator_cached === false, 'cache_shape');
-    fact(sha256(value.inventory_sha256) && sha256(value.composer_lock_sha256), 'runtime_hash_shape');
+    activeFact(value.cache?.creator_cached === false, 'cache_shape');
+    activeFact(sha256(value.inventory_sha256) && sha256(value.composer_lock_sha256), 'runtime_hash_shape');
     return { inventory_sha256: value.inventory_sha256, composer_lock_sha256: value.composer_lock_sha256, schema: value.schema, state: 'observed', sapi: value.sapi, php_version: value.php_version,
         pid: value.pid, opcache_enabled: true, ini: { mode: ini.mode, ...Object.fromEntries(activeSharedKeys.map(key => [key, ini[key]])) },
         jit: { enabled: jit.enabled, on: jit.on, kind: jit.kind, capacity_bytes: jit.capacity_bytes, free_bytes: jit.free_bytes },
@@ -294,18 +298,18 @@ export function parseActiveJitMode(text, phpMinor) {
 }
 
 export function captureActiveLaunch({ root, master, tick, binary, phpMinor }) {
-    fact(Object.hasOwn(activePatches, phpMinor) && /^\/tmp\/pinova-fpm-full-[0-9]+-[0-9]+$/.test(root), 'startup_scope');
+    activeFact(Object.hasOwn(activePatches, phpMinor) && /^\/tmp\/pinova-fpm-full-[0-9]+-[0-9]+$/.test(root), 'startup_scope');
     const blacklist = inspectActiveBlacklist(root, 'B');
     const before = inspectProcess(master, tick);
     const executable = realpathSync(`/proc/${master}/exe`), configured = realpathSync(binary);
     const command = readFileSync(`/proc/${master}/cmdline`);
-    fact(executable === configured && command.length <= 4096 && command.includes(Buffer.from(`${root}/fpm.conf`)), 'startup_process');
+    activeFact(executable === configured && command.length <= 4096 && command.includes(Buffer.from(`${root}/fpm.conf`)), 'startup_process');
     const binaryHash = fileHash(executable, 64 * 1024 * 1024);
     const concrete = [binary, '-d', 'opcache.jit=1235', '-d', 'opcache.jit_buffer_size=256M',
         '-d', 'opcache.file_cache=', '-d', 'opcache.preload=', '-d', `opcache.blacklist_filename=${root}/${BLACKLIST_FILE}`,
         '--allow-to-run-as-root', '-F', '-y', `${root}/fpm.conf`];
     const after = inspectProcess(master, tick);
-    fact(before.start === after.start, 'startup_identity_changed');
+    activeFact(before.start === after.start, 'startup_identity_changed');
     return { php_minor: phpMinor, runtime_identity: runtimeIdentity(root), contract_sha256: fileHash(activeContractFile, 16384), master_pid: master, master_start_ticks: after.start, binary_sha256: binaryHash,
         proc_cmdline_sha256: hash(command), owned_configuration_in_cmdline: true,
         declared_mode: '1235', configured_buffer_bytes: 268435456, blacklist,
@@ -317,9 +321,13 @@ export function captureActiveLaunch({ root, master, tick, binary, phpMinor }) {
 }
 
 export async function readActiveProofJit({ root, master, tick, phpMinor, startupLaunch, signal }) {
+    let stage = 'endpoint_source', bound = null;
+    const startupWarnings = readActiveStartupWarnings(root);
+    try {
     const script = `${root}/startup-jit-mode.php`;
     const source = new URL('../fixtures/fpm-otp/startup-jit-mode.php', import.meta.url);
-    fact(fileHash(script, 16384) === fileHash(source, 16384), 'mode_source_changed');
+    activeFact(fileHash(script, 16384) === fileHash(source, 16384), 'mode_source_changed');
+    stage = 'transport';
     const request = modeRequest(script);
     const text = await new Promise((resolve, reject) => {
         let bytes = Buffer.alloc(0), settled = false;
@@ -329,35 +337,45 @@ export async function readActiveProofJit({ root, master, tick, phpMinor, startup
             signal.removeEventListener('abort', abort); socket.destroy();
             error ? reject(error) : resolve(value);
         };
-        const abort = () => finish(new Error('mode_observation_aborted'));
+        const abort = () => finish(activeError('mode_observation_aborted'));
         signal.addEventListener('abort', abort, { once: true });
         if (signal.aborted) { abort(); return; }
         socket.once('connect', () => socket.write(request));
         socket.on('data', chunk => {
             try { bytes = Buffer.concat([bytes, chunk]); const body = fastCgiModeBody(bytes); if (body !== null) finish(null, body); }
-            catch { finish(new Error('mode_transport_invalid')); }
+            catch { finish(activeError('mode_transport_invalid')); }
         });
-        socket.once('error', () => finish(new Error('mode_transport_failed')));
-        socket.once('end', () => { if (!settled) finish(new Error('mode_transport_incomplete')); });
+        socket.once('error', () => finish(activeError('mode_transport_failed')));
+        socket.once('end', () => { if (!settled) finish(activeError('mode_transport_incomplete')); });
     });
-    const value = parseActiveJitMode(text, phpMinor);
+    stage = 'body_shape';
+    const value = projectActiveNativeMode(text, phpMinor);
+    stage = 'responder_binding';
     const responder = inspectProcess(value.pid, tick), observedMaster = inspectProcess(master, tick);
     const children = readFileSync(`/proc/${master}/task/${master}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number);
-    fact(children.length <= 64 && children.includes(value.pid) && responder.pool === 'fixture', 'mode_responder_unowned');
+    activeFact(children.length <= 64 && children.includes(value.pid) && responder.pool === 'fixture', 'mode_responder_unowned');
     const binaryHash = fileHash(realpathSync(`/proc/${master}/exe`), 64 * 1024 * 1024);
     const blacklist = inspectActiveBlacklist(root, 'B'), configurationHash = fileHash(`${root}/fpm.conf`, 32768);
-    fact(startupLaunch?.master_pid === master && startupLaunch.master_start_ticks === observedMaster.start &&
+    activeFact(startupLaunch?.master_pid === master && startupLaunch.master_start_ticks === observedMaster.start &&
         startupLaunch.binary_sha256 === binaryHash && startupLaunch.fpm_configuration_sha256 === configurationHash &&
         JSON.stringify(startupLaunch.blacklist) === JSON.stringify(blacklist) &&
         JSON.stringify(value.blacklist) === JSON.stringify(blacklist), 'postwork_binding_changed');
+    stage = 'source_binding';
     const identity = runtimeIdentity(root), contractHash = fileHash(activeContractFile, 16384);
-    fact(JSON.stringify(identity) === JSON.stringify(startupLaunch.runtime_identity) &&
+    activeFact(JSON.stringify(identity) === JSON.stringify(startupLaunch.runtime_identity) &&
         value.inventory_sha256 === identity.inventory_sha256 && value.composer_lock_sha256 === identity.composer_lock_sha256 &&
         contractHash === startupLaunch.contract_sha256, 'postwork_source_binding_changed');
-    return { ...value, runtime_identity: identity, contract_sha256: contractHash, master_pid: master, master_start_ticks: observedMaster.start, binary_sha256: binaryHash,
+    const binding = { runtime_identity: identity, contract_sha256: contractHash, master_pid: master, master_start_ticks: observedMaster.start, binary_sha256: binaryHash,
         fpm_configuration_sha256: configurationHash, responder_start_ticks: responder.start, responder_owned_main_pool: true,
         source_sha256: fileHash(source, 16384), attests_signaled_worker: false,
         limitation: 'post_failure_responder_may_be_replacement_not_signaled_worker' };
+    bound = { ...value, ...binding };
+    stage = 'profile';
+    const accepted = parseActiveJitMode(text, phpMinor);
+    return { ...accepted, ...binding };
+    } catch (error) {
+        return activeFailureEvidence(stage, error?.proofCode, startupWarnings, bound);
+    }
 }
 
 export function validateActiveProfile(value, { phpMinor, primaryReceiptHash, startupLaunch, expectedIdentity, contractHash } = {}) {
@@ -414,13 +432,16 @@ export function activeNativeGate(evidence) {
         limitation: 'bounded_recognized_events_only_unmatched_lines_not_complete_semantic_log_assurance' };
 }
 export async function preserveActiveOutcome(receipt, writeReceipt, observe) {
+    const decorate = value => value.reason === 'mode_observation_timeout' ? {
+        ...value, failure_stage: 'deadline', failure_code: 'mode_observation_timeout', startup_warnings: null, bound_native: null,
+    } : value;
     const writer = (name, value) => writeReceipt(name, name === 'postwork-jit-mode.json' ?
-        { ...value, resource_acceptance: false, shipping_fix: false } : value);
+        { ...decorate(value), resource_acceptance: false, shipping_fix: false } : value);
     const result = await preserveOutcomeAndObserve(receipt, writer, async signal => {
         try { return { ...await observe(signal), resource_acceptance: false, shipping_fix: false }; }
-        catch { return { state: 'unknown', reason: 'mode_observation_failed', resource_acceptance: false, shipping_fix: false }; }
+        catch { return { ...activeFailureEvidence('unclassified', 'unclassified', null, null), resource_acceptance: false, shipping_fix: false }; }
     });
-    return { ...result, resource_acceptance: false, shipping_fix: false };
+    return { ...decorate(result), resource_acceptance: false, shipping_fix: false };
 }
 
 export function validateActiveCleanup(value, { primaryReceiptHash, modeReceiptHash, startupLaunch, runId, attempt } = {}) {
@@ -466,4 +487,173 @@ export function activeLoggingGate(value, { applicationSource, loggingProfile } =
     return { state: common && matches ? 'passed' : 'needs_review',
         application_source: allowedSource ? applicationSource : null,
         selected_profile: selected ? loggingProfile : 'unknown', observed };
+}
+
+/** Shape projection only. It never grants the active runtime profile. */
+export function projectActiveNativeMode(text, phpMinor) {
+    activeFact(typeof text === 'string' && Buffer.byteLength(text) <= 4096 && Object.hasOwn(activePatches, phpMinor), 'mode_body_bound');
+    let value;
+    try { value = JSON.parse(text); } catch { throw activeError('mode_json_invalid'); }
+    activeFact(!(value?.schema === 'pinova.postwork-active-jit.v1' && value.state === 'unknown' && value.reason === 'native_mode_unavailable'), 'endpoint_native_unavailable');
+    activeFact(value?.schema === 'pinova.postwork-active-jit.v1' && value.state === 'observed' &&
+        value.sapi === 'fpm-fcgi' && Object.values(activePatches).includes(value.php_version) &&
+        integer(value.pid) && value.pid > 1 && typeof value.opcache_enabled === 'boolean', 'mode_shape');
+    const ini = value.ini, jit = value.jit;
+    activeFact(['1235', 'tracing', 'disable'].includes(ini?.mode) && integer(ini.buffer_bytes, 1073741824) &&
+        typeof ini.file_cache_empty === 'boolean' && typeof ini.preload_empty === 'boolean' &&
+        typeof ini.enable_cli === 'boolean' && integer(ini.optimization_level, 4294967295) &&
+        ['hot_loop', 'hot_func', 'hot_return', 'hot_side_exit'].every(key => integer(ini[key], 65535)), 'mode_ini_shape');
+    activeFact(typeof jit?.enabled === 'boolean' && typeof jit.on === 'boolean' && integer(jit.kind, 5) &&
+        integer(jit.capacity_bytes, 1073741824) && integer(jit.free_bytes, jit.capacity_bytes), 'mode_jit_shape');
+    const blacklist = value.blacklist;
+    activeFact(blacklist?.variant === 'B' && blacklist.configured_path_matches_owned_file === true &&
+        blacklist.entry_semantics === 'absolute_resolved_creator_prefix' && blacklist.entry_count === 1 &&
+        integer(blacklist.file_bytes, 1024) && blacklist.file_bytes > 0 &&
+        ['file_sha256', 'configured_path_sha256', 'creator_path_sha256', 'creator_source_sha256'].every(key => sha256(blacklist[key])),
+    'blacklist_shape');
+    activeFact(typeof value.cache?.creator_cached === 'boolean', 'cache_shape');
+    activeFact(sha256(value.inventory_sha256) && sha256(value.composer_lock_sha256), 'runtime_hash_shape');
+    activeFact(typeof value.extensions?.xdebug_loaded === 'boolean' && typeof value.extensions?.pcov_loaded === 'boolean', 'extensions_shape');
+    return { extensions: { xdebug_loaded: value.extensions.xdebug_loaded, pcov_loaded: value.extensions.pcov_loaded }, inventory_sha256: value.inventory_sha256, composer_lock_sha256: value.composer_lock_sha256, schema: value.schema, state: 'observed', sapi: value.sapi, php_version: value.php_version,
+        pid: value.pid, opcache_enabled: value.opcache_enabled, ini: { mode: ini.mode, ...Object.fromEntries(activeSharedKeys.map(key => [key, ini[key]])) },
+        jit: { enabled: jit.enabled, on: jit.on, kind: jit.kind, capacity_bytes: jit.capacity_bytes, free_bytes: jit.free_bytes },
+        blacklist: Object.fromEntries(['variant', 'file_sha256', 'file_bytes', 'configured_path_sha256', 'creator_path_sha256',
+            'creator_source_sha256', 'configured_path_matches_owned_file', 'entry_count', 'entry_semantics'].map(key => [key, blacklist[key]])),
+        cache: { creator_cached: value.cache.creator_cached } };
+}
+
+
+function validateBoundNative(value, { phpMinor, primaryReceiptHash, startupLaunch, expectedIdentity, contractHash } = {}) {
+    try {
+        const parsed = projectActiveNativeMode(JSON.stringify(value), phpMinor);
+        return startupLaunch?.php_minor === phpMinor && sha256(contractHash) &&
+            value.contract_sha256 === contractHash && startupLaunch.contract_sha256 === contractHash &&
+            validActiveIdentity(expectedIdentity) && JSON.stringify(value.runtime_identity) === JSON.stringify(expectedIdentity) &&
+            JSON.stringify(startupLaunch.runtime_identity) === JSON.stringify(expectedIdentity) &&
+            value.inventory_sha256 === expectedIdentity.inventory_sha256 && value.composer_lock_sha256 === expectedIdentity.composer_lock_sha256 &&
+            sha256(primaryReceiptHash) && value.primary_receipt_sha256 === primaryReceiptHash && value.primary_outcome_frozen === true &&
+            value.collection_boundary === 'after_primary_receipt_before_fpm_teardown' && value.attests_signaled_worker === false &&
+            value.resource_acceptance === false && value.shipping_fix === false && value.responder_owned_main_pool === true &&
+            integer(value.responder_start_ticks, Number.MAX_SAFE_INTEGER) && value.responder_start_ticks > 0 &&
+            startupLaunch?.owned_configuration_in_cmdline === true && startupLaunch.flags_recoverable_from_proc_title === false &&
+            startupLaunch.binding === 'pinned_launcher_source_and_binary_not_recovered_flags' &&
+            startupLaunch.declared_mode === '1235' && startupLaunch.configured_buffer_bytes === 268435456 &&
+            startupLaunch.declared_file_cache_empty === true && startupLaunch.declared_preload_empty === true &&
+            JSON.stringify(startupLaunch.declared_argv) === JSON.stringify(declaredActiveArgv()) &&
+            integer(startupLaunch.master_pid) && startupLaunch.master_pid > 1 && value.master_pid === startupLaunch.master_pid &&
+            integer(startupLaunch.master_start_ticks, Number.MAX_SAFE_INTEGER) && startupLaunch.master_start_ticks > 0 &&
+            value.master_start_ticks === startupLaunch.master_start_ticks &&
+            ['binary_sha256', 'fpm_configuration_sha256'].every(key => sha256(startupLaunch[key]) && value[key] === startupLaunch[key]) &&
+            sha256(startupLaunch.mode_endpoint_sha256) && value.source_sha256 === startupLaunch.mode_endpoint_sha256 &&
+            sha256(startupLaunch.proc_cmdline_sha256) && sha256(startupLaunch.concrete_launch_argv_sha256) &&
+            JSON.stringify(parsed.blacklist) === JSON.stringify(startupLaunch.blacklist);
+    } catch { return false; }
+}
+
+
+
+// Exact warning literals from pinned PHP8.3.36 lines4916/4926/4942 and PHP8.4.27 lines3603/3613/3628.
+const startupWarningLiterals = {
+    "unsupported_vm": "JIT is compatible only with CALL and HYBRID VM. JIT disabled.",
+    "executor_override": "JIT is incompatible with third party extensions that override zend_execute_ex(). JIT disabled.",
+    "opcode_handlers": "JIT is incompatible with third party extensions that setup user opcode handlers. JIT disabled."
+};
+
+const failureCodes = {
+    endpoint_source: ['mode_source_changed', 'mode_file_bound', 'unclassified'],
+    transport: ['mode_transport_invalid', 'mode_transport_failed', 'mode_transport_incomplete', 'mode_observation_aborted', 'unclassified'],
+    body_shape: ['mode_body_bound', 'mode_json_invalid', 'endpoint_native_unavailable', 'mode_shape', 'mode_ini_shape', 'mode_jit_shape', 'blacklist_shape', 'cache_shape', 'runtime_hash_shape', 'extensions_shape', 'unclassified'],
+    responder_binding: ['mode_responder_unowned', 'postwork_binding_changed', 'mode_file_bound', 'blacklist_input_scope', 'blacklist_file_bound', 'blacklist_contents_mismatch', 'unclassified'],
+    source_binding: ['runtime_identity_bound', 'runtime_identity_mismatch', 'postwork_source_binding_changed', 'active_contract_scope', 'active_contract_gate_changed', 'active_contract_profile_changed', 'mode_file_bound', 'unclassified'],
+    profile: ['mode_shape', 'mode_ini_shape', 'mode_jit_shape', 'mode_active_mismatch', 'blacklist_shape', 'cache_shape', 'runtime_hash_shape', 'unclassified'],
+    deadline: ['mode_observation_timeout'], unclassified: ['unclassified'],
+};
+const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).length === keys.length && Object.keys(value).every(key => keys.includes(key));
+const warningKeys = Object.keys(startupWarningLiterals);
+export function projectStartupWarnings(text, { readSuccess = true, truncated = false } = {}) {
+    const bytes = typeof text === 'string' ? Buffer.from(text) : Buffer.alloc(0);
+    const counts = Object.fromEntries(warningKeys.map(key => [key, 0])); let unmatched = 0;
+    for (const line of bytes.subarray(Math.max(0, bytes.length - 65536)).toString('utf8').split('\n')) {
+        if (!line.trim()) continue;
+        let matched = false;
+        for (const key of warningKeys) if (line.includes(startupWarningLiterals[key])) { counts[key]++; matched = true; }
+        if (!matched) unmatched++;
+    }
+    return { read_success: readSuccess === true && typeof text === 'string', tail_truncated: truncated === true || bytes.length > 65536,
+        class_counts: counts, unmatched_lines: unmatched };
+}
+function warningShape(value) {
+    return exactKeys(value, ['read_success', 'tail_truncated', 'class_counts', 'unmatched_lines']) &&
+        typeof value.read_success === 'boolean' && typeof value.tail_truncated === 'boolean' &&
+        integer(value.unmatched_lines, 65536) && exactKeys(value.class_counts, warningKeys) &&
+        warningKeys.every(key => integer(value.class_counts[key], 65536));
+}
+function readActiveStartupWarnings(root) {
+    let fd;
+    try {
+        activeFact(activeProofSelected() && root === `/tmp/pinova-fpm-full-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}` &&
+            realpathSync(root) === root && lstatSync(root).uid === 0 && realpathSync(`${root}/private`) === `${root}/private` &&
+            lstatSync(`${root}/private`).uid === 0 && (lstatSync(`${root}/private`).mode & 0o077) === 0, 'startup_warning_scope');
+        const file = `${root}/private/fpm-start.log`;
+        activeFact(realpathSync(file) === file, 'startup_warning_scope');
+        fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const info = fstatSync(fd);
+        activeFact(info.isFile() && info.uid === 0 && (info.mode & 0o022) === 0, 'startup_warning_scope');
+        const bytes = Buffer.alloc(Math.min(info.size, 65536));
+        const count = readSync(fd, bytes, 0, bytes.length, Math.max(0, info.size - bytes.length));
+        return projectStartupWarnings(bytes.subarray(0, count).toString('utf8'), { truncated: info.size > 65536 });
+    } catch { return projectStartupWarnings('', { readSuccess: false }); }
+    finally { if (fd !== undefined) { try { closeSync(fd); } catch {} } }
+}
+const boundKeys = ['extensions', 'inventory_sha256', 'composer_lock_sha256', 'schema', 'state', 'sapi', 'php_version', 'pid',
+    'opcache_enabled', 'ini', 'jit', 'blacklist', 'cache', 'runtime_identity', 'contract_sha256', 'master_pid', 'master_start_ticks',
+    'binary_sha256', 'fpm_configuration_sha256', 'responder_start_ticks', 'responder_owned_main_pool', 'source_sha256', 'attests_signaled_worker', 'limitation'];
+const identityKeys = ['schema', 'application_source', 'application_tree', 'workflow_source', 'source_archive_sha256', 'inventory_sha256',
+    'composer_lock_sha256', 'logging_profile', 'source_recipe', 'crashed_constructor_copy_attested'];
+function boundShape(value) {
+    return exactKeys(value, boundKeys) && exactKeys(value.runtime_identity, identityKeys) && validActiveIdentity(value.runtime_identity) &&
+        exactKeys(value.ini, ['mode', ...activeSharedKeys]) && exactKeys(value.jit, ['enabled', 'on', 'kind', 'capacity_bytes', 'free_bytes']) &&
+        exactKeys(value.extensions, ['xdebug_loaded', 'pcov_loaded']) && exactKeys(value.cache, ['creator_cached']) &&
+        exactKeys(value.blacklist, ['variant', 'file_sha256', 'file_bytes', 'configured_path_sha256', 'creator_path_sha256',
+            'creator_source_sha256', 'configured_path_matches_owned_file', 'entry_count', 'entry_semantics']) &&
+        ['contract_sha256', 'binary_sha256', 'fpm_configuration_sha256', 'source_sha256'].every(key => sha256(value[key])) &&
+        ['master_pid', 'master_start_ticks', 'responder_start_ticks'].every(key => integer(value[key], Number.MAX_SAFE_INTEGER) && value[key] > 1) &&
+        value.responder_owned_main_pool === true && value.attests_signaled_worker === false &&
+        value.limitation === 'post_failure_responder_may_be_replacement_not_signaled_worker';
+}
+/** No exception strings or arbitrary object fields leave this fixed projection. */
+export function activeFailureEvidence(stage, code, warnings, bound) {
+    const selectedStage = Object.hasOwn(failureCodes, stage) ? stage : 'unclassified';
+    const selectedCode = failureCodes[selectedStage].includes(code) ? code : 'unclassified';
+    let native = null;
+    if (selectedStage === 'profile' && selectedCode !== 'unclassified' && boundShape(bound)) {
+        try {
+            const minor = Object.keys(activePatches).find(key => activePatches[key] === bound.php_version);
+            projectActiveNativeMode(JSON.stringify(bound), minor);
+            native = Object.fromEntries(boundKeys.map(key => [key, bound[key]]));
+        } catch { /* A malformed shape is never promoted to bound native facts. */ }
+    }
+    return { state: 'unknown', reason: selectedStage === 'deadline' ? 'mode_observation_timeout' : 'mode_observation_failed',
+        failure_stage: selectedStage, failure_code: selectedCode,
+        startup_warnings: warningShape(warnings) ? warnings : null, bound_native: native };
+}
+/** Retaining an unknown witness is diagnostic only; successful-profile validation remains mandatory for acceptance. */
+export function validateActiveFailureEvidence(value, options = {}) {
+    try {
+        if (!exactKeys(value, ['state', 'reason', 'failure_stage', 'failure_code', 'startup_warnings', 'bound_native',
+            'resource_acceptance', 'shipping_fix', 'primary_receipt_sha256', 'primary_outcome_frozen', 'collection_boundary', 'attests_signaled_worker']) ||
+            value.state !== 'unknown' || !Object.hasOwn(failureCodes, value.failure_stage) ||
+            !failureCodes[value.failure_stage].includes(value.failure_code) ||
+            value.reason !== (value.failure_stage === 'deadline' ? 'mode_observation_timeout' : 'mode_observation_failed') ||
+            value.resource_acceptance !== false || value.shipping_fix !== false || value.attests_signaled_worker !== false ||
+            !sha256(options.primaryReceiptHash) || value.primary_receipt_sha256 !== options.primaryReceiptHash || value.primary_outcome_frozen !== true ||
+            value.collection_boundary !== 'after_primary_receipt_before_fpm_teardown' ||
+            !(value.startup_warnings === null || warningShape(value.startup_warnings))) return false;
+        if (value.bound_native === null) return true;
+        if (value.failure_stage !== 'profile' || value.failure_code === 'unclassified' || !boundShape(value.bound_native)) return false;
+        const merged = { ...value.bound_native, primary_receipt_sha256: value.primary_receipt_sha256, primary_outcome_frozen: true,
+            collection_boundary: value.collection_boundary, resource_acceptance: false, shipping_fix: false };
+        return validateBoundNative(merged, options) && !validateActiveProfile(merged, options);
+    } catch { return false; }
 }

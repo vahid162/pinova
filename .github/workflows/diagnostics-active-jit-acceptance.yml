@@ -1,4 +1,4 @@
-name: Supplemental active JIT acceptance (never merge)
+name: PHP8.3 finite postwork diagnosis (never merge)
 
 on:
   push:
@@ -13,20 +13,16 @@ concurrency:
 
 jobs:
   acceptance:
-    name: Active JIT ${{ matrix.kind }} / PHP ${{ matrix.php }} / ${{ matrix.logging }}
+    name: PHP8.3 full16 postwork diagnosis only
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { kind: source, php: '8.3', logging: normal }
-          - { kind: source, php: '8.3', logging: diagnostic }
-          - { kind: source, php: '8.4', logging: normal }
-          - { kind: source, php: '8.4', logging: diagnostic }
           - { kind: full, php: '8.3', logging: diagnostic }
-          - { kind: full, php: '8.4', logging: diagnostic }
     env:
+      PINOVA_ACTIVE_DIAGNOSTIC_ONLY: '1'
       PINOVA_FPM_ACTIVE_JIT_PROOF: creator-prefix-v1
       PINOVA_ACTIVE_JOB_KIND: ${{ matrix.kind }}
       PINOVA_TEST_PROFILE: third-party
@@ -57,6 +53,10 @@ jobs:
         run: |
           test "${GITHUB_REF}" = refs/heads/proof/diagnostics-active-jit-acceptance
           test "${GITHUB_RUN_ATTEMPT}" = 1
+          test "${PINOVA_ACTIVE_DIAGNOSTIC_ONLY}" = 1
+          test "${PINOVA_ACTIVE_JOB_KIND}" = full
+          test "${PINOVA_FPM_PHP_VERSION}" = 8.3
+          test "${PINOVA_FPM_LOGGING_PROFILE}" = diagnostic
           test "$(git rev-parse 117e434bf65f093ad9d05f15cd180d34b4193ba9^{tree})" = 2f52e09f470431bfb3b1320e9812dca2515c201c
           test "$(git rev-parse 96386b9fdd803086e9ecfe2af421034976dc185d^{tree})" = dc72906dfd80f4d254fb99b94e495995a2e8fe7c
       - name: Validate native FPM profile evidence before provisioning
@@ -88,7 +88,7 @@ jobs:
           curl --fail --silent --show-error --location --max-time 90 "https://wordpress.org/wordpress-${wp_version}.tar.gz" \
             | sudo tar -xz -C "${PINOVA_FPM_CAMPAIGN_ROOT}"
           sudo "${PINOVA_FPM_PHP_BIN}" "${PINOVA_FPM_WP_CLI}" core verify-checksums --path="${PINOVA_FPM_CAMPAIGN_ROOT}/wordpress" --version="${wp_version}" --allow-root
-      - name: Run each declared source campaign or complete diagnostic suite once
+      - name: Run the existing PHP8.3 full16 suite once for postwork diagnosis
         run: |
           sudo env GITHUB_ACTIONS="${GITHUB_ACTIONS}" RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT}" \
             GITHUB_RUN_ID="${GITHUB_RUN_ID}" GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}" GITHUB_SHA="${GITHUB_SHA}" GITHUB_REF="${GITHUB_REF}" \
@@ -132,7 +132,7 @@ jobs:
           }
           process.exitCode = result.status === 0 && !result.signal && !result.error ? 0 : 1;
           JS
-      - name: Independently require full-suite source, active mode, native evidence and cleanup
+      - name: Classify the diagnostic witness while preserving the original workload result
         if: always() && matrix.kind == 'full'
         run: |
           sudo env GITHUB_ACTIONS="${GITHUB_ACTIONS}" RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT}" GITHUB_REF="${GITHUB_REF}" \
@@ -144,7 +144,9 @@ jobs:
           import { chmodSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
           import { activeProofSelected, readActiveContract, validateActiveProfile, activeNativeGate, validateActiveCleanup, activeLoggingGate } from './tests/Integration/postwork-jit-evidence.mjs';
           const root = process.env.PINOVA_FPM_FULL_STACK_ROOT, sha = bytes => createHash('sha256').update(bytes).digest('hex');
-          let output = { schema: 'pinova.active-full-suite-acceptance.v1', state: 'needs_review', shipping_fix: false,
+          let output = { schema: 'pinova.php83-postwork-diagnostic.v1', state: 'needs_review', diagnostic_only: true,
+              purpose: 'resolve_finite_postwork_observation_unknown', shipping_fix: false, resource_acceptance: false, release_acceptance: false,
+              reference_run_id: 41305053587, reference_unknown_witnesses: 13, reference_unknowns_retroactively_accepted: false,
               crashed_constructor_copy_attested: false, configuration_incremental_cost_attributed: false };
           try {
               if (!activeProofSelected()) throw new Error();
@@ -177,7 +179,7 @@ jobs:
                   receipt.fpm_startup_profile.binary_sha256 === sha(readFileSync(realpathSync(process.env.PINOVA_FPM_BIN))) &&
                   logging.state === 'passed' &&
                   receipt.cli_cleanup_complete === true && receipt.ordinary_http_worker?.complete === true && native.state === 'passed' && cleanupComplete && processCoverage;
-              output = { ...output, state: passed ? 'passed' : 'needs_review', primary_receipt_sha256: sha(primary),
+              output = { ...output, state: passed ? 'diagnostic_completed' : 'needs_review', primary_receipt_sha256: sha(primary),
                   postwork_receipt_sha256: sha(sidecar), native_gate: native, logging_gate: logging, runtime_profile_bound: bound,
                   expected_groups: contract.full_suite_expected_groups, completed_groups: receipt.tests?.length ?? 0,
                   owned_process_cleanup_complete: cleanupComplete, measured_process_coverage_complete: processCoverage, runtime_identity: expectedIdentity };
@@ -186,14 +188,14 @@ jobs:
               writeFileSync(`${root}/receipt/active-full-suite-acceptance.json`, JSON.stringify(output, null, 2) + '\n', { mode: 0o600 });
               chmodSync(`${root}/receipt/active-full-suite-acceptance.json`, 0o644);
           }
-          console.log(`Active full-suite supplemental evidence: ${output.state}.`);
-          if (output.state !== 'passed') process.exitCode = 1;
+          console.log(`PHP8.3 postwork diagnosis: ${output.state}; shipping/resource/release acceptance remains false.`);
+          if (output.state !== 'diagnostic_completed') process.exitCode = 1;
           JS
-      - name: Retain every bounded sanitized arm and acceptance result
+      - name: Retain all five diagnostic JSONs including primary and finite unknown witness
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: active-jit-${{ matrix.kind }}-php-${{ matrix.php }}-${{ matrix.logging }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: php83-postwork-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ matrix.kind == 'source' && env.PINOVA_FPM_CAMPAIGN_ROOT || env.PINOVA_FPM_FULL_STACK_ROOT }}/receipt
           if-no-files-found: error
           retention-days: 7

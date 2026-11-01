@@ -365,3 +365,139 @@ test('normal logging for either staged source stays off and malformed source/pro
         assert.equal(secret.state, 'needs_review'); assert.equal(JSON.stringify(secret).includes('SECRET'), false);
     }
 });
+
+import { projectActiveNativeMode, projectStartupWarnings, activeFailureEvidence, validateActiveFailureEvidence } from '../Integration/postwork-jit-evidence.mjs';
+
+const finiteMode = (minor = '8.4', active = false) => {
+    const value = { ...activeMode(minor), extensions: { xdebug_loaded: true, pcov_loaded: false } };
+    if (!active) { value.jit = { enabled: false, on: false, kind: 3, capacity_bytes: 0, free_bytes: 0 }; value.ini.optimization_level = 0; }
+    return value;
+};
+const boundMode = (minor = '8.4', active = false) => {
+    const witness = activeWitness(minor);
+    return { ...projectActiveNativeMode(JSON.stringify(finiteMode(minor, active)), minor), runtime_identity: witness.runtime_identity,
+        contract_sha256: witness.contract_sha256, master_pid: witness.master_pid, master_start_ticks: witness.master_start_ticks,
+        binary_sha256: witness.binary_sha256, fpm_configuration_sha256: witness.fpm_configuration_sha256,
+        responder_start_ticks: witness.responder_start_ticks, responder_owned_main_pool: true,
+        source_sha256: witness.source_sha256, attests_signaled_worker: false,
+        limitation: 'post_failure_responder_may_be_replacement_not_signaled_worker' };
+};
+const failureWitness = (minor = '8.4') => ({
+    ...activeFailureEvidence('profile', 'mode_active_mismatch', projectStartupWarnings(''), boundMode(minor)),
+    resource_acceptance: false, shipping_fix: false, primary_receipt_sha256: 'e'.repeat(64), primary_outcome_frozen: true,
+    collection_boundary: 'after_primary_receipt_before_fpm_teardown', attests_signaled_worker: false,
+});
+
+test('finite native projection retains disabled facts without relaxing successful active-profile predicates', () => {
+    for (const minor of ['8.3', '8.4']) {
+        const projected = projectActiveNativeMode(JSON.stringify({ ...finiteMode(minor), private: 'SECRET' }), minor);
+        assert.equal(projected.jit.enabled, false); assert.equal(projected.jit.on, false);
+        assert.equal(projected.ini.optimization_level, 0); assert.deepEqual(projected.extensions, { xdebug_loaded: true, pcov_loaded: false });
+        assert.equal(JSON.stringify(projected).includes('SECRET'), false);
+        assert.throws(() => parseActiveJitMode(JSON.stringify(projected), minor));
+        assert.deepEqual(parseActiveJitMode(JSON.stringify(finiteMode(minor, true)), minor), parseActiveJitMode(JSON.stringify(activeMode(minor)), minor));
+    }
+});
+
+test('finite projection rejects malformed bodies, unknown enums and invalid booleans or integer bounds with fixed codes', () => {
+    for (const mutate of [v => { v.php_version = '8.3.SECRET'; }, v => { v.ini.mode = 'SECRET'; },
+        v => { v.ini.buffer_bytes = 1073741825; }, v => { v.ini.optimization_level = -1; }, v => { v.jit.enabled = 'false'; },
+        v => { v.jit.free_bytes = 1; }, v => { delete v.extensions; }, v => { v.extensions.pcov_loaded = 'SECRET'; }]) {
+        const value = finiteMode(); mutate(value);
+        assert.throws(() => projectActiveNativeMode(JSON.stringify(value), '8.4'), error => typeof error.proofCode === 'string' && !error.proofCode.includes('SECRET'));
+    }
+    assert.throws(() => projectActiveNativeMode('{SECRET', '8.4'), error => error.proofCode === 'mode_json_invalid');
+    assert.throws(() => projectActiveNativeMode('x'.repeat(4097), '8.4'), error => error.proofCode === 'mode_body_bound');
+    assert.throws(() => projectActiveNativeMode('{"schema":"pinova.postwork-active-jit.v1","state":"unknown","reason":"native_mode_unavailable"}', '8.4'),
+        error => error.proofCode === 'endpoint_native_unavailable');
+});
+
+test('failure projection exports only fixed stage/code classes and never raw error or unknown fields', () => {
+    const transport = activeFailureEvidence('transport', 'mode_transport_incomplete', null, boundMode());
+    assert.equal(transport.failure_code, 'mode_transport_incomplete'); assert.equal(transport.bound_native, null);
+    for (const value of [activeFailureEvidence('SECRET', 'SECRET', { private: 'SECRET' }, boundMode()),
+        activeFailureEvidence('profile', 'SECRET', null, { ...boundMode(), private: 'SECRET' })]) {
+        assert.equal(value.bound_native, null); assert.equal(JSON.stringify(value).includes('SECRET'), false);
+    }
+    const profile = activeFailureEvidence('profile', 'mode_active_mismatch', projectStartupWarnings(''), boundMode());
+    assert.equal(profile.failure_stage, 'profile'); assert.equal(profile.bound_native.jit.on, false);
+    const extra = activeFailureEvidence('profile', 'mode_active_mismatch', projectStartupWarnings(''), { ...boundMode(), private: 'SECRET' });
+    assert.equal(extra.bound_native, null); assert.equal(JSON.stringify(extra).includes('SECRET'), false);
+});
+
+test('retained unknown native facts require primary/startup/source binding and cannot pass active acceptance', () => {
+    for (const minor of ['8.3', '8.4']) {
+        const value = failureWitness(minor), options = activeOptions(minor);
+        assert.equal(validateActiveFailureEvidence(value, options), true);
+        assert.equal(validateActiveProfile(value, options), false);
+        for (const mutate of [v => { v.primary_receipt_sha256 = 'a'.repeat(64); }, v => { v.bound_native.master_pid++; },
+            v => { v.bound_native.master_start_ticks++; }, v => { v.bound_native.binary_sha256 = 'a'.repeat(64); },
+            v => { v.bound_native.contract_sha256 = 'a'.repeat(64); }, v => { v.bound_native.source_sha256 = 'a'.repeat(64); },
+            v => { v.bound_native.runtime_identity.application_source = 'f'.repeat(40); },
+            v => { v.bound_native.runtime_identity.private = 'SECRET'; }, v => { v.bound_native.ini.private = 'SECRET'; },
+            v => { v.bound_native.extensions.pcov_loaded = 'SECRET'; }, v => { v.private = 'SECRET'; },
+            v => { v.failure_stage = 'transport'; }, v => { v.resource_acceptance = true; }, v => { v.shipping_fix = true; }]) {
+            const wrong = failureWitness(minor); mutate(wrong); assert.equal(validateActiveFailureEvidence(wrong, options), false);
+        }
+        const falselyUnknown = { ...value, bound_native: boundMode(minor, true) };
+        assert.equal(validateActiveFailureEvidence(falselyUnknown, options), false);
+    }
+});
+
+test('retained transport or timeout unknowns stay nonaccepting and reject unbound hashes or arbitrary fields', () => {
+    const value = { ...failureWitness(), ...activeFailureEvidence('transport', 'mode_transport_failed', null, null) };
+    assert.equal(validateActiveFailureEvidence(value, activeOptions()), true);
+    assert.equal(validateActiveProfile(value, activeOptions()), false);
+    for (const mutate of [v => { v.primary_outcome_frozen = false; }, v => { v.collection_boundary = 'before_primary'; },
+        v => { v.failure_code = 'SECRET'; }, v => { v.bound_native = boundMode(); }, v => { v.source_sha256 = 'a'.repeat(64); },
+        v => { v.startup_warnings = { read_success: true, raw: 'SECRET' }; }]) {
+        const wrong = structuredClone(value); mutate(wrong); assert.equal(validateActiveFailureEvidence(wrong, activeOptions()), false);
+    }
+});
+
+test('fixed startup warning classes retain read/truncation limits and discard paths, raw lines and extension attribution', () => {
+    const text = '[private/path] JIT is compatible only with CALL and HYBRID VM. JIT disabled.\n' +
+        '[SECRET] JIT is incompatible with third party extensions that override zend_execute_ex(). JIT disabled.\n' +
+        'JIT is incompatible with third party extensions that setup user opcode handlers. JIT disabled.\n' +
+        'DTrace SECRET other warning\n';
+    const value = projectStartupWarnings(text);
+    assert.deepEqual(value.class_counts, { unsupported_vm: 1, executor_override: 1, opcode_handlers: 1 });
+    assert.equal(value.unmatched_lines, 1); assert.equal(value.read_success, true); assert.equal(value.tail_truncated, false);
+    assert.equal(JSON.stringify(value).includes('SECRET'), false); assert.equal(JSON.stringify(value).includes('path'), false);
+    assert.equal(projectStartupWarnings('x'.repeat(65537)).tail_truncated, true);
+    assert.equal(projectStartupWarnings('', { readSuccess: false }).read_success, false);
+});
+
+test('finite failure collection preserves primary-before-observation, original deadline and forced nonacceptance', async () => {
+    const primary = { state: 'passed' }, writes = [];
+    const result = await preserveActiveOutcome(primary, (name, value) => writes.push({ name, value }), async () => {
+        assert.equal(writes[0].name, 'full-stack-result.json');
+        return { ...activeFailureEvidence('profile', 'mode_active_mismatch', projectStartupWarnings(''), boundMode()), shipping_fix: true, resource_acceptance: true };
+    });
+    assert.deepEqual(primary, { state: 'passed' }); assert.equal(result.state, 'unknown');
+    assert.equal(result.shipping_fix, false); assert.equal(result.resource_acceptance, false);
+    assert.equal(validateActiveFailureEvidence(result, { ...activeOptions(), primaryReceiptHash: result.primary_receipt_sha256 }), true);
+    assert.equal(MODE_OBSERVATION_TIMEOUT_MS, 3000);
+});
+
+
+test('validated unknown sidecar retains exact producer bytes and cleanup hash after campaign copying', async () => {
+    const controller = readFileSync(new URL('../Integration/otp-fpm-full-stack.mjs', import.meta.url), 'utf8');
+    const campaign = readFileSync(new URL('../Integration/otp-fpm-revision-campaign.mjs', import.meta.url), 'utf8');
+    assert.ok(controller.includes("writeFileSync(target, JSON.stringify(value, null, 2) + '\\n',"));
+    assert.ok(campaign.includes("writeFileSync(target, JSON.stringify(runtimeProfile, null, 2) + '\\n',"));
+    const writes = new Map(), primary = { state: 'passed' };
+    await preserveActiveOutcome(primary, (name, value) => writes.set(name, Buffer.from(JSON.stringify(value, null, 2) + '\n')), async () =>
+        activeFailureEvidence('profile', 'mode_active_mismatch', projectStartupWarnings(''), boundMode()));
+    const producerBytes = writes.get('postwork-jit-mode.json'), retained = JSON.parse(producerBytes);
+    const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+    const options = { ...activeOptions(), primaryReceiptHash: sha(writes.get('full-stack-result.json')) };
+    assert.equal(validateActiveFailureEvidence(retained, options), true);
+    const copiedBytes = Buffer.from(JSON.stringify(retained, null, 2) + '\n');
+    assert.deepEqual(copiedBytes, producerBytes);
+    const cleanup = { ...cleanupReceipt(), primary_receipt_sha256: options.primaryReceiptHash, postwork_receipt_sha256: sha(producerBytes) };
+    assert.equal(validateActiveCleanup(cleanup, { ...cleanupOptions(), primaryReceiptHash: options.primaryReceiptHash,
+        modeReceiptHash: sha(copiedBytes) }), true);
+    assert.equal(validateActiveProfile(retained, options), false);
+    assert.equal(retained.shipping_fix, false); assert.equal(retained.resource_acceptance, false);
+});

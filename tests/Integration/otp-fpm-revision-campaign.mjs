@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateCampaign } from './revision-resource-gates.mjs';
 import { expectedNativeFpmProfile, validatePostworkProfile, activeProofSelected, readActiveContract,
-    expectedActiveFpmProfile, validateActiveProfile, activeNativeGate, validateActiveCleanup, activeLoggingGate } from './postwork-jit-evidence.mjs';
+    expectedActiveFpmProfile, validateActiveProfile, activeNativeGate, validateActiveCleanup, activeLoggingGate, validateActiveFailureEvidence } from './postwork-jit-evidence.mjs';
 import { DIAGNOSTIC_CASES, REVISION_ARM_TIMEOUT_MS, executionEvidence, readDiagnosticEvidence } from './otp-fpm-diagnostic-evidence.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -149,8 +149,9 @@ try {
             const bytes = readFileSync(`${runRoot}/receipt/postwork-jit-mode.json`);
             requireFact(bytes.length <= 8192, 'Postwork runtime profile exceeded its bound.');
             const value = JSON.parse(bytes);
-            requireFact((activeProof ? validateActiveProfile(value, { phpMinor: php, primaryReceiptHash,
-                startupLaunch: receipt?.fpm_startup_profile, expectedIdentity, contractHash: hash(contractBytes) }) :
+            const evidenceOptions = { phpMinor: php, primaryReceiptHash, startupLaunch: receipt?.fpm_startup_profile,
+                expectedIdentity, contractHash: hash(contractBytes) };
+            requireFact((activeProof ? (validateActiveProfile(value, evidenceOptions) || validateActiveFailureEvidence(value, evidenceOptions)) :
                 validatePostworkProfile(value, { phpMinor: php, primaryReceiptHash, startupLaunch: receipt?.fpm_startup_profile })) &&
                 receipt.fpm_startup_profile.binary_sha256 === fpmBinaryHash, 'Runtime profile evidence does not match this arm.');
             runtimeProfile = value;

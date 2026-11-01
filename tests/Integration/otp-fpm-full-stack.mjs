@@ -2,14 +2,26 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer, request } from 'node:http';
 import { observeHTTPFailures } from './fixture-http-failures.mjs';
-import { chmodSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync as rawExistsSync, fstatSync, openSync, readFileSync as rawReadFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createOrdinaryHTTP, ordinaryRuntimeVersion } from './ordinary-http-worker.mjs';
-import { PHPProcessSampler, inspectProcess } from './php-process-sampler.mjs';
+import { PHPProcessSampler, inspectProcess as rawInspectProcess } from './php-process-sampler.mjs';
 import { revisionWorkload } from './otp-fpm-revision-workload.mjs';
 import { captureStartupLaunch, preserveOutcomeAndObserve, readPostworkJit } from './postwork-jit-evidence.mjs';
 import { DIAGNOSTIC_CASES, readDiagnosticEvidence, sanitizeCheckpoint } from './otp-fpm-diagnostic-evidence.mjs';
+
+import { createObserverDuty, calibrationReceipt, observerSampleCadence } from './observer-duty.mjs';
+
+const calibration = process.env.PINOVA_OBSERVER_CALIBRATION === '1';
+const sampleCadence = observerSampleCadence(calibration, process.env.PINOVA_OBSERVER_CADENCE_MS);
+if (calibration && (process.env.GITHUB_REF !== 'refs/heads/proof/observer-duty-calibration-8e005' ||
+    ![40, 200].includes(sampleCadence))) throw new Error('Invalid isolated observer calibration.');
+const duty = createObserverDuty({ enabled: calibration });
+const readFileSync = (...args) => duty.measure('observer_io', () => rawReadFileSync(...args));
+const existsSync = (...args) => duty.measure('observer_io', () => rawExistsSync(...args));
+const parseStatus = text => duty.measure('status_parse', () => JSON.parse(text));
+const inspectProcess = (...args) => duty.measure('identity', () => rawInspectProcess(...args));
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const root = process.env.PINOVA_FPM_FULL_STACK_ROOT;
@@ -102,7 +114,7 @@ const providerMobile = index => mobile(index).replace(/^0/, '+98');
 function sanitizedReceipt(name, value) {
     ensure(['frozen-resource-gates.json', 'full-stack-result.json', 'postwork-jit-mode.json'].includes(name), 'Unexpected sanitized receipt target.');
     const target = path.join(receiptRoot, name);
-    writeFileSync(target, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
+    writeFileSync(target, JSON.stringify(calibrationReceipt(value, calibration), null, 2) + '\n', { mode: 0o600 });
     // The shell's private umask also applies to Node's requested creation mode.
     // Widen only these allowlisted, sanitized receipts, never logs or WP config.
     chmodSync(target, 0o644);
@@ -110,8 +122,9 @@ function sanitizedReceipt(name, value) {
 
 function http(url, { body, label = 'ordinary', source = 120, headers = {}, method = body ? 'POST' : 'GET',
     category = new URL(url).pathname === '/fpm-status' ? 'fpm_status' : body ? 'authentication' : 'ordinary', redirects = 0 } = {}) {
+    const observe = (kind, callback) => category === 'fpm_status' ? duty.wrap(kind, callback) : callback;
     const started = performance.now();
-    return new Promise((resolve, reject) => {
+    return (category === 'fpm_status' ? operation => duty.measure('status_setup', operation) : operation => operation())(() => new Promise((resolve, reject) => {
         const serialized = body === undefined ? undefined : JSON.stringify(body);
         let failureObserver;
         const outgoing = request(url, {
@@ -119,15 +132,15 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
             headers: { 'X-Pinova-Fixture-Case': label, ...(serialized ? {
                 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(serialized),
             } : {}), ...headers },
-        }, incoming => {
+        }, observe('status_callback', incoming => {
             failureObserver.watchIncoming(incoming);
             let text = '';
             incoming.setEncoding('utf8');
-            incoming.on('data', chunk => {
+            incoming.on('data', observe('status_callback', chunk => {
                 text += chunk;
                 if (text.length > 2 * 1024 * 1024) failureObserver.bound('body_bound');
-            });
-            incoming.on('end', async () => {
+            }));
+            incoming.on('end', observe('status_callback', async () => {
                 httpDiagnostics.push({ phase, category, status: incoming.statusCode,
                     selected_php: matchesPhp(incoming.headers['x-pinova-fixture-php']) });
                 if (httpDiagnostics.length > 24) httpDiagnostics.shift();
@@ -144,14 +157,16 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                 }
                 resolve({ status: incoming.statusCode, headers: incoming.headers, text,
                     ms: performance.now() - started, completed: now() });
-            });
-        });
+            }));
+        }));
         failureObserver = observeHTTPFailures(outgoing, { phase, category, reject, record: row => {
-            httpDiagnostics.push(row);
-            if (httpDiagnostics.length > 24) httpDiagnostics.shift();
+            duty.measure(category === 'fpm_status' ? 'status_callback' : 'cli_callback', () => {
+                httpDiagnostics.push(row);
+                if (httpDiagnostics.length > 24) httpDiagnostics.shift();
+            });
         } });
         outgoing.end(serialized);
-    });
+    }));
 }
 
 let statusRequest = Promise.resolve();
@@ -248,7 +263,7 @@ function startCli(args, { input, label = 'observation', sensitive = false, barri
             catch (error) { return !['ENOENT', 'ESRCH', 'PROCESS_EXITED'].includes(error.code); }
         };
         const timeout = setTimeout(abort, 25000);
-        const observer = setInterval(() => {
+        const observer = setInterval(duty.wrap('cli_poll', () => {
             try {
                 if (!registered && existsSync(`${prefix}.start`)) {
                     phpPid = Number(readFileSync(`${prefix}.start`, 'utf8').trim());
@@ -267,16 +282,16 @@ function startCli(args, { input, label = 'observation', sensitive = false, barri
                     writeFileSync(`${prefix}.final-ack`, '1', { mode: 0o600 });
                 }
             } catch (error) { observerFailure = error; tracker?.fail('cli_observation_failed'); clearInterval(observer); abort(); }
-        }, 10);
-        child.stdout.on('data', chunk => { output += chunk; if (output.length > 2 * 1024 * 1024) {
+        }), 10);
+        child.stdout.on('data', duty.wrap('cli_callback', chunk => { output += chunk; if (output.length > 2 * 1024 * 1024) {
             output = output.slice(0, 2 * 1024 * 1024); observerFailure = new Error('CLI output bound exceeded.'); abort();
-        } });
-        child.stderr.on('data', chunk => { errors += chunk; if (errors.length > 2 * 1024 * 1024) {
+        } }));
+        child.stderr.on('data', duty.wrap('cli_callback', chunk => { errors += chunk; if (errors.length > 2 * 1024 * 1024) {
             errors = errors.slice(0, 2 * 1024 * 1024); observerFailure = new Error('CLI output bound exceeded.'); abort();
-        } });
+        } }));
         child.stdin.on('error', () => { observerFailure = new Error('CLI input failed.'); abort(); });
         child.on('error', reject);
-        child.on('close', code => {
+        child.on('close', duty.wrap('cli_close', code => {
             closed = true;
             if (!control.aborted) liveCli.delete(control);
             clearTimeout(timeout);
@@ -292,14 +307,14 @@ function startCli(args, { input, label = 'observation', sensitive = false, barri
                 if (tracker) { ensure(measuring && tracker === processSampler, 'Measured CLI escaped its original measurement.'); measuredCli.push(timing); }
                 resolve({ output, timing, pid: phpPid });
             } catch (error) { reject(error); }
-        });
+        }));
         if (!barrier) child.stdin.end(input === undefined ? '' : JSON.stringify(input));
     });
     result.catch(() => {}); // Attach immediately while a held invocation boots.
     control.result = result;
     return { result, ready: barrier ? until(() => {
         ensure(!closed, 'Held CLI exited before readiness.');
-        return registered && existsSync(`${prefix}.booted`) && Number(readFileSync(`${prefix}.booted`, 'utf8').trim()) === phpPid;
+        return duty.measure('cli_poll', () => registered && existsSync(`${prefix}.booted`) && Number(readFileSync(`${prefix}.booted`, 'utf8').trim()) === phpPid);
     }, 'Held CLI did not reach the native after_wp_load barrier.') : Promise.resolve(),
     release(value = input) {
         ensure(barrier && !released && !closed, 'Invalid duplicate CLI barrier release.');
@@ -341,11 +356,11 @@ async function drainDue(label) {
     }
     throw new Error('Existing bounded CLI did not drain this fixture queue.');
 }
-function events() {
+function events() { return duty.measure('markers', () => {
     const text = existsSync(path.join(root, 'events.jsonl')) ? readFileSync(path.join(root, 'events.jsonl'), 'utf8') : '';
     ensure(text.length < 1024 * 1024, 'Fixture marker budget exceeded.');
     return text.trim() ? text.trim().split('\n').map(line => JSON.parse(line)) : [];
-}
+}); }
 async function until(predicate, message, limit = 15000) {
     const end = performance.now() + limit;
     do { if (await predicate()) return; await sleep(40); } while (performance.now() < end);
@@ -354,7 +369,7 @@ async function until(predicate, message, limit = 15000) {
 async function quiescent() {
     await until(async () => {
         const response = await statusSnapshot();
-        return response.status === 200 && JSON.parse(response.text)['active processes'] === 0 && activeProvider === 0;
+        return response.status === 200 && parseStatus(response.text)['active processes'] === 0 && activeProvider === 0;
     }, 'FPM/provider work did not quiesce.', 22000);
 }
 async function headroom() {
@@ -368,11 +383,11 @@ async function headroom() {
     return Math.round(performance.now() - start);
 }
 
-function processSample() {
+function processSample() { return duty.measure('pool_inventory', () => {
     const children = readFileSync(`/proc/${master}/task/${master}/children`, 'utf8').trim().split(/\s+/).filter(Boolean);
     ensure(children.length > 0 && children.length <= 64, 'FPM process inventory is unavailable.');
     return children.map(pid => inspectProcess(Number(pid), tick));
-}
+}); }
 let processSampler;
 let samples = [];
 let measuredCli = [];
@@ -384,7 +399,8 @@ let statusBusy = false;
 let statusSamples = [];
 let statusError = false;
 function beginMeasure(initialStatus) {
-    processSampler = new PHPProcessSampler({ master, ticks: tick });
+    duty.beginWindow(phase);
+    processSampler = new PHPProcessSampler({ master, ticks: tick, measure: duty.measure });
     samples = [processSampler.sample()];
     measuredCli = [];
     measuredRunnerInvocations = 0;
@@ -392,14 +408,16 @@ function beginMeasure(initialStatus) {
     statusSamples = [{ at: now(), active: initialStatus['active processes'], queue: initialStatus['listen queue'], reached: initialStatus['max children reached'] }];
     statusError = false;
     measuring = true;
-    monitor = setInterval(() => samples.push(processSampler.sample()), 40);
+    monitor = setInterval(() => samples.push(processSampler.sample()), sampleCadence);
     statusMonitor = setInterval(async () => {
         if (statusBusy) return;
         statusBusy = true;
         try {
             const response = await statusSnapshot();
-            const status = JSON.parse(response.text);
-            statusSamples.push({ at: now(), active: status['active processes'], queue: status['listen queue'], reached: status['max children reached'] });
+            duty.measure('status_parse', () => {
+                const status = JSON.parse(response.text);
+                statusSamples.push({ at: now(), active: status['active processes'], queue: status['listen queue'], reached: status['max children reached'] });
+            });
         } catch { statusError = true; } finally { statusBusy = false; }
     }, 125);
 }
@@ -408,6 +426,7 @@ async function endMeasure() {
     clearInterval(monitor);
     clearInterval(statusMonitor);
     await until(() => !statusBusy, 'FPM status observation did not finish.');
+    const result = duty.measure('resource_summary', () => {
     samples.push(processSampler.sample());
     measuring = false;
     ensure(!statusError && statusSamples.length > 0, 'FPM status evidence is incomplete.');
@@ -429,7 +448,7 @@ async function endMeasure() {
         sum + (sample.at - statusSamples[index].at) * (sample.active + statusSamples[index].active) / 2, 0);
     const retained = samples.at(-1).workers.filter(worker => worker.kind === 'fpm_worker').reduce((sum, worker) => sum + worker.rss, 0);
     const retainedPss = samples.at(-1).workers.filter(worker => worker.kind === 'fpm_worker').reduce((sum, worker) => sum + worker.pss, 0);
-    return {
+    const resources = {
         fpm_cpu_seconds: fpmCpu, measured_cli_cpu_seconds: cliCpu, total_php_cpu_seconds: fpmCpu + cliCpu,
         peak_sampled_total_php_pss_kib: sampling.peak_sampled_total_php_pss_kib,
         process_coverage: sampling,
@@ -446,6 +465,13 @@ async function endMeasure() {
         wall_seconds: samples.at(-1).at - samples[0].at,
         status_samples: statusSamples.length, process_samples: samples.length,
     };
+    return resources;
+    });
+    if (calibration) {
+        result.observer_duty = duty.endWindow(true);
+        result.observer_duty.maximum_sample_start_gap_ms = result.process_coverage.maximum_sample_start_gap_ms;
+    }
+    return result;
 }
 function percentile(values, ratio) { return [...values].sort((a, b) => a - b)[Math.ceil(values.length * ratio) - 1]; }
 function dbDelta(before, after) {
@@ -530,7 +556,7 @@ let receipt = {
     limits: { fpm_children: 10, fpm_process_max: 11, fast_tails: 2, provider_budget_seconds: 8, normal_provider_delay_ms: 200,
         slow_provider_delay_ms: 6000, normal_flows_per_resource_variant: 10,
         controlled_existing_cli_opportunities: { idle: 1, normal: 10, slow: 1, concurrent: 1 },
-        fixed_resource_windows_ms: { idle: 20000, slow: 24000, concurrent: 32000 }, process_sample_interval_ms: 40, status_interval_ms: 125 },
+        fixed_resource_windows_ms: { idle: 20000, slow: 24000, concurrent: 32000 }, process_sample_interval_ms: sampleCadence, status_interval_ms: 125 },
     tests,
 };
 try {
@@ -666,7 +692,7 @@ try {
         const pageTimes = [];
         const pageIntervals = [];
         const flows = [];
-        const initialStatus = JSON.parse((await statusSnapshot()).text);
+        const initialStatus = parseStatus((await statusSnapshot()).text);
         beginMeasure(initialStatus);
         const windowStart = performance.now();
         let worker;
@@ -964,7 +990,7 @@ try {
     }
     phase = 'final_quiescence';
     await quiescent();
-    const finalStatus = JSON.parse((await statusSnapshot()).text);
+    const finalStatus = parseStatus((await statusSnapshot()).text);
     ensure(finalStatus['active processes'] === 0 && finalStatus['listen queue'] === 0 && activeProvider === 0,
         'Fixture did not finish with quiescent workers and an empty FPM listen queue.');
     receipt.state = 'passed';
@@ -1033,6 +1059,14 @@ try {
     if (probeCase || (process.env.PINOVA_FPM_REVISION_ARM && receipt.state === 'failed')) {
         receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), last_phase: lastCheckpoint,
             checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
+    }
+    if (calibration) {
+        const partialDuty = duty.endWindow(false);
+        if (partialDuty) partialDuty.maximum_sample_start_gap_ms = processSampler?.summary().maximum_sample_start_gap_ms ?? null;
+        receipt.resource_acceptance = false;
+        receipt.observer_calibration = { ...duty.snapshot(), cadence_ms: sampleCadence,
+            protocol: 'fixed_40_control_200_candidate_no_retuning',
+            pss_resolution: 'sampled_peak_only_200ms_is_coarser_than_40ms' };
     }
     await preserveOutcomeAndObserve(receipt, sanitizedReceipt, signal => readPostworkJit({
         root, master, tick, phpMinor: selectedPhp, startupLaunch: receipt.fpm_startup_profile, signal }));

@@ -34,9 +34,10 @@ export function inspectProcess(pid, ticks, read = file => readFileSync(file, 'ut
 export class PHPProcessSampler {
     constructor({ master, ticks, inspect = pid => inspectProcess(pid, ticks), children = () =>
         readFileSync(`/proc/${master}/task/${master}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number),
-    clock = () => performance.now() / 1000 }) {
+    clock = () => performance.now() / 1000, measure = (kind, operation) => operation() }) {
         this.master = master;
-        this.inspect = inspect;
+        this.measure = measure;
+        this.inspect = pid => measure('identity', () => inspect(pid));
         this.children = children;
         this.clock = clock;
         this.failures = new Set();
@@ -50,6 +51,7 @@ export class PHPProcessSampler {
         this.samples = 0;
         this.started = this.clock();
         this.previousAt = null;
+        this.maximumSampleStartGap = 0;
     }
     fail(reason) { this.failures.add(reason); }
     registerCli(pid) {
@@ -72,10 +74,14 @@ export class PHPProcessSampler {
         if (!state?.final) this.fail('cli_missing_final_sample');
         this.cli.delete(pid);
     }
-    sample() {
+    sample() { return this.measure('sample', () => this.sampleObserved()); }
+    sampleObserved() {
         const at = this.clock();
         if (!Number.isFinite(at) || (this.previousAt !== null && (at < this.previousAt || at - this.previousAt > 0.5))) {
             this.fail('process_sampling_discontinuity');
+        }
+        if (Number.isFinite(at) && Number.isFinite(this.previousAt) && at >= this.previousAt) {
+            this.maximumSampleStartGap = Math.max(this.maximumSampleStartGap, at - this.previousAt);
         }
         this.previousAt = at;
         let pids = [];
@@ -138,7 +144,7 @@ export class PHPProcessSampler {
             coverage_reasons: [...this.failures].sort(),
             peak_sampled_total_php_pss_kib: this.peak,
             fpm_cpu_seconds: [...this.last].reduce((sum, [key, value]) => sum + value - this.first.get(key), 0),
-            process_samples: this.samples,
+            process_samples: this.samples, maximum_sample_start_gap_ms: this.maximumSampleStartGap * 1000,
             process_sample_scope: 'run_owned_fpm_master_workers_and_measured_cli',
             initial_fpm_inventory: this.expectedFpmRows,
             first_identity_delta: this.firstIdentityDelta,

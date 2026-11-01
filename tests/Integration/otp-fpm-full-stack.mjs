@@ -4,7 +4,9 @@ import { createServer, request } from 'node:http';
 import { chmodSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { readlinkSync } from 'node:fs';
 import { PHPProcessSampler, inspectProcess } from './php-process-sampler.mjs';
+import { FpmSettingsObservation } from './fpm-settings-observation.mjs';
 import { revisionWorkload } from './otp-fpm-revision-workload.mjs';
 import { DIAGNOSTIC_CASES, readDiagnosticEvidence, sanitizeCheckpoint } from './otp-fpm-diagnostic-evidence.mjs';
 
@@ -56,7 +58,14 @@ const selectedPhp = process.env.PINOVA_FPM_PHP_VERSION || '8.3';
 ensure(['8.3', '8.4'].includes(selectedPhp), 'Unexpected selected native PHP runtime.');
 const matchesPhp = value => new RegExp(`^${selectedPhp.replace('.', '\\.')}\\.[0-9]+$`).test(value || '');
 const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
-const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
+const engineComparison = process.env.PINOVA_FPM_ENGINE_COMPARE === '1';
+const probeCase = engineComparison ? { id: 'engine-comparison', php: '8.4', logging: 'diagnostic', arm: process.env.PINOVA_FPM_REVISION_ARM }
+    : DIAGNOSTIC_CASES.find(item => item.id === probeId);
+ensure(!engineComparison || (probeId === 'engine-comparison' && process.env.GITHUB_REF === 'refs/heads/proof/php84-ce-cache-20261101'),
+    'Wrong source-bisection probe identity.');
+const fpmObserver = engineComparison ? new FpmSettingsObservation(
+    JSON.parse(readFileSync(path.join(repo, 'tests/fixtures/engine-comparison.json'))).fpm_ini_expected_literals,
+    pid => readlinkSync(`/proc/${pid}/exe`) === process.env.PINOVA_ENGINE_FPM_REALPATH) : null;
 ensure(!probeId || (probeCase && probeCase.php === selectedPhp && probeCase.logging === process.env.PINOVA_FPM_LOGGING_PROFILE &&
     probeCase.arm === process.env.PINOVA_FPM_REVISION_ARM), 'Invalid focused diagnostic case.');
 const checkpointStarted = performance.now();
@@ -64,6 +73,7 @@ let checkpointFailed = false;
 let lastCheckpoint = null;
 let measuring = false;
 function checkpoint(phaseName, flowIndex = null) {
+    if (engineComparison && phaseName === 'revision_warmup') fpmObserver.freezeBeforeVerification();
     const value = sanitizeCheckpoint({ phase: phaseName, flow_index: flowIndex, arm: process.env.PINOVA_FPM_REVISION_ARM,
         at_ms: Date.now(), elapsed_ms: Math.round(performance.now() - checkpointStarted), pid: process.pid });
     lastCheckpoint = value;
@@ -115,6 +125,7 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(serialized),
             } : {}), ...headers },
         }, incoming => {
+            if (category !== 'fpm_status' && label !== 'status') fpmObserver?.observe(incoming.headers, incoming.statusCode, phase);
             let text = '';
             incoming.setEncoding('utf8');
             incoming.on('data', chunk => {
@@ -369,6 +380,7 @@ async function headroom() {
 function processSample() {
     const children = readFileSync(`/proc/${master}/task/${master}/children`, 'utf8').trim().split(/\s+/).filter(Boolean);
     ensure(children.length > 0 && children.length <= 64, 'FPM process inventory is unavailable.');
+    if (engineComparison) ensure(children.every(pid => readlinkSync(`/proc/${pid}/exe`) === process.env.PINOVA_ENGINE_FPM_REALPATH), 'A request worker changed engine executable.');
     return children.map(pid => inspectProcess(Number(pid), tick));
 }
 let processSampler;
@@ -520,7 +532,7 @@ async function verifyFlow(flow, purpose = 'login') {
 }
 
 let receipt = {
-    fixture: 'pinova-full-stack-fpm-v1', state: 'running',
+    fixture: 'pinova-full-stack-fpm-v1', state: 'running', ...(engineComparison ? { resource_acceptance: false } : {}),
     source_commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
     profile: { wordpress: manifest.wordpress, plugins: manifest.deployed_plugins.map(({ slug, version, sha256 }) => ({ slug, version, sha256 })),
         php_cli: execFileSync(process.env.PINOVA_FPM_PHP_BIN || 'php', ['-r', 'echo PHP_VERSION;'], { encoding: 'utf8' }), redis: 'not_applicable_not_installed' },
@@ -997,5 +1009,6 @@ try {
         receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), last_phase: lastCheckpoint,
             checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
     }
+    if (engineComparison) receipt.fpm_runtime = fpmObserver.receipt(events());
     sanitizedReceipt('full-stack-result.json', receipt);
 }

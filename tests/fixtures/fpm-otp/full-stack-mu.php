@@ -25,6 +25,33 @@ namespace {
 	}
 	if ( 'fpm-fcgi' === PHP_SAPI ) {
 		header( 'X-Pinova-Fixture-PHP: ' . PHP_VERSION );
+        if (is_file($fixture_root . '/engine-comparison')) {
+            $expected_ini = [
+			'opcache.enable' => '1',
+			'opcache.enable_cli' => '0',
+			'opcache.optimization_level' => '0x7FFEBFFF',
+			'opcache.jit' => '1235',
+			'opcache.jit_buffer_size' => '256M',
+			'opcache.protect_memory' => '0',
+			'opcache.validate_timestamps' => '1',
+			'opcache.file_update_protection' => '2',
+			'opcache.revalidate_freq' => '2'
+            ];
+            $observed_ini = [];
+            foreach ($expected_ini as $directive => $expected_literal) {
+                $actual = ini_get($directive);
+                $observed_ini[$directive] = ['type' => gettype($actual), 'value' => $actual === $expected_literal ? $actual : null];
+            }
+            header('X-Pinova-Fixture-FPM-Settings: ' . json_encode([
+                'nts' => PHP_ZTS === 0, 'debug' => PHP_DEBUG !== 0,
+                'zend_only_opcache' => get_loaded_extensions(true) === ['Zend OPcache'],
+                'engine_ini' => php_ini_loaded_file() === '/tmp/pinova-engine-' . getenv('GITHUB_RUN_ID') . '-' . getenv('GITHUB_RUN_ATTEMPT') . '/ini/fpm/php.ini',
+                'pid' => getmypid(), 'php_version' => preg_match('/\A8\.4\.[0-9]{1,3}\z/D', PHP_VERSION) ? PHP_VERSION : null,
+                'sapi' => PHP_SAPI === 'fpm-fcgi' ? PHP_SAPI : null, 'ini' => $observed_ini,
+            ], JSON_THROW_ON_ERROR));
+            unset($expected_ini, $observed_ini, $directive, $expected_literal, $actual);
+        }
+
 	}
 
 	/** Only finite test labels, PID and timestamps enter the shared evidence. */

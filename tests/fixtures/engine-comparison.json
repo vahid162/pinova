@@ -1,0 +1,105 @@
+{
+  "schema": "pinova.engine-comparison.v1",
+  "resource_acceptance": false,
+  "runtime_source": "a1bb4a8985502e38498bb1df53b719868ced40b8",
+  "baseline_source": "a1bb4a8985502e38498bb1df53b719868ced40b8",
+  "proof_branch": "proof/php84-ce-cache-20261101",
+  "php": [
+    "8.4"
+  ],
+  "logging_profiles": [
+    "diagnostic"
+  ],
+  "order": [
+    "a1",
+    "b1",
+    "b2",
+    "a2",
+    "a3",
+    "b3"
+  ],
+  "variants": {
+    "a1": "A",
+    "b1": "B",
+    "b2": "B",
+    "a2": "A",
+    "a3": "A",
+    "b3": "B"
+  },
+  "pairs": [
+    [
+      "a1",
+      "b1"
+    ],
+    [
+      "a2",
+      "b2"
+    ],
+    [
+      "a3",
+      "b3"
+    ]
+  ],
+  "fpm_ini_expected_literals": {
+    "opcache.enable": "1",
+    "opcache.enable_cli": "0",
+    "opcache.optimization_level": "0x7FFEBFFF",
+    "opcache.jit": "1235",
+    "opcache.jit_buffer_size": "256M",
+    "opcache.protect_memory": "0",
+    "opcache.validate_timestamps": "1",
+    "opcache.file_update_protection": "2",
+    "opcache.revalidate_freq": "2"
+  },
+  "php_version": "8.4.27",
+  "php_api": "20240924",
+  "nts": true,
+  "debug": false,
+  "archive_files": [
+    {
+      "url": "https://ppa.launchpadcontent.net/ondrej/php/ubuntu/pool/main/p/php8.4/php8.4_8.4.27-1+ubuntu24.04.1+deb.sury.org+1.dsc",
+      "name": "php8.4_8.4.27-1+ubuntu24.04.1+deb.sury.org+1.dsc",
+      "sha256": "84813e5bdb6f7494e82ecbfbd390d852921185ffc9f06273f0d6577569d4098d",
+      "bytes": 5533
+    },
+    {
+      "url": "https://ppa.launchpadcontent.net/ondrej/php/ubuntu/pool/main/p/php8.4/php8.4_8.4.27.orig.tar.xz",
+      "name": "php8.4_8.4.27.orig.tar.xz",
+      "sha256": "dcf93923b0e38e0d5252b25b796520b5a47761a08b3488b6d0b5d1115764d3f0",
+      "bytes": 13862944
+    },
+    {
+      "url": "https://ppa.launchpadcontent.net/ondrej/php/ubuntu/pool/main/p/php8.4/php8.4_8.4.27-1+ubuntu24.04.1+deb.sury.org+1.debian.tar.xz",
+      "name": "php8.4_8.4.27-1+ubuntu24.04.1+deb.sury.org+1.debian.tar.xz",
+      "sha256": "f70d8b4cfcd852aa8e5cc777c86d9d2456fa212e3934ab7925ab77db3999a3bf",
+      "bytes": 80864
+    }
+  ],
+  "upstream_commit": "47d5c0c716860800dc9324cd0b73901e1dbc1606",
+  "upstream_patch_sha256": "f08639edcca75861f9d23fa6cfa322e8987ddfe568fcb07948465a439696dcf5",
+  "runtime_patch_sha256": "4b604eb17f231a80b7d9b6ae7e8c592b86db138f20c47c73bd792a846f4f31e9",
+  "runtime_files": [
+    "Zend/zend.c",
+    "Zend/zend_atomic.h",
+    "Zend/zend_types.h",
+    "ext/opcache/ZendAccelerator.c",
+    "ext/opcache/zend_persist.c"
+  ],
+  "debian_patch_count": 47,
+  "build_targets": [
+    "ext",
+    "fpm",
+    "cli"
+  ],
+  "ext_packages": [
+    "opcache"
+  ],
+  "compiler_jobs": 2,
+  "build_timeout_seconds": 1800,
+  "job_timeout_minutes": 90,
+  "arm_timeout_ms": 420000,
+  "retries": 0,
+  "source_signature_validation": "not_independently_established_by_this_preparation",
+  "interpretation": "only_gh24577_patch_association_if_control_reproduces_and_all_arms_classified",
+  "source_date_epoch": 1792593321
+}

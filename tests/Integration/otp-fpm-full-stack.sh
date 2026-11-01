@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Disposable GHA only. All WordPress/plugin execution stays in loopback-only netns.
 set -euo pipefail
+ulimit -c 0
 umask 077
 
 if [[ "${GITHUB_ACTIONS:-}" != true || "${RUNNER_ENVIRONMENT:-}" != github-hosted \

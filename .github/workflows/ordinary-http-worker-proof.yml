@@ -54,11 +54,55 @@ jobs:
           mkdir -p .build
           red_status=0
           PINOVA_ORDINARY_HTTP_TRANSPORT=inline node --test --test-reporter=tap --test-name-pattern='blocked parent must not inflate ordinary HTTP timer' tests/js/ordinary-http-worker.test.mjs > .build/ordinary-http-red.tap 2>&1 || red_status=$?
-          test "${red_status}" -eq 1
-          rg -q 'BLOCKED_PARENT_TIMING_REGRESSION' .build/ordinary-http-red.tap
-          rg -q '^# fail 1$' .build/ordinary-http-red.tap
-          rg -q '^# pass 0$' .build/ordinary-http-red.tap
-          rg -q 'ORDINARY_HTTP_CONTROL=.*"independent_responder":true' .build/ordinary-http-red.tap
+          RED_STATUS="${red_status}" node --input-type=module <<'NODE'
+          import { constants, openSync, fstatSync, readSync, closeSync, writeFileSync } from 'node:fs';
+          const summary = { resource_acceptance: false, state: 'failed', node_exit_code: Number(process.env.RED_STATUS),
+            tap_within_bound: false, pass_count: null, fail_count: null, cancelled_count: null,
+            intended_test_failed: false, intended_assertion_present: false, control: null };
+          let fd;
+          try {
+            fd = openSync('.build/ordinary-http-red.tap', constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+            const info = fstatSync(fd);
+            if (!info.isFile() || info.size > 65536) throw new Error();
+            const bytes = Buffer.alloc(info.size + 1);
+            const count = readSync(fd, bytes, 0, bytes.length, 0);
+            if (count !== info.size || fstatSync(fd).size !== info.size) throw new Error();
+            summary.tap_within_bound = true;
+            const text = bytes.subarray(0, count).toString('utf8');
+            for (const key of ['pass', 'fail', 'cancelled']) {
+              const matches = [...text.matchAll(new RegExp('^# ' + key + ' ([0-9]+)$', 'gm'))];
+              if (matches.length === 1) summary[key + '_count'] = Number(matches[0][1]);
+            }
+            summary.intended_test_failed = /^not ok [0-9]+ - blocked parent must not inflate ordinary HTTP timer$/m.test(text);
+            summary.intended_assertion_present = /error: ['"]BLOCKED_PARENT_TIMING_REGRESSION['"]/.test(text);
+            const controls = [...text.matchAll(/^# ORDINARY_HTTP_CONTROL=(\{[^\r\n]*\})$/gm)];
+            if (controls.length === 1) {
+              const value = JSON.parse(controls[0][1]);
+              if (value.transport === 'inline' && value.independent_responder === true && value.responder_delay_ms === 80 &&
+                value.status === 200 && Number.isFinite(value.parent_block_ms) && value.parent_block_ms >= 300 &&
+                Number.isFinite(value.recorded_http_ms) && value.recorded_http_ms >= 225) {
+                summary.control = { independent_responder: true, responder_delay_ms: 80, status: 200,
+                  parent_block_ms: value.parent_block_ms, recorded_http_ms: value.recorded_http_ms };
+              }
+            }
+            if (summary.node_exit_code === 1 && summary.pass_count === 0 && summary.fail_count === 1 &&
+              summary.cancelled_count === 0 && summary.intended_test_failed && summary.intended_assertion_present && summary.control) {
+              summary.state = 'expected_regression_verified';
+            }
+          } catch { /* Missing, invalid or bounded-out evidence is failure, not an inferred RED pass. */ }
+          finally { if (fd !== undefined) closeSync(fd); }
+          writeFileSync('.build/ordinary-http-red-control.json', JSON.stringify(summary, null, 2) + '\n');
+          console.log('ORDINARY_HTTP_RED_SUMMARY=' + JSON.stringify(summary));
+          if (summary.state !== 'expected_regression_verified') process.exitCode = 1;
+          NODE
+      - name: Retain finite early RED control evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ordinary-http-red-control-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .build/ordinary-http-red-control.json
+          if-no-files-found: warn
+          retention-days: 7
       - name: GREEN actual worker timing and transport lifecycle controls
         run: node --test --test-concurrency=1 tests/js/ordinary-http-worker.test.mjs
       - name: Provision disposable native FPM and database

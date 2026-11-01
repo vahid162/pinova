@@ -69,6 +69,29 @@ export function parseFpmTerminationTail(text, { truncated = false } = {}) {
     return { read_success: input.valid, tail_truncated: input.truncated, event_bound: events.length > 16,
         invalid_records: invalid, events: events.slice(-16) };
 }
+/** Fixed classes from a retained error tail; never exports messages or request context. */
+export function parseNginxErrorTail(text, { truncated = false } = {}) {
+    const input = boundedText(text, truncated);
+    const counts = { response_header_too_large: 0, upstream_premature_close: 0, upstream_timeout: 0,
+        upstream_connection_failure: 0, upstream_invalid_header: 0, other_error: 0 };
+    let invalid = 0;
+    for (const line of input.text.split('\n')) {
+        if (!line.trim()) continue;
+        if (Buffer.byteLength(line) > 8192) { invalid++; continue; }
+        const prefix = line.match(/^20\d{2}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2} \[(?:error|crit|alert|emerg|warn)\] \d{1,10}#\d{1,10}: (?:\*\d{1,16} )?/);
+        if (!prefix) { invalid++; continue; }
+        const message = line.slice(prefix[0].length);
+        if (/^upstream sent too big header while reading response header from upstream(?:,|$)/.test(message)) counts.response_header_too_large++;
+        else if (/^upstream prematurely closed connection while reading response header from upstream(?:,|$)/.test(message)) counts.upstream_premature_close++;
+        else if (/^upstream timed out \([0-9]{1,4}: [^\)\r\n]{1,96}\) while (?:reading response header from|connecting to) upstream(?:,|$)/.test(message)) counts.upstream_timeout++;
+        else if (/^(?:connect\(\) failed \([0-9]{1,4}: [^\)\r\n]{1,96}\) while connecting to upstream|recv\(\) failed \([0-9]{1,4}: [^\)\r\n]{1,96}\) while reading response header from upstream)(?:,|$)/.test(message)) counts.upstream_connection_failure++;
+        else if (/^upstream sent invalid header(?:[:,]|$)/.test(message)) counts.upstream_invalid_header++;
+        else counts.other_error++;
+    }
+    return { read_success: input.valid, tail_truncated: input.truncated, classification_scope: 'retained_64KiB_tail',
+        invalid_records: invalid, class_counts: counts };
+}
+
 export function finiteMarkers(text, { truncated = false } = {}) {
     const input = boundedText(text, truncated);
     const known = new Set(['request_start', 'early_shutdown', 'finished', 'account_lookup', 'provider_enter', 'provider_return',
@@ -109,9 +132,11 @@ export function readDiagnosticEvidence(root) {
     let value;
     try { value = checkpoint.truncated ? null : JSON.parse(checkpoint.text); } catch { value = null; }
     const fpm = read('private/fpm.log');
+    const nginx = read('private/nginx.log');
     const markers = read('events.jsonl');
     return { checkpoint: sanitizeCheckpoint(value), checkpoint_read_success: checkpoint.read_success && value !== null && typeof value === 'object' && !Array.isArray(value),
         checkpoint_truncated: checkpoint.truncated,
         fpm_termination: { ...parseFpmTerminationTail(fpm.text, { truncated: fpm.truncated }), read_success: fpm.read_success },
-        markers: { ...finiteMarkers(markers.text, { truncated: markers.truncated }), read_success: markers.read_success } };
+        markers: { ...finiteMarkers(markers.text, { truncated: markers.truncated }), read_success: markers.read_success },
+        nginx_errors: { ...parseNginxErrorTail(nginx.text, { truncated: nginx.truncated }), read_success: nginx.read_success } };
 }

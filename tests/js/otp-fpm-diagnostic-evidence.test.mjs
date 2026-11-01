@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DIAGNOSTIC_CASES, executionEvidence, sanitizeCheckpoint, parseFpmTerminationTail, finiteMarkers, readDiagnosticEvidence } from '../Integration/otp-fpm-diagnostic-evidence.mjs';
+import { DIAGNOSTIC_CASES, executionEvidence, sanitizeCheckpoint, parseFpmTerminationTail, finiteMarkers, readDiagnosticEvidence, parseNginxErrorTail } from '../Integration/otp-fpm-diagnostic-evidence.mjs';
 const stamp = '[31-Oct-2026 14:00:00] WARNING: [pool fixture] child 123';
 test('native timeout and signal witnesses discard URI, script and credential text', () => {
     const secret = 'OTP-123456-cookie-password-token';
@@ -61,4 +61,42 @@ test('normal status-pool exits and fixed probe identities remain distinguishable
     assert.deepEqual(result.events, [{ pid: 222, pool: 'fixture_status', event: 'normal_exit', exit_code: 0, lifetime_seconds: 10.123 }]);
     assert.equal(DIAGNOSTIC_CASES.length, 4); assert.equal(new Set(DIAGNOSTIC_CASES.map(item => item.id)).size, 4);
     assert.equal(readDiagnosticEvidence('/outside-the-authorized-fixture').checkpoint_read_success, false);
+});
+
+const nginxPrefix = '2026/11/01 07:00:00 [error] 123#123: *456 ';
+test('real Nginx response-header limit error becomes a count without request or cookie context', () => {
+    const secret='CANARY-session-cookie-OTP';
+    const line=nginxPrefix+'upstream sent too big header while reading response header from upstream, client: 127.0.0.1, request: "POST /?'+secret+' HTTP/1.1", upstream: "fastcgi://private", cookie: "'+secret+'"';
+    const result=parseNginxErrorTail(line);
+    assert.equal(result.read_success,true);assert.equal(result.class_counts.response_header_too_large,1);
+    assert.equal(result.invalid_records,0);assert.equal(result.tail_truncated,false);
+    assert.equal(JSON.stringify(result).includes(secret),false);assert.equal(JSON.stringify(result).includes('fastcgi://'),false);
+    assert.deepEqual(Object.keys(result.class_counts),['response_header_too_large','upstream_premature_close','upstream_timeout','upstream_connection_failure','upstream_invalid_header','other_error']);
+});
+test('a classifier phrase inside a URL or arbitrary message cannot forge an upstream header error', () => {
+    const phrase='upstream sent too big header while reading response header from upstream';
+    const result=parseNginxErrorTail(nginxPrefix+'open() failed (2: missing), request: "GET /?'+phrase+' HTTP/1.1"\n'+phrase);
+    assert.equal(result.class_counts.response_header_too_large,0);assert.equal(result.class_counts.other_error,1);assert.equal(result.invalid_records,1);
+});
+test('other ordinary upstream failures remain separate finite classes', () => {
+    const lines=['upstream prematurely closed connection while reading response header from upstream',
+        'upstream timed out (110: Connection timed out) while reading response header from upstream',
+        'connect() failed (111: Connection refused) while connecting to upstream',
+        'recv() failed (104: Connection reset by peer) while reading response header from upstream',
+        'upstream sent invalid header: "private-header-value"'];
+    const result=parseNginxErrorTail(lines.map(line=>nginxPrefix+line+', request: "POST /private"').join('\n'));
+    assert.deepEqual(result.class_counts,{response_header_too_large:0,upstream_premature_close:1,upstream_timeout:1,upstream_connection_failure:2,upstream_invalid_header:1,other_error:0});
+    assert.equal(JSON.stringify(result).includes('private'),false);
+});
+test('oversized and truncated error tails cannot become complete absence evidence', () => {
+    const result=parseNginxErrorTail(nginxPrefix+'upstream sent too big header while reading response header from upstream, '+ 'SECRET'.repeat(1800));
+    assert.equal(result.invalid_records,1);assert.equal(result.class_counts.response_header_too_large,0);
+    assert.equal(parseNginxErrorTail('x'.repeat(70000)).tail_truncated,true);
+    assert.equal(parseNginxErrorTail(nginxPrefix+'some error',{truncated:true}).tail_truncated,true);
+    assert.equal(parseNginxErrorTail(null).read_success,false);
+});
+test('an unavailable or unowned Nginx log retains read failure instead of asserting no gateway errors', () => {
+    const result=readDiagnosticEvidence('/outside-the-authorized-fixture').nginx_errors;
+    assert.equal(result.read_success,false);assert.equal(result.classification_scope,'retained_64KiB_tail');
+    assert.equal(Object.values(result.class_counts).every(value=>value===0),true);
 });

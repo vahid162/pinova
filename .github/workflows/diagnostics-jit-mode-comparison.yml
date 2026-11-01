@@ -57,6 +57,7 @@ jobs:
           node --check tests/Integration/otp-fpm-full-stack.mjs
           node --check tests/Integration/fpm-settings-observation.mjs
           node --test tests/js/fpm-settings-observation.test.mjs
+          node --test tests/js/otp-fpm-diagnostic-evidence.test.mjs
           php -l tests/fixtures/fpm-otp/full-stack-mu.php
           bash -n tests/Integration/otp-fpm-full-stack.sh
       - name: Validate workflow syntax before native provisioning

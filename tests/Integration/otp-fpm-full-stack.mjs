@@ -76,7 +76,6 @@ let checkpointFailed = false;
 let lastCheckpoint = null;
 let measuring = false;
 function checkpoint(phaseName, flowIndex = null) {
-    if (jitModeComparison && phaseName === 'revision_warmup') fpmObserver.freezeBeforeVerification();
     const value = sanitizeCheckpoint({ phase: phaseName, flow_index: flowIndex, arm: process.env.PINOVA_FPM_REVISION_ARM,
         at_ms: Date.now(), elapsed_ms: Math.round(performance.now() - checkpointStarted), pid: process.pid });
     lastCheckpoint = value;
@@ -588,6 +587,7 @@ try {
     if (process.env.PINOVA_FPM_REVISION_ARM) {
         ensure(/^[ab][123]$/.test(process.env.PINOVA_FPM_REVISION_ARM) &&
             /^[a-f0-9]{40}$/.test(process.env.PINOVA_FPM_REVISION_SOURCE || ''), 'Invalid revision arm identity.');
+        if (jitModeComparison) fpmObserver.freezeBeforeVerification();
         await revisionWorkload({ ensure, root, writeFileSync, issue, ordinary, until, records, quiescent,
             runWorker, inspect, verifyFlow, beginMeasure, endMeasure, http, base, site, receipt, headroom,
             events, processSample, checkpoint, probeCase, setPhase: name => { phase = name; checkpoint(name); } });

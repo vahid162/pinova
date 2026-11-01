@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { DIAGNOSTIC_CASES, executionEvidence, sanitizeCheckpoint, parseFpmTerminationTail, finiteMarkers, readDiagnosticEvidence, parseNginxErrorTail } from '../Integration/otp-fpm-diagnostic-evidence.mjs';
+import { classifyStartupArm } from '../Integration/postwork-jit-evidence.mjs';
 const stamp = '[31-Oct-2026 14:00:00] WARNING: [pool fixture] child 123';
 test('native timeout and signal witnesses discard URI, script and credential text', () => {
     const secret = 'OTP-123456-cookie-password-token';
@@ -152,18 +153,16 @@ test('both startup variants keep fine checkpoints in memory and the ordinary spa
 
 
 test('native warmup classifier accepts only pre-teardown evidence from the warmup failure phase', () => {
-    const source = readFileSync(new URL('../Integration/otp-fpm-revision-campaign.mjs', import.meta.url), 'utf8');
-    const start = source.indexOf('const matchedSignal11 = row => {');
-    const end = source.indexOf('        const first = campaign.arms[0];', start);
-    assert.ok(start >= 0 && end > start && end - start < 2000);
-    assert.equal(source.indexOf('const matchedSignal11 = row => {', start + 1), -1);
-    const classify = runInNewContext(`(() => {${source.slice(start, end)}; return matchedSignal11;})()`);
-    const row = { failure_phase: 'revision_warmup', diagnostic_evidence: {
+    const classify = row => classifyStartupArm(row, {
+        warm_flows_completed: 10, runner_opportunities: 10, verification_workers: 10, provider_attempts_observed: 10,
+    }).matched_warmup_signal11;
+    const row = { state: 'failed', cleanup_status: 'complete', failure_phase: 'revision_warmup', diagnostic_evidence: {
         collection_boundary: 'controller_before_fpm_teardown',
-        fpm_termination: { read_success: true, events: [{
+        fpm_termination: { read_success: true, tail_truncated: false, event_bound: false, invalid_records: 0, events: [{
             event: 'signal_exit', signal_number: 11, pool: 'fixture', pid: 777,
+            signal_name: 'SIGSEGV', lifetime_seconds: 0.25,
         }] },
-        markers: { read_success: true, events: [{
+        markers: { read_success: true, tail_truncated: false, event_bound: false, invalid_records: 0, events: [{
             event: 'request_start', case: 'revision-warm-7-verify', pid: 777, at: 1793459146,
         }] },
     } };

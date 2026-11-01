@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
+import { cleanupFailureEvidence, cleanupMarker } from './cli-failure-evidence.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const username = 'pinova_mobile_browser';
@@ -14,7 +15,7 @@ let vendorMigration;
 let vendorDashboard;
 let vendorRegistration;
 
-function cli(script) {
+function cli(script, cleanup = false) {
     const expected = `pinova-browser-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
     if (process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true' ||
         process.env.PINOVA_TEST_PROFILE !== 'third-party' || process.env.COMPOSE_PROJECT_NAME !== expected ||
@@ -22,10 +23,15 @@ function cli(script) {
         throw new Error('Integration browser fixtures require the exact disposable CI environment.');
     }
     const authorized = `$admins = get_users(['role' => 'administrator', 'number' => 1, 'fields' => 'ID']); if (!$admins) { throw new Exception('Missing fixture administrator'); } wp_set_current_user((int)$admins[0]); ${script}`;
-    return execFileSync('npx', ['--no-install', 'wp-env', 'run', 'cli', 'wp', 'eval', authorized], {
-        cwd: repositoryRoot, encoding: 'utf8', timeout: 30000,
-        env: process.env, stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    try {
+        return execFileSync('npx', ['--no-install', 'wp-env', 'run', 'cli', 'wp', 'eval', authorized], {
+            cwd: repositoryRoot, encoding: 'utf8', timeout: 30000,
+            env: process.env, stdio: ['ignore', 'pipe', 'pipe'],
+        });
+    } catch (error) {
+        if (!cleanup) throw error;
+        throw new Error('Integration browser cleanup failed: ' + JSON.stringify(cleanupFailureEvidence(error)));
+    }
 }
 
 function readData(script) {
@@ -93,32 +99,52 @@ update_option('pinova_browser_widget_page', $widget_page);
 
 test.afterAll(() => {
     cli(String.raw`
+${cleanupMarker('cleanup_start')}
+${cleanupMarker('primary_user_lookup')}
 $id = username_exists('${username}');
 if ($id) {
+${cleanupMarker('outbound_filters')}
     add_filter('pre_wp_mail', '__return_true');
     add_filter('pre_http_request', static fn() => new WP_Error('fixture_no_network'));
+${cleanupMarker('primary_pending_erase')}
     \Pinova\Services\MobileVerificationService::erase_pending($id);
+${cleanupMarker('primary_otp_delete')}
     \Pinova\Models\OTP::query()->where('user_id', $id)->delete();
+${cleanupMarker('user_api_load')}
     require_once ABSPATH . 'wp-admin/includes/user.php';
+${cleanupMarker('primary_user_delete')}
     wp_delete_user($id);
 }
 foreach (['09127770001', '09127770002'] as $mobile) {
+${cleanupMarker('signup_user_lookup')}
     $synthetic_id = \Pinova\Services\UserService::get_by_mobile($mobile);
+${cleanupMarker('signup_user_delete')}
     if ($synthetic_id) { wp_delete_user($synthetic_id); }
+${cleanupMarker('signup_queue_delete')}
     \Pinova\Services\RateLimitService::delete_queued_for_identifiers([(new \Pinova\Objects\Identifier($mobile))->get_value()]);
 }
+${cleanupMarker('saved_options_read')}
 $saved = get_option('pinova_browser_saved_options');
 if (is_array($saved)) {
+${cleanupMarker('integrations_restore')}
     null === $saved['integrations'] ? delete_option('pinova_integrations') : update_option('pinova_integrations', $saved['integrations']);
+${cleanupMarker('forum_authorization_restore')}
     wpforo_update_option('wpforo_authorization', $saved['authorization']);
+${cleanupMarker('saved_options_delete')}
     delete_option('pinova_browser_saved_options');
 }
+${cleanupMarker('delivery_hook_unschedule')}
 wp_unschedule_hook('pinova_otp_delivery');
+${cleanupMarker('vendor_page_delete')}
 wp_delete_post((int)get_option('pinova_browser_vendor_page'), true);
+${cleanupMarker('vendor_option_delete')}
 delete_option('pinova_browser_vendor_page');
+${cleanupMarker('widget_page_delete')}
 wp_delete_post((int)get_option('pinova_browser_widget_page'), true);
+${cleanupMarker('widget_option_delete')}
 delete_option('pinova_browser_widget_page');
-`);
+${cleanupMarker('cleanup_complete')}
+`, true);
 });
 
 test('RecentTopics renders through both REST URL forms with integration routing off and on', async ({ request }) => {

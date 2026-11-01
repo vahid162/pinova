@@ -1,6 +1,7 @@
 /** Actual WordPress/plugin/FPM acceptance. Only run through the guarded shell entrypoint. */
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer, request } from 'node:http';
+import { observeHTTPFailures } from './fixture-http-failures.mjs';
 import { chmodSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -112,17 +113,19 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
     const started = performance.now();
     return new Promise((resolve, reject) => {
         const serialized = body === undefined ? undefined : JSON.stringify(body);
+        let failureObserver;
         const outgoing = request(url, {
             method, localAddress: `127.0.0.${source}`, timeout: 25000,
             headers: { 'X-Pinova-Fixture-Case': label, ...(serialized ? {
                 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(serialized),
             } : {}), ...headers },
         }, incoming => {
+            failureObserver.watchIncoming(incoming);
             let text = '';
             incoming.setEncoding('utf8');
             incoming.on('data', chunk => {
                 text += chunk;
-                if (text.length > 2 * 1024 * 1024) outgoing.destroy(new Error('Fixture response exceeds its bound.'));
+                if (text.length > 2 * 1024 * 1024) failureObserver.bound('body_bound');
             });
             incoming.on('end', async () => {
                 httpDiagnostics.push({ phase, category, status: incoming.statusCode,
@@ -142,15 +145,11 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                 resolve({ status: incoming.statusCode, headers: incoming.headers, text,
                     ms: performance.now() - started, completed: now() });
             });
-            incoming.on('error', reject);
         });
-        outgoing.on('timeout', () => outgoing.destroy(new Error('Fixture HTTP deadline exceeded.')));
-        outgoing.on('error', error => {
-            const codes = { ECONNREFUSED: 'connection_refused', ECONNRESET: 'connection_reset', ETIMEDOUT: 'timeout' };
-            httpDiagnostics.push({ phase, category, status: null, failure: codes[error.code] || 'transport_failure' });
+        failureObserver = observeHTTPFailures(outgoing, { phase, category, reject, record: row => {
+            httpDiagnostics.push(row);
             if (httpDiagnostics.length > 24) httpDiagnostics.shift();
-            reject(error);
-        });
+        } });
         outgoing.end(serialized);
     });
 }
@@ -848,7 +847,7 @@ try {
         'purpose_mismatch_denials_and_valid_verifications', 'frozen_idle_normal_slow_and_concurrent_resource_limits',
         'six_second_provider_http_nonblocking', 'two_fast_slots_overflow_ready_and_durable', 'independent_cli_live_claim_race_at_most_once',
         'mirrored_measured_existing_cli_opportunities_and_completed_fast_flow_no_resend');
-    phase = 'functional';
+    phase = 'functional_privacy';
 
     // Equivalent eligible/missing/native-only public responses. Validate signed
     // state and countdown before normalizing only legitimately fresh fields.
@@ -878,6 +877,7 @@ try {
         'Origin or unsigned-flow boundary failed.');
     tests.push('uniform_public_eligible_missing_native_policy', 'foreign_origin_and_unsigned_flow_denied');
 
+    phase = 'functional_recovery';
     const recovered = await issue(30, 'forget-positive', { forget: true });
     await quiescent();
     const recoveryState = await inspect(recovered);
@@ -887,6 +887,7 @@ try {
 
     // Obtain a real session through the real OTP login endpoint; only the
     // session-specific REST nonce is derived through a private CLI pipe.
+    phase = 'functional_mobile_session';
     const loggedIn = await verifyFlow(eligible);
     // Native login expires old cookies before issuing fresh values. A browser
     // keeps the last value for each name; sending both can restore the old one.
@@ -908,6 +909,7 @@ try {
     delays.set('mobile-proof', 200);
     const mobileStart = now();
     const mobileSource = ++sequence;
+    phase = 'functional_mobile_request';
     const mobileResponse = await http(`${base}/?rest_route=/pinova/mobile/request`, {
         label: 'mobile-proof', source: mobileSource, body: { mobile: mobile(21) },
         headers: { Origin: base, Cookie: cookieParts.join('; '), 'X-WP-Nonce': nonce.nonce },
@@ -920,6 +922,7 @@ try {
     const mobileState = await inspect(mobileFlow);
     ensure(mobileState.rows === 1 && mobileState.purpose === 'verify_mobile' && mobileState.otp_expiry === mobileState.expiry,
         'Authenticated mobile proof did not preserve its signed account/purpose/deadline.');
+    phase = 'functional_mobile_verify';
     const mobileVerification = await http(`${base}/?rest_route=/pinova/mobile/verify`, {
         label: 'mobile-proof-verify', source: mobileSource, body: { jwt: mobileFlow.token, code: codes.get('mobile-proof') },
         headers: { Origin: base, Cookie: cookieParts.join('; '), 'X-WP-Nonce': nonce.nonce },
@@ -930,14 +933,19 @@ try {
 
     // Time out after the real transport deadline, while the provider may still
     // accept. Recovery must retain the existing proof and must never resend.
+    phase = 'functional_uncertain_issue';
     const uncertain = await issue(27, 'uncertain', {}, 9500);
+    phase = 'functional_uncertain_provider_return';
     await until(() => events().some(event => event.case === 'uncertain' && event.event === 'provider_return'),
         'Real aggregate provider budget was not effective.', 11000);
     const uncertainStart = events().find(event => event.case === 'uncertain' && event.event === 'provider_enter');
     const uncertainEnd = events().find(event => event.case === 'uncertain' && event.event === 'provider_return');
     ensure(uncertainEnd.at - uncertainStart.at <= 9, 'Provider transport exceeded its bounded deadline.');
+    phase = 'functional_uncertain_quiescence';
     await quiescent();
+    phase = 'functional_uncertain_recovery';
     await drainDue('uncertain-recovery');
+    phase = 'functional_uncertain_inspection';
     const uncertainty = await inspect(uncertain);
     ensure(uncertainty.rows === 1 && records.filter(record => record.case === uncertain.label).length === 1,
         'Uncertain provider acceptance caused automatic replay or lost proof.');
@@ -945,6 +953,7 @@ try {
     tests.push('real_transport_deadline_and_uncertain_provider_no_resend');
 
     writeFileSync(path.join(root, 'mode'), 'off\n');
+    phase = 'functional_cancel_expiry';
     const cancelled = await issue(28, 'cancelled');
     await site({ action: 'cancel', jwt: cancelled.token });
     const expired = await issue(29, 'expired');
@@ -953,6 +962,7 @@ try {
     ensure(!records.some(record => ['cancelled', 'expired'].includes(record.case)), 'Cancelled/expired queue work reached a provider.');
     tests.push('cancelled_and_expired_acknowledged_jobs_do_not_send');
     }
+    phase = 'final_quiescence';
     await quiescent();
     const finalStatus = JSON.parse((await statusSnapshot()).text);
     ensure(finalStatus['active processes'] === 0 && finalStatus['listen queue'] === 0 && activeProvider === 0,

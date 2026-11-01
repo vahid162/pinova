@@ -560,6 +560,7 @@ jobs:
           bash -n tests/Integration/otp-fpm-full-stack.sh
           php -l tests/fixtures/fpm-otp/startup-jit-mode.php
           node --test tests/js/postwork-jit-evidence.test.mjs
+          node --test tests/js/fixture-http-failures.test.mjs
       - name: Provision disposable native FPM and database
         run: |
           sudo add-apt-repository --yes ppa:ondrej/php

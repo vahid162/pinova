@@ -1,0 +1,58 @@
+{
+  "schema": "pinova.diagnostic-context-subtraction.v1",
+  "resource_acceptance": false,
+  "shipping_fix": false,
+  "runtime_source": "09e9d334ead9b06d0888736fb467915ecb272230",
+  "runtime_tree": "09ca0560d8febcc0d1ba6688244903ee1e0459e3",
+  "baseline_source": "09e9d334ead9b06d0888736fb467915ecb272230",
+  "runtime_path": "src/Services/OTPService.php",
+  "runtime_sha256": {
+    "A": "0269aa90e2acbe7bf25f5a72c22126407c4286e0e80569a9dd777eb4e607495c",
+    "B": "b3218407896c920663a75eb27832f9531df9ed5aece030d75478c0221958a474"
+  },
+  "factory_body_sha256": {
+    "A": "695ededc72580365f9a9f1dfd354620a732d318e4ba43a96b2245e7c11446fb0",
+    "B": "c9f893fed89b6e70aa506c733f4247ce10d4b2e1561eb0383578e389dd819db9"
+  },
+  "factory_body_B": "\n\t\treturn null;\n\t",
+  "order": [
+    "a1",
+    "b1",
+    "b2",
+    "a2",
+    "a3",
+    "b3"
+  ],
+  "variants": {
+    "a1": "A",
+    "b1": "B",
+    "b2": "B",
+    "a2": "A",
+    "a3": "A",
+    "b3": "B"
+  },
+  "php": [
+    "8.4"
+  ],
+  "logging_profiles": [
+    "diagnostic"
+  ],
+  "workload": "original_complete_revision_warmup_only",
+  "expected_completed": {
+    "warm_flows_completed": 10,
+    "runner_opportunities": 10,
+    "verification_workers": 10,
+    "provider_attempts_observed": 10
+  },
+  "retries": 0,
+  "variant_B_only_change": "diagnostic_context_factory_body_returns_null",
+  "scope_limit": "instances_collection_emission_not_class_or_constants_loading",
+  "retained_marker_limit": 256,
+  "unchanged_harness_sha256": {
+    "tests/Integration/otp-fpm-full-stack.sh": "fb4d6fd08acf2152a4ff882bf8f30e920d2c209bb0aa23ea9253acfa07780daf",
+    "tests/Integration/otp-fpm-revision-workload.mjs": "d5f9055bac63befeb347105db7e075f05ff539b2ef555603e5beda7a19a15bd8",
+    "tests/fixtures/fpm-otp/full-stack-mu.php": "46b73f19b3c3ce6709990a05814f5de4e5e233d6a60f97c978df5b231b4bf1cb",
+    "tests/fixtures/fpm-otp/full-stack-site.php": "300a6b0443c33c0a4d5122dabc9617307b1498229feec6e2f392ca64dd6cb34e",
+    "tests/fixtures/diagnostics-campaign.json": "c585e1647f38c9c6d5acabd8625683ccb9333e296078459fc565ed336bd29ed9"
+  }
+}

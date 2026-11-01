@@ -56,7 +56,11 @@ const selectedPhp = process.env.PINOVA_FPM_PHP_VERSION || '8.3';
 ensure(['8.3', '8.4'].includes(selectedPhp), 'Unexpected selected native PHP runtime.');
 const matchesPhp = value => new RegExp(`^${selectedPhp.replace('.', '\\.')}\\.[0-9]+$`).test(value || '');
 const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
-const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
+const contextProof = process.env.PINOVA_FPM_DIAGNOSTIC_CONTEXT_PROOF === '1';
+const probeCase = contextProof ? { id: 'diagnostic-context-null', php: '8.4', logging: 'diagnostic', arm: process.env.PINOVA_FPM_REVISION_ARM }
+    : DIAGNOSTIC_CASES.find(item => item.id === probeId);
+ensure(!contextProof || (probeId === 'diagnostic-context-null' && process.env.GITHUB_REF === 'refs/heads/proof/diagnostics-context-null'),
+    'Wrong diagnostic-context proof identity.');
 ensure(!probeId || (probeCase && probeCase.php === selectedPhp && probeCase.logging === process.env.PINOVA_FPM_LOGGING_PROFILE &&
     probeCase.arm === process.env.PINOVA_FPM_REVISION_ARM), 'Invalid focused diagnostic case.');
 const checkpointStarted = performance.now();
@@ -70,7 +74,7 @@ function checkpoint(phaseName, flowIndex = null) {
     // Ordinary campaigns update memory during measurement. Sparse preceding
     // checkpoints survive an outer timeout without measured-window file I/O.
     if (measuring) return;
-    if (!probeCase && !(process.env.PINOVA_FPM_REVISION_ARM &&
+    if ((!probeCase || contextProof) && !(process.env.PINOVA_FPM_REVISION_ARM &&
         ['controller_start', 'readiness', 'ordinary_warmup', 'headroom_wait', 'revision_warmup',
             'revision_measurement', 'revision_postmeasurement'].includes(phaseName))) return;
     try {

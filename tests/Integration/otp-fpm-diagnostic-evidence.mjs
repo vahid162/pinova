@@ -107,8 +107,8 @@ export function finiteMarkers(text, { truncated = false } = {}) {
         const label = typeof row.case === 'string' && /^(?:setup|warm|observation|status|revision-warm-(?:page|settle|worker-(?:[1-9]|10)|(?:[1-9]|10)(?:-wrong|-verify)?))$/.test(row.case) ? row.case : 'unknown';
         events.push({ case: label, event: row.event, pid: row.pid, at: row.at });
     }
-    return { read_success: input.valid, tail_truncated: input.truncated, event_bound: events.length > 64,
-        invalid_records: invalid, events: events.slice(-64) };
+    return { read_success: input.valid, tail_truncated: input.truncated, event_bound: events.length > 256,
+        invalid_records: invalid, events: events.slice(-256) };
 }
 
 export function readDiagnosticEvidence(root) {

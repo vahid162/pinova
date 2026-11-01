@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { DIAGNOSTIC_CASES, executionEvidence, sanitizeCheckpoint, parseFpmTerminationTail, finiteMarkers, readDiagnosticEvidence, parseNginxErrorTail } from '../Integration/otp-fpm-diagnostic-evidence.mjs';
 const stamp = '[31-Oct-2026 14:00:00] WARNING: [pool fixture] child 123';
 test('native timeout and signal witnesses discard URI, script and credential text', () => {
@@ -46,10 +48,10 @@ test('checkpoint normalization accepts only finite phase and lifecycle fields', 
     assert.equal(measured.resource_acceptance, false); assert.equal(JSON.stringify(measured).includes('otp'), false);
 });
 test('last finite markers preserve chronology with no arbitrary context', () => {
-    const rows = Array.from({ length: 70 }, (_, index) => JSON.stringify({ case: 'revision-warm-worker-5', event: 'cli_command',
+    const rows = Array.from({ length: 262 }, (_, index) => JSON.stringify({ case: 'revision-warm-worker-5', event: 'cli_command',
         pid: index + 10, at: 1793459146 + index, jwt: 'SECRET-JWT', uri: '/private' }));
     const result = finiteMarkers(rows.join('\n'));
-    assert.equal(result.events.length, 64); assert.equal(result.event_bound, true); assert.equal(result.events[0].pid, 16);
+    assert.equal(result.events.length, 256); assert.equal(result.event_bound, true); assert.equal(result.events[0].pid, 16);
     assert.equal(JSON.stringify(result).includes('SECRET'), false);
     const unknown = finiteMarkers(JSON.stringify({ case: 'OTP-123456', event: 'provider_enter', pid: 123, at: 1793459146 }));
     assert.equal(unknown.events[0].case, 'unknown');
@@ -99,4 +101,80 @@ test('an unavailable or unowned Nginx log retains read failure instead of assert
     const result=readDiagnosticEvidence('/outside-the-authorized-fixture').nginx_errors;
     assert.equal(result.read_success,false);assert.equal(result.classification_scope,'retained_64KiB_tail');
     assert.equal(Object.values(result.class_counts).every(value=>value===0),true);
+});
+
+// Native evidence is collected after workload completion; retain the signaled
+// request even when later unrelated markers would push it out of the old64 cap.
+test('256 retained markers preserve an earlier native signal PID without widening exported fields', () => {
+    const rows = Array.from({ length: 300 }, (_, index) => JSON.stringify({
+        case: 'revision-warm-7-verify', event: 'request_start', pid: index === 100 ? 777 : 1000 + index,
+        at: 1793459146 + index / 1000, raw_context: 'SECRET-OTP-COOKIE',
+    }));
+    const markers = finiteMarkers(rows.join('\n'));
+    const native = parseFpmTerminationTail('[31-Oct-2026 14:00:00] WARNING: [pool fixture] child 777 exited on signal 11 (SIGSEGV) after 2 seconds from start\n');
+    const signal = native.events.find(event => event.event === 'signal_exit' && event.signal_number === 11 && event.pool === 'fixture');
+    assert.equal(markers.events.length, 256);
+    assert.equal(markers.event_bound, true);
+    assert.equal(markers.events.filter(event => event.pid === signal.pid).length, 1);
+    assert.equal(markers.events.find(event => event.pid === signal.pid).case, 'revision-warm-7-verify');
+    assert.equal(markers.events.slice(-64).some(event => event.pid === signal.pid), false);
+    assert.deepEqual(Object.keys(markers.events.find(event => event.pid === signal.pid)), ['case', 'event', 'pid', 'at']);
+    assert.equal(JSON.stringify(markers).includes('SECRET'), false);
+});
+
+test('both subtraction variants keep fine checkpoints in memory and the ordinary sparse write pattern', () => {
+    const source = readFileSync(new URL('../Integration/otp-fpm-full-stack.mjs', import.meta.url), 'utf8');
+    const start = source.indexOf('function checkpoint(');
+    const end = source.indexOf("\ncheckpoint('controller_start');", start);
+    assert.ok(start >= 0 && end > start);
+    for (const arm of ['a1', 'b1']) {
+        const writes = [];
+        const clock = { now: () => 20 };
+        const controller = runInNewContext(`let checkpointStarted=0,checkpointFailed=false,lastCheckpoint=null,measuring=false;
+            ${source.slice(start, end)}
+            ({checkpoint,state:()=>({lastCheckpoint,checkpointFailed}),measure:value=>{measuring=value;}})`, {
+            sanitizeCheckpoint, performance: clock, process: { env: { PINOVA_FPM_REVISION_ARM: arm } },
+            probeCase: { id: 'diagnostic-context-null' }, contextProof: true, root: '/fixture',
+            path: { join: (...parts) => parts.join('/') },
+            writeFileSync: () => writes.push('write'), renameSync: () => writes.push('rename'),
+        });
+        controller.checkpoint('revision_warmup');
+        assert.equal(writes.length, 2);
+        controller.checkpoint('warm_verify');
+        assert.equal(writes.length, 2);
+        assert.equal(controller.state().lastCheckpoint.phase, 'warm_verify');
+        controller.measure(true);
+        controller.checkpoint('revision_measurement');
+        assert.equal(writes.length, 2);
+        assert.equal(controller.state().lastCheckpoint.phase, 'revision_measurement');
+    }
+});
+
+
+test('native warmup classifier accepts only pre-teardown evidence from the warmup failure phase', () => {
+    const source = readFileSync(new URL('../Integration/otp-fpm-revision-campaign.mjs', import.meta.url), 'utf8');
+    const start = source.indexOf('const matchedSignal11 = row => {');
+    const end = source.indexOf('        const first = campaign.arms[0];', start);
+    assert.ok(start >= 0 && end > start && end - start < 2000);
+    assert.equal(source.indexOf('const matchedSignal11 = row => {', start + 1), -1);
+    const classify = runInNewContext(`(() => {${source.slice(start, end)}; return matchedSignal11;})()`);
+    const row = { failure_phase: 'revision_warmup', diagnostic_evidence: {
+        collection_boundary: 'controller_before_fpm_teardown',
+        fpm_termination: { read_success: true, events: [{
+            event: 'signal_exit', signal_number: 11, pool: 'fixture', pid: 777,
+        }] },
+        markers: { read_success: true, events: [{
+            event: 'request_start', case: 'revision-warm-7-verify', pid: 777, at: 1793459146,
+        }] },
+    } };
+    assert.equal(classify(row), true);
+    assert.equal(classify({ ...row, diagnostic_evidence: { ...row.diagnostic_evidence,
+        collection_boundary: 'after_fixture_exit_or_timeout', termination_causation_unverified: true,
+    } }), false);
+    assert.equal(classify({ ...row, diagnostic_evidence: { ...row.diagnostic_evidence,
+        collection_boundary: undefined,
+    } }), false);
+    for (const failure_phase of ['fixture_execution', 'arm_cleanup', 'readiness', null]) {
+        assert.equal(classify({ ...row, failure_phase }), false);
+    }
 });

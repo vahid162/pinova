@@ -199,6 +199,70 @@ def native_module(path):
     return name if re.fullmatch(r"(?:php-fpm8\.4|[A-Za-z0-9_+.-]{1,96}\.so(?:\.[0-9.]{1,24})?)", name) else "unknown"
 
 
+def code_pointer(value, tag, gdb):
+    require(not value.is_optimized_out and not getattr(value, 'is_unavailable', False), 'code_metadata_unavailable')
+    kind = value.type.strip_typedefs()
+    require(kind.code == gdb.TYPE_CODE_PTR and kind.target().strip_typedefs().tag == tag
+            and int(value) != 0, 'code_metadata_type_invalid')
+    return value.dereference()
+
+
+def code_string(value, limit, gdb):
+    fields = code_pointer(value, '_zend_string', gdb)
+    length = int(fields['len'])
+    require(0 < length <= limit, 'code_metadata_string_bound')
+    text = fields['val'].string(encoding='utf-8', errors='strict', length=length)
+    require(isinstance(text, str) and len(text.encode('utf-8')) == length and '\0' not in text,
+            'code_metadata_string_invalid')
+    return text
+
+
+def compiled_target(frame, arm_root, gdb):
+    """One exact C argument's code identity, never PHP values or executor state."""
+    try:
+        fields = code_pointer(frame.read_var('op_array'), '_zend_op_array', gdb)
+        require(int(fields['type']) == 2, 'code_metadata_type_invalid')  # ZEND_USER_FUNCTION
+        filename = code_string(fields['filename'], 4096, gdb)
+        source = Path(filename)
+        require(source.is_absolute() and source.suffix == '.php', 'source_code_unverified')
+        source = source.resolve(strict=True)
+        require(source.suffix == '.php' and stat.S_ISREG(source.lstat().st_mode), 'source_code_unverified')
+        roots = ((arm_root / 'runtime/vendor', 'vendor'), (arm_root / 'runtime', 'plugin'),
+                 (arm_root / 'wordpress/wp-includes', 'wordpress'), (arm_root / 'wordpress/wp-admin', 'wordpress'),
+                 (arm_root / 'wordpress/wp-content/plugins', 'profile_plugin'))
+        origin = None
+        for root, label in roots:
+            if source.is_relative_to(root):
+                require(root.resolve(strict=True) == root and stat.S_ISDIR(root.lstat().st_mode), 'source_code_unverified')
+                origin = label
+                break
+        require(origin is not None, 'source_code_unverified')
+        flags = int(fields['fn_flags'])
+        require(0 <= flags < 2 ** 32, 'code_metadata_type_invalid')
+        scope = fields['scope']
+        if flags & (1 << 22):  # ZEND_ACC_CLOSURE: names may contain source paths.
+            return {'state': 'recorded', 'kind': 'anonymous', 'fqn': 'anonymous', 'origin': origin}
+        owner = None
+        if int(scope) != 0:
+            owner = code_pointer(scope, '_zend_class_entry', gdb)
+            if int(owner['ce_flags']) & (1 << 2):  # ZEND_ACC_ANON_CLASS
+                return {'state': 'recorded', 'kind': 'anonymous', 'fqn': 'anonymous', 'origin': origin}
+        name = code_string(fields['function_name'], 512, gdb)
+        identifier = r'[A-Za-z_][A-Za-z0-9_]*'
+        qualified = identifier + r'(?:\\' + identifier + r')*'
+        require(re.fullmatch(identifier if owner is not None else qualified, name), 'code_identifier_invalid')
+        if owner is not None:
+            class_name = code_string(owner['name'], 512, gdb)
+            require(re.fullmatch(qualified, class_name), 'code_identifier_invalid')
+            name = class_name + '::' + name
+        require(len(name) <= 512, 'code_metadata_string_bound')
+        return {'state': 'recorded', 'kind': 'method' if owner is not None else 'function', 'fqn': name, 'origin': origin}
+    except CaptureError as error:
+        return {'state': 'needs_review', 'reason': error.code}
+    except BaseException:
+        return {'state': 'needs_review', 'reason': 'code_metadata_unavailable'}
+
+
 OPTIONAL_METADATA_REASONS = frozenset(('extensions_shape_invalid', 'extension_name_invalid', 'extension_version_invalid',
                                      'settings_keys_invalid', 'settings_value_invalid', 'zend_version_invalid'))
 
@@ -537,7 +601,8 @@ def gdb_extract():
     data = json.loads(read_bytes(base / "gdb-input.json", 16384))
     output = {"state": "needs_review", "reason": "gdb_unavailable", "frames": [], "resource_acceptance": False,
               'pid': None, 'signal': None, 'partial_core': data.get('partial_core') is True,
-              'stack_complete': False, 'frame_bound': False, 'debug_objfile_attached': None}
+              'stack_complete': False, 'frame_bound': False, 'debug_objfile_attached': None,
+              'compiled_target': {'state': 'not_observed'}}
     try:
         exe, core = data["executable"], data["core"]
         require(exe == "/usr/sbin/php-fpm8.4" and Path(core).parent == base / "cores" and re.fullmatch(r"core\.[0-9]+\.(?:6|7|11)\.[0-9]+", Path(core).name))
@@ -588,6 +653,10 @@ def gdb_extract():
                 symbol, name_status = 'unknown', 'unavailable'
             output["frames"].append({"index": len(output["frames"]), "symbol": symbol, 'name_status': name_status,
                                       "module": module, "build_id": identity})
+            if (symbol == 'zend_real_jit_func' and module == 'opcache.so'
+                    and identity == '18a699d7e9ff4bd386ec9837fb11d37f3e1fcaf4'
+                    and output['compiled_target']['state'] == 'not_observed'):
+                output['compiled_target'] = compiled_target(frame, arm_root, gdb)
             frame = frame.older()
         known = bool(output['frames']) and all(row['symbol'] != 'unknown' and row['module'] != 'unknown' for row in output['frames'])
         unknown_reason = 'module_unknown' if any(row['module'] == 'unknown' for row in output['frames']) else 'symbol_unknown'

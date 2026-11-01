@@ -231,7 +231,167 @@ def gdb_entry_fixture(*, unwind_failure=False, debug_case=None):
                 operation.assert_not_called()
 
 
+@contextlib.contextmanager
+def compiled_target_fixture():
+    """Typed code-metadata doubles; no inferior, native memory or arbitrary fields."""
+    real_resolve = Path.resolve
+    with gdb_entry_fixture(debug_case='matching') as (base, debugger, written, directory, debug_file):
+        arm = base.parent.parent / 'arm'
+        code = arm / 'runtime/src/Code.php'
+        code.parent.mkdir(parents=True)
+        code.write_text('<?php\n')
+        module = '/usr/lib/php/20240924/opcache.so'
+        identity = '18a699d7e9ff4bd386ec9837fb11d37f3e1fcaf4'
+        debugger.TYPE_CODE_PTR = 1
+
+        def pointer(fields, tag):
+            target = types.SimpleNamespace(tag=tag)
+            target.strip_typedefs = lambda: target
+            kind = types.SimpleNamespace(code=1, target=lambda: target)
+            kind.strip_typedefs = lambda: kind
+            value = mock.MagicMock()
+            value.type, value.is_optimized_out, value.is_unavailable = kind, False, False
+            value.__int__.return_value = 0 if fields is None else 1
+            value.dereference.return_value = fields
+            return value
+
+        def string(text):
+            chars = mock.Mock()
+            chars.string.return_value = text
+            fields = {'len': len(text.encode('utf-8')), 'val': chars}
+            return pointer(fields, '_zend_string'), fields, chars
+
+        filename, file_fields, file_chars = string(str(code))
+        function, function_fields, function_chars = string('Pinova\\OTP\\dispatch')
+        name, name_fields, name_chars = string('Pinova\\OTP\\Dispatcher')
+        scope_fields = {'ce_flags': 0, 'name': name}
+        scope = pointer(scope_fields, '_zend_class_entry')
+        fields = {'type': 2, 'fn_flags': 0, 'filename': filename, 'function_name': function,
+                  'scope': pointer(None, '_zend_class_entry')}
+        argument = pointer(fields, '_zend_op_array')
+        frame = debugger.newest_frame.return_value
+        frame.name.return_value = 'zend_real_jit_func'
+        frame.read_var.side_effect = lambda name: argument if name == 'op_array' else (_ for _ in ()).throw(AssertionError('Forbidden C variable read.'))
+        debugger.solib_name.return_value = module
+        original_build = capture.build_id
+        controls = {'module_identity': identity}
+
+        def build(path):
+            return controls['module_identity'] if str(path) == module else original_build(path)
+
+        with (mock.patch.object(capture, 'build_id', side_effect=build),
+              mock.patch.object(Path, 'resolve', real_resolve)):
+            yield base, debugger, written, {'arm': arm, 'code': code, 'fields': fields, 'argument': argument,
+                'scope': scope, 'scope_fields': scope_fields, 'file_fields': file_fields, 'file_chars': file_chars,
+                'function_fields': function_fields, 'function_chars': function_chars,
+                'name_fields': name_fields, 'name_chars': name_chars, 'controls': controls}
+
+
 class NativeCrashEvidenceTest(unittest.TestCase):
+    def test_compiled_target_reads_only_verified_bounded_code_metadata(self):
+        for case in ('function', 'method', 'closure', 'anonymous_class'):
+            with self.subTest(target=case), compiled_target_fixture() as (base, debugger, written, data):
+                expected = 'Pinova\\OTP\\dispatch'
+                if case == 'method':
+                    data['fields']['scope'] = data['scope']
+                    data['function_chars'].string.return_value = 'dispatch'
+                    data['function_fields']['len'] = len('dispatch')
+                    expected = 'Pinova\\OTP\\Dispatcher::dispatch'
+                elif case in ('closure', 'anonymous_class'):
+                    data['function_chars'].string.side_effect = AssertionError('Forbidden anonymous name read.')
+                    data['name_chars'].string.side_effect = AssertionError('Forbidden anonymous class name read.')
+                    if case == 'closure':
+                        data['fields']['fn_flags'] = 1 << 22
+                    else:
+                        data['fields']['scope'] = data['scope']
+                        data['scope_fields']['ce_flags'] = 1 << 2
+                    expected = 'anonymous'
+                capture.gdb_extract()
+                result = written.call_args.args[1]
+                target = result.get('compiled_target')
+                self.assertIsInstance(target, dict, 'The existing extraction seam must retain a finite compiled-target observation.')
+                self.assertEqual(target, {'state': 'recorded', 'kind': 'anonymous' if case in ('closure', 'anonymous_class') else case,
+                                          'fqn': expected, 'origin': 'plugin'})
+                debugger.newest_frame.return_value.read_var.assert_called_once_with('op_array')
+                data['file_chars'].string.assert_called_once_with(encoding='utf-8', errors='strict', length=data['file_fields']['len'])
+                if case in ('closure', 'anonymous_class'):
+                    data['function_chars'].string.assert_not_called()
+                    data['name_chars'].string.assert_not_called()
+                self.assertFalse(result['resource_acceptance'])
+                self.assertNotIn(str(data['arm']), json.dumps(result))
+                self.assertNotIn('main_ranges', json.dumps(result))
+        with core_collection_fixture() as (base, arm, core, debugger):
+            target = {'state': 'recorded', 'kind': 'function', 'fqn': 'Pinova\\OTP\\dispatch', 'origin': 'plugin'}
+            original = debugger.side_effect
+
+            def with_target(command, timeout):
+                original(command, timeout)
+                output = base / 'gdb-output.json'
+                output.write_text(json.dumps({**json.loads(output.read_text()), 'compiled_target': target}))
+
+            debugger.side_effect = with_target
+            self.assertEqual(capture.collect(base.parent, arm, base)['cores'][0]['compiled_target'], target)
+
+    def test_compiled_target_refuses_unverified_frames_values_and_source_without_leaks(self):
+        cases = ('other_frame', 'other_module', 'wrong_build', 'missing_argument', 'optimized', 'unavailable',
+                 'null', 'wrong_type', 'eval', 'filename_bound', 'name_bound', 'hostile_name', 'nul_name',
+                 'nonascii_name', 'outside_code', 'symlink_escape', 'symlink_noncode')
+        for case in cases:
+            with self.subTest(target=case), compiled_target_fixture() as (base, debugger, written, data):
+                frame = debugger.newest_frame.return_value
+                if case == 'other_frame':
+                    frame.name.return_value = 'zend_execute'
+                elif case == 'other_module':
+                    debugger.solib_name.return_value = '/usr/sbin/php-fpm8.4'
+                elif case == 'wrong_build':
+                    data['controls']['module_identity'] = 'ffeeddccbbaa9988'
+                elif case == 'missing_argument':
+                    frame.read_var.side_effect = RuntimeError('SECRET /private/?otp=123456')
+                elif case in ('optimized', 'unavailable'):
+                    setattr(data['argument'], 'is_' + ('optimized_out' if case == 'optimized' else 'unavailable'), True)
+                elif case == 'null':
+                    data['argument'].__int__.return_value = 0
+                elif case == 'wrong_type':
+                    data['argument'].type.strip_typedefs().target().tag = '_zval_struct'
+                elif case == 'eval':
+                    data['fields']['type'] = 4
+                elif case == 'filename_bound':
+                    data['file_fields']['len'] = 4097
+                elif case == 'name_bound':
+                    data['function_fields']['len'] = 513
+                elif case in ('hostile_name', 'nul_name', 'nonascii_name'):
+                    text = 'SECRET /private/?otp=123456' if case == 'hostile_name' else 'safe\0SECRET' if case == 'nul_name' else 'نام'
+                    data['function_fields']['len'] = len(text.encode('utf-8'))
+                    data['function_chars'].string.return_value = text
+                elif case in ('outside_code', 'symlink_escape', 'symlink_noncode'):
+                    outside = data['arm'] / ('runtime/src/SECRET.txt' if case == 'symlink_noncode' else 'wordpress/wp-content/uploads/SECRET.php')
+                    outside.parent.mkdir(parents=True, exist_ok=True)
+                    outside.write_text('<?php\n')
+                    if case.startswith('symlink_'):
+                        data['code'].unlink()
+                        data['code'].symlink_to(outside)
+                    else:
+                        data['file_chars'].string.return_value = str(outside)
+                        data['file_fields']['len'] = len(str(outside))
+                capture.gdb_extract()
+                result = written.call_args.args[1]
+                target = result.get('compiled_target')
+                self.assertIsInstance(target, dict)
+                self.assertNotEqual(target.get('state'), 'recorded')
+                if case in ('other_frame', 'other_module', 'wrong_build'):
+                    frame.read_var.assert_not_called()
+                if case == 'filename_bound':
+                    data['file_chars'].string.assert_not_called()
+                if case in ('filename_bound', 'outside_code', 'symlink_escape', 'symlink_noncode'):
+                    data['function_chars'].string.assert_not_called()
+                    data['name_chars'].string.assert_not_called()
+                if case == 'name_bound':
+                    data['function_chars'].string.assert_not_called()
+                self.assertTrue(result['frames'], 'Metadata refusal must preserve ordinary C-frame evidence.')
+                self.assertFalse(result['resource_acceptance'])
+                for rejected in ('SECRET', '/private/', '123456', str(data['arm']), 'main_ranges'):
+                    self.assertNotIn(rejected, json.dumps(result))
+
     def test_preflight_preserves_strict_partial_settings_from_one_native_snapshot(self):
         for case in ('extension_version', 'extensions_shape', 'zend_version', 'extra_key', 'missing_key', 'hostile_value'):
             with self.subTest(settings_case=case), core_collection_fixture() as (base, arm, core, debugger):

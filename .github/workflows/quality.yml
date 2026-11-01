@@ -2,7 +2,7 @@ name: Quality
 
 on:
   push:
-    branches-ignore: ['proof/diagnostics-native-crash-opcache-symbols']
+    branches-ignore: ['proof/diagnostics-native-crash-compiled-target']
   pull_request:
   workflow_dispatch:
 

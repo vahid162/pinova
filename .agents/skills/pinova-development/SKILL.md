@@ -22,6 +22,8 @@ Work from a repository checkout or disposable worktree, never from an installed 
 5. Establish the requested delivery boundary before reporting completion. For this project, a new version intended for installation or site testing is a GitHub-delivered release: local worktree changes and local ZIPs are intermediate evidence only.
 6. Route vulnerabilities through root `SECURITY.md`; never place exploit details, credentials, private routes, or production identifiers in public issues, pull requests, logs, or artifacts.
 
+For disposable real-plugin browser tests, keep PHP diagnostics logged while disabling their display in responses; verify logging readiness and retain bounded interval evidence as described in the quality reference.
+
 For native FPM acceptance, require the declared runtime profile and its separate post-workload evidence described in the quality reference. A corrected test environment does not resolve earlier native failures or authorize a new public compatibility restriction.
 
 ## Non-negotiable invariants

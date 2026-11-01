@@ -460,6 +460,9 @@ jobs:
         env:
           HPOS_MODE: ${{ matrix.hpos }}
         run: npx wp-env run cli wp option update woocommerce_custom_orders_table_enabled "$HPOS_MODE"
+      - name: Verify real-plugin PHP diagnostic configuration
+        id: php-diagnostic-preflight
+        run: node tools/report-php-fixture-diagnostics.mjs preflight
       - name: Characterize real activated plugin lifecycle
         run: bash tools/run-third-party-baseline.sh
       - name: Prepare real-plugin browser routes
@@ -469,6 +472,9 @@ jobs:
           npx wp-env run cli wp rewrite flush --hard
       - name: Verify real mobile proof in the browser
         run: npx playwright test --config tests/browser/integrations.config.mjs
+      - name: Report bounded real-plugin PHP diagnostics before cleanup
+        if: ${{ always() && steps.php-diagnostic-preflight.outcome == 'success' }}
+        run: node tools/report-php-fixture-diagnostics.mjs collect
       - name: Upload real-plugin browser evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -477,6 +483,7 @@ jobs:
           path: |
             playwright-report/browser
             test-results/browser
+            test-results/php-diagnostics
           if-no-files-found: ignore
           retention-days: 7
       - name: Remove only this job's disposable environment

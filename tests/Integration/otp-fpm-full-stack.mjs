@@ -5,6 +5,7 @@ import { chmodSync, closeSync, existsSync, fstatSync, openSync, readFileSync, re
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { PHPProcessSampler, inspectProcess } from './php-process-sampler.mjs';
+import { FpmSettingsObservation } from './fpm-settings-observation.mjs';
 import { revisionWorkload } from './otp-fpm-revision-workload.mjs';
 import { DIAGNOSTIC_CASES, readDiagnosticEvidence, sanitizeCheckpoint } from './otp-fpm-diagnostic-evidence.mjs';
 
@@ -56,7 +57,12 @@ const selectedPhp = process.env.PINOVA_FPM_PHP_VERSION || '8.3';
 ensure(['8.3', '8.4'].includes(selectedPhp), 'Unexpected selected native PHP runtime.');
 const matchesPhp = value => new RegExp(`^${selectedPhp.replace('.', '\\.')}\\.[0-9]+$`).test(value || '');
 const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
-const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
+const verificationSeam = process.env.PINOVA_FPM_VERIFICATION_SEAM === '1';
+const probeCase = verificationSeam ? { id: 'verification-seam', php: '8.4', logging: 'diagnostic', arm: process.env.PINOVA_FPM_REVISION_ARM }
+    : DIAGNOSTIC_CASES.find(item => item.id === probeId);
+ensure(!verificationSeam || (probeId === 'verification-seam' && process.env.GITHUB_REF === 'refs/heads/proof/diagnostics-verification-seam'),
+    'Wrong source-bisection probe identity.');
+const fpmObserver = verificationSeam ? new FpmSettingsObservation(JSON.parse(readFileSync(path.join(repo, 'tests/fixtures/verification-seam-bisection.json'))).fpm_ini_expected_literals) : null;
 ensure(!probeId || (probeCase && probeCase.php === selectedPhp && probeCase.logging === process.env.PINOVA_FPM_LOGGING_PROFILE &&
     probeCase.arm === process.env.PINOVA_FPM_REVISION_ARM), 'Invalid focused diagnostic case.');
 const checkpointStarted = performance.now();
@@ -64,6 +70,7 @@ let checkpointFailed = false;
 let lastCheckpoint = null;
 let measuring = false;
 function checkpoint(phaseName, flowIndex = null) {
+    if (verificationSeam && phaseName === 'warm_verify') fpmObserver.freezeBeforeVerification();
     const value = sanitizeCheckpoint({ phase: phaseName, flow_index: flowIndex, arm: process.env.PINOVA_FPM_REVISION_ARM,
         at_ms: Date.now(), elapsed_ms: Math.round(performance.now() - checkpointStarted), pid: process.pid });
     lastCheckpoint = value;
@@ -122,6 +129,7 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                 if (text.length > 2 * 1024 * 1024) outgoing.destroy(new Error('Fixture response exceeds its bound.'));
             });
             incoming.on('end', async () => {
+                if (category !== 'fpm_status' && label !== 'status') fpmObserver?.observe(incoming.headers, incoming.statusCode, phase);
                 httpDiagnostics.push({ phase, category, status: incoming.statusCode,
                     selected_php: matchesPhp(incoming.headers['x-pinova-fixture-php']) });
                 if (httpDiagnostics.length > 24) httpDiagnostics.shift();
@@ -520,7 +528,7 @@ async function verifyFlow(flow, purpose = 'login') {
 }
 
 let receipt = {
-    fixture: 'pinova-full-stack-fpm-v1', state: 'running',
+    fixture: 'pinova-full-stack-fpm-v1', state: 'running', ...(verificationSeam ? { resource_acceptance: false } : {}),
     source_commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
     profile: { wordpress: manifest.wordpress, plugins: manifest.deployed_plugins.map(({ slug, version, sha256 }) => ({ slug, version, sha256 })),
         php_cli: execFileSync(process.env.PINOVA_FPM_PHP_BIN || 'php', ['-r', 'echo PHP_VERSION;'], { encoding: 'utf8' }), redis: 'not_applicable_not_installed' },
@@ -997,5 +1005,6 @@ try {
         receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), last_phase: lastCheckpoint,
             checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
     }
+    if (verificationSeam) receipt.fpm_runtime = fpmObserver.receipt(events());
     sanitizedReceipt('full-stack-result.json', receipt);
 }

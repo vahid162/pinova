@@ -5,6 +5,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, real
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateCampaign } from './revision-resource-gates.mjs';
+import { interpretVerificationSeam } from './fpm-settings-observation.mjs';
 import { DIAGNOSTIC_CASES, REVISION_ARM_TIMEOUT_MS, executionEvidence, readDiagnosticEvidence } from './otp-fpm-diagnostic-evidence.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -19,18 +20,26 @@ requireFact(process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONM
 'Revision campaign requires exact disposable hosted ownership.');
 requireFact(!existsSync(runRoot) && realpathSync(campaignRoot) === campaignRoot &&
     lstatSync(campaignRoot).uid === 0 && !existsSync(`${campaignRoot}/fixture-owned`), 'Revision campaign path is already owned.');
-const contractBytes = readFileSync(path.join(repo, 'tests/fixtures/diagnostics-campaign.json'));
+const seam = process.env.PINOVA_FPM_VERIFICATION_SEAM === '1';
+requireFact(!seam || process.env.GITHUB_REF === 'refs/heads/proof/diagnostics-verification-seam', 'Wrong source-bisection branch.');
+const contractBytes = readFileSync(path.join(repo, seam ? 'tests/fixtures/verification-seam-bisection.json' : 'tests/fixtures/diagnostics-campaign.json'));
 const contract = JSON.parse(contractBytes);
 const php = process.env.PINOVA_FPM_PHP_VERSION;
 const logging = process.env.PINOVA_FPM_LOGGING_PROFILE;
 requireFact(contract.php.includes(php) && contract.logging_profiles.includes(logging), 'Invalid revision campaign profile.');
 const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
-const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
+const probeCase = seam ? { id: 'verification-seam', php: '8.4', logging: 'diagnostic' } : DIAGNOSTIC_CASES.find(item => item.id === probeId);
 requireFact(!probeId || (probeCase && probeCase.php === php && probeCase.logging === logging), 'Invalid focused diagnostic case.');
-const order = probeCase ? [probeCase.arm] : contract.order;
+const order = seam ? contract.order : probeCase ? [probeCase.arm] : contract.order;
+requireFact(!seam || probeId === 'verification-seam', 'Wrong source-bisection probe.');
 const git = args => execFileSync('git', args, { cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-const candidate = git(['rev-parse', 'HEAD']).trim();
-requireFact(candidate === process.env.GITHUB_SHA && /^[a-f0-9]{40}$/.test(candidate), 'Candidate is not this exact workflow revision.');
+const workflowSource = git(['rev-parse', 'HEAD']).trim();
+requireFact(workflowSource === process.env.GITHUB_SHA && /^[a-f0-9]{40}$/.test(workflowSource), 'Candidate is not this exact workflow revision.');
+const candidate = seam ? contract.runtime_source : workflowSource;
+if (seam) requireFact(candidate === 'a1bb4a8985502e38498bb1df53b719868ced40b8' &&
+    contract.method_baseline_source === 'f55692d2f80936729b198396e04431fad91423db' &&
+    JSON.stringify(order) === '["a1","b1","b2","a2","a3","b3"]' && contract.resource_acceptance === false,
+'Source-bisection contract changed.');
 requireFact(git(['rev-parse', `${contract.baseline_source}^{commit}`]).trim() === contract.baseline_source, 'Pinned baseline commit is unavailable.');
 const manifestShape = sha => {
     const manifest = JSON.parse(git(['show', `${sha}:composer.json`]));
@@ -41,19 +50,48 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const inventoryBytes = readFileSync(path.join(repo, 'vendor/composer/installed.json'));
 const inventory = hash(inventoryBytes);
 const lock = readFileSync(path.join(repo, 'composer.lock'));
+if (seam) requireFact(lock.equals(Buffer.from(git(['show', `${candidate}:composer.lock`]))), 'Source bisection changed locked dependencies.');
+const runtimeSource = arm => seam ? candidate : arm.startsWith('a') ? contract.baseline_source : candidate;
+function verificationMethod(source) {
+    const start = source.indexOf('\tpublic static function verify_with_flow(');
+    const end = source.indexOf('\n\t/** Record an operational failure without retaining exception text or request secrets. */', start);
+    requireFact(start >= 0 && end > start && source.indexOf('\tpublic static function verify_with_flow(', start + 1) < 0,
+        'Verification method boundary is not unique.');
+    return { start, end, value: source.slice(start, end) };
+}
+function prepareVerificationVariant(arm) {
+    if (!seam) return;
+    const target = `${runRoot}/runtime/${contract.runtime_path}`;
+    const before = readFileSync(target, 'utf8');
+    const current = verificationMethod(before);
+    const baseline = verificationMethod(git(['show', `${contract.method_baseline_source}:${contract.runtime_path}`]));
+    requireFact(hash(before) === contract.runtime_sha256.A && hash(current.value) === contract.method_sha256.A &&
+        hash(baseline.value) === contract.method_sha256.B, 'Pinned method bytes changed.');
+    const variant = contract.variants[arm];
+    requireFact(['A', 'B'].includes(variant), 'Unknown verification variant.');
+    const after = variant === 'B' ? before.slice(0, current.start) + baseline.value + before.slice(current.end) : before;
+    requireFact(hash(after) === contract.runtime_sha256[variant] &&
+        verificationMethod(after).value === (variant === 'B' ? baseline.value : current.value), 'Method replacement proof failed.');
+    if (variant === 'B') writeFileSync(target, after);
+    activeRow.runtime_variant = variant;
+    activeRow.runtime_byte_proof = { path: contract.runtime_path, before_sha256: hash(before), after_sha256: hash(after),
+        method_sha256: hash(verificationMethod(after).value), all_other_runtime_bytes: 'unchanged_exact_source_archive',
+        resource_acceptance: false };
+    writeFileSync(`${runRoot}/verification-seam`, 'source-only-verification-seam-v1\n', { mode: 0o600 });
+}
 writeFileSync(`${campaignRoot}/fixture-owned`, `${id}:${attempt}\n`, { mode: 0o600 });
 chmodSync(campaignRoot, 0o755); // Traversal for sanitized receipts; config/private files retain private modes.
 mkdirSync(`${campaignRoot}/receipt`, { mode: 0o755 });
 mkdirSync(`${campaignRoot}/private`, { mode: 0o700 });
 const identity = { candidate, inventory, php, logging, profile: null };
-const campaign = { schema: probeCase ? 'pinova.warmup-diagnostic.v1' : contract.schema, state: 'running', contract, contract_sha256: hash(contractBytes),
-    identity, composer_lock_sha256: hash(lock), dependency_normalization: 'both_code_revisions_use_identical_candidate_locked_production_vendor',
+const campaign = { schema: seam ? contract.schema : probeCase ? 'pinova.warmup-diagnostic.v1' : contract.schema, state: 'running', contract, contract_sha256: hash(contractBytes),
+    identity, workflow_source: workflowSource, composer_lock_sha256: hash(lock), dependency_normalization: 'both_code_revisions_use_identical_candidate_locked_production_vendor',
     ...(probeCase ? { resource_acceptance: false, probe_case: probeCase } : {}),
-    active_arm: null, arms: order.map(arm => ({ arm, source: arm.startsWith('a') ? contract.baseline_source : candidate,
+    active_arm: null, arms: order.map(arm => ({ arm, source: runtimeSource(arm), ...(seam ? { resource_acceptance: false } : {}),
         inventory_sha256: inventory, profile_sha256: null, source_archive_sha256: null,
         state: 'unexecuted', measurement: null, failure_phase: null, cleanup_status: 'not_started' })) };
 function save() {
-    const target = `${campaignRoot}/receipt/${probeCase ? 'warmup-diagnostic' : 'revision-comparison'}.json`;
+    const target = `${campaignRoot}/receipt/${seam ? 'verification-seam-bisection' : probeCase ? 'warmup-diagnostic' : 'revision-comparison'}.json`;
     writeFileSync(target, JSON.stringify(campaign, null, 2) + '\n', { mode: 0o600 }); chmodSync(target, 0o644);
 }
 save();
@@ -82,7 +120,7 @@ try {
         activeRow = campaign.arms.find(row => row.arm === arm);
         activeRow.state = 'running'; activeRow.cleanup_status = 'pending';
         campaign.active_arm = arm; save();
-        const source = arm.startsWith('a') ? contract.baseline_source : candidate;
+        const source = runtimeSource(arm);
         mkdirSync(runRoot, { mode: 0o700 });
         cpSync(`${campaignRoot}/wordpress`, `${runRoot}/wordpress`, { recursive: true, errorOnExist: true, force: false });
         mkdirSync(`${runRoot}/runtime`, { mode: 0o700 });
@@ -91,6 +129,7 @@ try {
         const archive = execFileSync('git', ['archive', '--format=tar', source], { cwd: repo, maxBuffer: 64 * 1024 * 1024 });
         activeRow.source_archive_sha256 = hash(archive); save();
         execFileSync('tar', ['--extract', '--directory', `${runRoot}/runtime`, '--no-same-owner'], { input: archive });
+        prepareVerificationVariant(arm);
         cpSync(path.join(repo, 'vendor'), `${runRoot}/runtime/vendor`, { recursive: true, errorOnExist: true, force: false });
         writeFileSync(`${runRoot}/runtime/composer.lock`, lock, { mode: 0o600 });
         requireFact(hash(readFileSync(`${runRoot}/runtime/vendor/composer/installed.json`)) === inventory, 'Normalized inventory changed.');
@@ -124,6 +163,9 @@ try {
             state: execution.status === 0 && receipt?.state === 'passed' ? 'passed' : 'failed',
             measurement: probeCase ? null : receipt?.revision_arm || null,
             ...(probeCase ? { diagnostic: receipt?.diagnostic_probe || null } : {}),
+            ...(seam ? { fpm_runtime: receipt?.fpm_runtime || null, resource_acceptance: false,
+                fpm_configuration_sha256: existsSync(`${runRoot}/fpm.conf`) ? hash(readFileSync(`${runRoot}/fpm.conf`)) : null,
+                nginx_configuration_sha256: existsSync(`${runRoot}/nginx.conf`) ? hash(readFileSync(`${runRoot}/nginx.conf`)) : null } : {}),
             ...(activeRow.parent_diagnostic_evidence ? {
                 diagnostic_evidence: receipt?.diagnostic_evidence || activeRow.parent_diagnostic_evidence } : {}),
             failure_phase: receipt?.failure_phase || (execution.status === 0 ? null : 'fixture_execution'),
@@ -137,7 +179,34 @@ try {
         campaign.active_arm = null; save();
     }
     campaignPhase = 'campaign_evaluation';
-    if (probeCase) {
+    if (seam) {
+        const completed = row => row.state === 'passed' && row.cleanup_status === 'complete' &&
+            row.diagnostic?.state === 'completed' && row.diagnostic?.warm_flows_completed === 10 &&
+            row.diagnostic?.runner_opportunities === 10 && row.diagnostic?.verification_workers === 10 &&
+            row.diagnostic?.provider_attempts_observed === 10;
+        const signal11 = row => row.failure_phase === 'revision_warmup' &&
+            row.diagnostic_evidence?.checkpoint?.phase === 'warm_verify' &&
+            row.diagnostic_evidence?.fpm_termination?.read_success === true &&
+            (row.diagnostic_evidence?.fpm_termination?.events || [])
+                .some(event => event.event === 'signal_exit' && event.signal_number === 11 && event.pool === 'fixture');
+        const first = campaign.arms[0];
+        const identitiesMatch = campaign.arms.every(row => row.inventory_sha256 === inventory && identity.profile && row.profile_sha256 === identity.profile &&
+            row.source === candidate && row.source_archive_sha256 === first.source_archive_sha256 &&
+            row.fpm_configuration_sha256 && row.fpm_configuration_sha256 === first.fpm_configuration_sha256 &&
+            row.nginx_configuration_sha256 && row.nginx_configuration_sha256 === first.nginx_configuration_sha256 &&
+            row.runtime_byte_proof?.after_sha256 === contract.runtime_sha256[row.runtime_variant] && row.fpm_runtime?.complete === true);
+        const allCleaned = campaign.arms.every(row => row.cleanup_status === 'complete');
+        const allClassified = campaign.arms.every(row => completed(row) || signal11(row));
+        campaign.observations = { comparable: identitiesMatch && allCleaned, all_arms_classified: allClassified,
+            all_arms_completed: campaign.arms.every(completed),
+            A_signal11_arms: campaign.arms.filter(row => row.runtime_variant === 'A' && signal11(row)).map(row => row.arm),
+            B_signal11_arms: campaign.arms.filter(row => row.runtime_variant === 'B' && signal11(row)).map(row => row.arm),
+            completed_A: campaign.arms.filter(row => row.runtime_variant === 'A' && completed(row)).length,
+            completed_B: campaign.arms.filter(row => row.runtime_variant === 'B' && completed(row)).length };
+        campaign.interpretation = interpretVerificationSeam(campaign.observations);
+        campaign.state = campaign.observations.comparable && allClassified
+            ? 'diagnostic_recorded' : 'needs_review';
+    } else if (probeCase) {
         // A focused warmup is never an input to the six-arm resource gate.
         campaign.state = campaign.arms.every(row => row.state === 'passed' && row.cleanup_status === 'complete' &&
             row.diagnostic?.state === 'completed' && row.diagnostic?.warm_flows_completed === 10 &&
@@ -148,7 +217,7 @@ try {
     }
     save();
     process.stdout.write(`${probeCase ? 'Focused warmup diagnosis (no resource acceptance)' : 'Revision comparison'} ${campaign.state}: ${campaign.arms.length} predeclared arms retained.\n`);
-    if (!['passed', 'diagnostic_completed'].includes(campaign.state)) process.exitCode = 1;
+    if (!['passed', 'diagnostic_completed', 'diagnostic_recorded'].includes(campaign.state)) process.exitCode = 1;
 } catch (error) {
     campaign.state = 'needs_review';
     campaign.infrastructure_failure = 'campaign_ownership_or_execution_incomplete';

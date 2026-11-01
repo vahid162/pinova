@@ -1,0 +1,66 @@
+{
+  "schema": "pinova.verification-seam-bisection.v1",
+  "resource_acceptance": false,
+  "runtime_source": "a1bb4a8985502e38498bb1df53b719868ced40b8",
+  "baseline_source": "a1bb4a8985502e38498bb1df53b719868ced40b8",
+  "method_baseline_source": "f55692d2f80936729b198396e04431fad91423db",
+  "runtime_path": "src/Services/OTPService.php",
+  "runtime_sha256": {
+    "A": "0269aa90e2acbe7bf25f5a72c22126407c4286e0e80569a9dd777eb4e607495c",
+    "B": "de9c83da259cc1ad8b10d9a179bcc8420696bf78d3ff52c103e694fca7b9a599"
+  },
+  "method_sha256": {
+    "A": "c8501d597755203f634b5f41f8eb22cfbdb4e707a32007ad7b899fd4bcd6ac45",
+    "B": "841385843062f90bd3716a7d2faf7bb7a58e3bb2f45f0f1048ec2d479227b277"
+  },
+  "order": [
+    "a1",
+    "b1",
+    "b2",
+    "a2",
+    "a3",
+    "b3"
+  ],
+  "variants": {
+    "a1": "A",
+    "b1": "B",
+    "b2": "B",
+    "a2": "A",
+    "a3": "A",
+    "b3": "B"
+  },
+  "pairs": [
+    [
+      "a1",
+      "b1"
+    ],
+    [
+      "a2",
+      "b2"
+    ],
+    [
+      "a3",
+      "b3"
+    ]
+  ],
+  "php": [
+    "8.4"
+  ],
+  "logging_profiles": [
+    "diagnostic"
+  ],
+  "fpm_ini_expected_literals": {
+    "opcache.enable": "1",
+    "opcache.enable_cli": "0",
+    "opcache.optimization_level": "0x7FFEBFFF",
+    "opcache.jit": "1235",
+    "opcache.jit_buffer_size": "256M",
+    "opcache.protect_memory": "0",
+    "opcache.validate_timestamps": "1",
+    "opcache.file_update_protection": "2",
+    "opcache.revalidate_freq": "2"
+  },
+  "variant_B_only_change": "exact_baseline_verify_with_flow_method",
+  "workload": "unchanged_complete_revision_warmup_only",
+  "retries": 0
+}

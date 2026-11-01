@@ -60,7 +60,7 @@ const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
 const startupProof = process.env.PINOVA_FPM_STARTUP_JIT_PROOF === '1';
 const probeCase = startupProof ? { id: 'startup-jit', php: '8.4', logging: 'diagnostic', arm: process.env.PINOVA_FPM_REVISION_ARM }
     : DIAGNOSTIC_CASES.find(item => item.id === probeId);
-ensure(!startupProof || (probeId === 'startup-jit' && process.env.GITHUB_REF === 'refs/heads/proof/diagnostics-startup-jit'),
+ensure(!startupProof || (probeId === 'startup-jit' && process.env.GITHUB_REF === 'refs/heads/proof/diagnostics-creator-blacklist'),
     'Wrong startup JIT proof identity.');
 ensure(!probeId || (probeCase && probeCase.php === selectedPhp && probeCase.logging === process.env.PINOVA_FPM_LOGGING_PROFILE &&
     probeCase.arm === process.env.PINOVA_FPM_REVISION_ARM), 'Invalid focused diagnostic case.');
@@ -538,7 +538,7 @@ let receipt = {
 };
 try {
     if (startupProof) receipt.startup_jit_launch = captureStartupLaunch({ root, master, tick,
-        binary: process.env.PINOVA_FPM_BIN, mode: process.env.PINOVA_FPM_STARTUP_JIT_MODE });
+        binary: process.env.PINOVA_FPM_BIN, variant: process.env.PINOVA_FPM_CREATOR_BLACKLIST_VARIANT });
     phase = 'readiness';
     checkpoint('readiness');
     await new Promise(resolve => provider.listen(providerPort, '127.0.0.1', resolve));
@@ -998,6 +998,7 @@ try {
     mobileCases.clear();
     if (probeCase) {
         receipt.resource_acceptance = false;
+        if (startupProof) receipt.shipping_fix = false;
         receipt.diagnostic_checkpoint_failed = checkpointFailed;
     }
     if (probeCase || (process.env.PINOVA_FPM_REVISION_ARM && receipt.state === 'failed')) {
@@ -1005,6 +1006,6 @@ try {
             checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
     }
     if (startupProof) await preserveOutcomeAndObserve(receipt, sanitizedReceipt, signal => readPostworkJit({
-        root, master, tick, expectedMode: process.env.PINOVA_FPM_STARTUP_JIT_MODE, signal }));
+        root, master, tick, variant: process.env.PINOVA_FPM_CREATOR_BLACKLIST_VARIANT, startupLaunch: receipt.startup_jit_launch, signal }));
     else sanitizedReceipt('full-stack-result.json', receipt);
 }

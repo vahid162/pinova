@@ -1,5 +1,5 @@
 {
-  "schema": "pinova.cold-start-jit-comparison.v1",
+  "schema": "pinova.active-jit-creator-blacklist-comparison.v1",
   "resource_acceptance": false,
   "shipping_fix": false,
   "application_source": "09e9d334ead9b06d0888736fb467915ecb272230",
@@ -29,12 +29,20 @@
   },
   "startup_modes": {
     "A": "1235",
-    "B": "disable"
+    "B": "1235"
   },
   "common_jit_buffer_bytes": 268435456,
   "common_launch_flags": [
     "-d",
-    "opcache.jit_buffer_size=256M"
+    "opcache.jit=1235",
+    "-d",
+    "opcache.jit_buffer_size=256M",
+    "-d",
+    "opcache.file_cache=",
+    "-d",
+    "opcache.preload=",
+    "-d",
+    "opcache.blacklist_filename=RUN/startup-opcache-blacklist.txt"
   ],
   "php": [
     "8.4"
@@ -50,7 +58,7 @@
     "provider_attempts_observed": 10
   },
   "retries": 0,
-  "only_AB_difference": "cold_master_startup_opcache.jit_value",
+  "only_AB_difference": "owned_blacklist_file_contents_empty_or_resolved_Creator_prefix",
   "all_application_logging_retained": true,
   "native_CLI_unchanged": true,
   "retained_marker_limit": 256,
@@ -64,9 +72,9 @@
     "tests/fixtures/diagnostics-campaign.json": "c585e1647f38c9c6d5acabd8625683ccb9333e296078459fc565ed336bd29ed9"
   },
   "baseline_shell_sha256": "fb4d6fd08acf2152a4ff882bf8f30e920d2c209bb0aa23ea9253acfa07780daf",
-  "proof_shell_sha256": "ae3872380a3d70678e39c573a78acd9d2b8d8e0898b72bc14d1b6f308cb50651",
-  "mode_helper_sha256": "ee74d96c5b8f86f68d3696ac62d9a8fe5db639db9f25c95911d8aa2b97c6937f",
-  "mode_endpoint_sha256": "7d831b50747bf65ec32a8325e00e19485ac59d013d69cfcb6e6405ae1d61e648",
+  "proof_shell_sha256": "5c9ce92fc3e336076910d6c6cbb2fc5aa6ee7b0513fcfc6b6ccf09781edad56c",
+  "mode_helper_sha256": "2d39fff19291f6e4d2f40d68a0a3bd98e17aca49450c8962c72309a781d2496d",
+  "mode_endpoint_sha256": "5c318bb07d62b4abc15eeb08f654a3e33eb689ddc5a2bf34da055a03991ff31c",
   "mode_limit": "post_failure_responder_may_be_replacement_not_signaled_worker",
   "pairs": [
     [
@@ -89,6 +97,12 @@
       "opcache.jit=1235",
       "-d",
       "opcache.jit_buffer_size=256M",
+      "-d",
+      "opcache.file_cache=",
+      "-d",
+      "opcache.preload=",
+      "-d",
+      "opcache.blacklist_filename=RUN/startup-opcache-blacklist.txt",
       "--allow-to-run-as-root",
       "-F",
       "-y",
@@ -97,13 +111,55 @@
     "B": [
       "FPM",
       "-d",
-      "opcache.jit=disable",
+      "opcache.jit=1235",
       "-d",
       "opcache.jit_buffer_size=256M",
+      "-d",
+      "opcache.file_cache=",
+      "-d",
+      "opcache.preload=",
+      "-d",
+      "opcache.blacklist_filename=RUN/startup-opcache-blacklist.txt",
       "--allow-to-run-as-root",
       "-F",
       "-y",
       "RUN/fpm.conf"
     ]
-  }
+  },
+  "reproducer_source": "7ea60a6c7f0b2f092e5342840d6c34d68ffdabc0",
+  "reproducer_tree": "50cd8a24efd3dd0cecbe90134e9967f8b54d8924",
+  "php_patch": "8.4.27",
+  "common_file_cache": "",
+  "common_preload": "",
+  "blacklist_variant_contents": {
+    "A": "empty_file",
+    "B": "actual_resolved_owned_Creator_source_path_plus_one_newline"
+  },
+  "expected_creator_cached": {
+    "A": true,
+    "B": false
+  },
+  "prefix_semantics": "absolute_path_prefix_not_end_anchored",
+  "scope_limit": "all_Creator_trait_methods_and_dependent_class_cache_links",
+  "control_nonreproduction": "inconclusive_not_a_fix",
+  "no_preprimary_PHP_observation": true,
+  "interpretation_rule": {
+    "minimum_matched_A_signal11": 1,
+    "all_A_classified": true,
+    "completed_B": 3,
+    "all_runtime_and_cache_evidence_complete": true,
+    "other_outcomes": "inconclusive",
+    "failure_rate_estimate": false,
+    "engine_root_cause_established": false,
+    "completion_requires": "functional_counts_plus_complete_preteardown_tail_and_no_retained_owned_pool_signal_timeout_or_nonzero_exit"
+  },
+  "source_copy_identity": {
+    "selected_dependency": "normalized_application_vendor_nesbot_carbon_2.73.0",
+    "retained_target_fqn": "Carbon\\Carbon::__construct",
+    "retained_target_origin": "vendor",
+    "exact_native_copy_attested": false,
+    "limitation": "Prior native target evidence did not retain an exact filename or path hash; selected Creator copy is a source-supported candidate, not a fresh worker origin attestation. Cache membership does not prove constructor-origin identity.",
+    "do_not_expand_to_other_plugin_copies": true
+  },
+  "native_parser_limit": "Unmatched line count includes normal startup lines; report count and do not claim complete semantic log assurance."
 }

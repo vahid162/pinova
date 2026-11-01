@@ -225,11 +225,14 @@ trap cleanup_processes EXIT
 diagnostic_checkpoint native_start
 fpm_launch=("${fpm_bin}" --allow-to-run-as-root -F -y "${run_root}/fpm.conf")
 if [[ "${PINOVA_FPM_STARTUP_JIT_PROOF:-}" == 1 ]]; then
-	[[ "${GITHUB_REF:-}" == refs/heads/proof/diagnostics-startup-jit && "${php_version}" == 8.4 \
+	[[ "${GITHUB_REF:-}" == refs/heads/proof/diagnostics-creator-blacklist && "${php_version}" == 8.4 \
 		&& "${PINOVA_FPM_LOGGING_PROFILE:-}" == diagnostic \
-		&& "${PINOVA_FPM_STARTUP_JIT_MODE:-}" =~ ^(1235|disable)$ ]]
+		&& "${PINOVA_FPM_STARTUP_JIT_MODE:-}" == 1235 \
+		&& "${PINOVA_FPM_CREATOR_BLACKLIST_VARIANT:-}" =~ ^[AB]$ \
+		&& -f "${run_root}/startup-opcache-blacklist.txt" && ! -L "${run_root}/startup-opcache-blacklist.txt" ]]
 	cp "${fixture_root}/startup-jit-mode.php" "${run_root}/startup-jit-mode.php"
-	fpm_launch=("${fpm_bin}" -d "opcache.jit=${PINOVA_FPM_STARTUP_JIT_MODE}" -d opcache.jit_buffer_size=256M \
+	fpm_launch=("${fpm_bin}" -d opcache.jit=1235 -d opcache.jit_buffer_size=256M \
+		-d opcache.file_cache= -d opcache.preload= -d "opcache.blacklist_filename=${run_root}/startup-opcache-blacklist.txt" \
 		--allow-to-run-as-root -F -y "${run_root}/fpm.conf")
 fi
 "${fpm_launch[@]}" > "${run_root}/private/fpm-start.log" 2>&1 &

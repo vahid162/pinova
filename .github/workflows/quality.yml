@@ -2,7 +2,7 @@ name: Quality
 
 on:
   push:
-    branches-ignore: ['proof/diagnostics-startup-jit']
+    branches-ignore: ['proof/diagnostics-startup-jit', 'proof/diagnostics-creator-blacklist']
   pull_request:
   workflow_dispatch:
 

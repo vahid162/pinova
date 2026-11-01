@@ -1,0 +1,199 @@
+name: Supplemental active JIT acceptance (never merge)
+
+on:
+  push:
+    branches: ['proof/diagnostics-active-jit-acceptance']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnostics-active-jit-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: Active JIT ${{ matrix.kind }} / PHP ${{ matrix.php }} / ${{ matrix.logging }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { kind: source, php: '8.3', logging: normal }
+          - { kind: source, php: '8.3', logging: diagnostic }
+          - { kind: source, php: '8.4', logging: normal }
+          - { kind: source, php: '8.4', logging: diagnostic }
+          - { kind: full, php: '8.3', logging: diagnostic }
+          - { kind: full, php: '8.4', logging: diagnostic }
+    env:
+      PINOVA_FPM_ACTIVE_JIT_PROOF: creator-prefix-v1
+      PINOVA_ACTIVE_JOB_KIND: ${{ matrix.kind }}
+      PINOVA_TEST_PROFILE: third-party
+      PINOVA_TEST_PLUGIN_SET: deployed
+      PINOVA_FPM_FULL_STACK_ROOT: /tmp/pinova-fpm-full-${{ github.run_id }}-${{ github.run_attempt }}
+      PINOVA_FPM_CAMPAIGN_ROOT: /tmp/pinova-fpm-revisions-${{ github.run_id }}-${{ github.run_attempt }}
+      PINOVA_FPM_BIN: /usr/sbin/php-fpm${{ matrix.php }}
+      PINOVA_FPM_PHP_BIN: /usr/bin/php${{ matrix.php }}
+      PINOVA_FPM_PHP_VERSION: ${{ matrix.php }}
+      PINOVA_FPM_LOGGING_PROFILE: ${{ matrix.logging }}
+      PINOVA_FPM_NGINX_BIN: /usr/sbin/nginx
+      PINOVA_FPM_MYSQL_SOCKET: /var/run/mysqld/mysqld.sock
+      PINOVA_FPM_MYSQL_DEFAULTS_FILE: /tmp/pinova-fpm-revisions-${{ github.run_id }}-${{ github.run_attempt }}/mysql-admin.cnf
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          extensions: curl, dom, fileinfo, gd, mbstring, pdo_mysql, simplexml, xml, xmlreader, xmlwriter, zip
+          tools: composer:2.10.3, wp-cli:2.12.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.21.0'
+      - name: Require the exact proof branch and first attempt
+        run: |
+          test "${GITHUB_REF}" = refs/heads/proof/diagnostics-active-jit-acceptance
+          test "${GITHUB_RUN_ATTEMPT}" = 1
+          test "$(git rev-parse 117e434bf65f093ad9d05f15cd180d34b4193ba9^{tree})" = 2f52e09f470431bfb3b1320e9812dca2515c201c
+          test "$(git rev-parse 96386b9fdd803086e9ecfe2af421034976dc185d^{tree})" = dc72906dfd80f4d254fb99b94e495995a2e8fe7c
+      - name: Validate native FPM profile evidence before provisioning
+        run: |
+          node --check tests/Integration/postwork-jit-evidence.mjs
+          node --check tests/Integration/otp-fpm-full-stack.mjs
+          node --check tests/Integration/otp-fpm-revision-campaign.mjs
+          bash -n tests/Integration/otp-fpm-full-stack.sh
+          php -l tests/fixtures/fpm-otp/startup-jit-mode.php
+          node --test tests/js/postwork-jit-evidence.test.mjs
+          node --test tests/js/fixture-http-failures.test.mjs
+          node --test tests/js/otp-fpm-diagnostic-evidence.test.mjs tests/js/php-process-sampler.test.mjs tests/js/revision-resource-gates.test.mjs
+      - name: Provision disposable native tools
+        run: |
+          sudo add-apt-repository --yes ppa:ondrej/php
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends "php${PINOVA_FPM_PHP_VERSION}-fpm" "php${PINOVA_FPM_PHP_VERSION}-curl" "php${PINOVA_FPM_PHP_VERSION}-gd" "php${PINOVA_FPM_PHP_VERSION}-mbstring" "php${PINOVA_FPM_PHP_VERSION}-mysql" "php${PINOVA_FPM_PHP_VERSION}-xml" "php${PINOVA_FPM_PHP_VERSION}-zip" nginx
+          sudo systemctl start mysql.service
+          sudo install -d -m 0755 "${PINOVA_FPM_CAMPAIGN_ROOT}"
+          sudo install -m 0600 /dev/null "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}"
+          printf '[client]\nuser=root\npassword=root\n' | sudo tee "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}" > /dev/null
+          echo "PINOVA_FPM_WP_CLI=$(command -v wp)" >> "${GITHUB_ENV}"
+      - name: Prepare one normalized dependency inventory and verified profile
+        run: |
+          composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+          npm ci --ignore-scripts
+          node tools/prepare-third-party-fixtures.mjs
+          wp_version="$(node -p "require('./tests/fixtures/third-party-baseline.json').wordpress")"
+          curl --fail --silent --show-error --location --max-time 90 "https://wordpress.org/wordpress-${wp_version}.tar.gz" \
+            | sudo tar -xz -C "${PINOVA_FPM_CAMPAIGN_ROOT}"
+          sudo "${PINOVA_FPM_PHP_BIN}" "${PINOVA_FPM_WP_CLI}" core verify-checksums --path="${PINOVA_FPM_CAMPAIGN_ROOT}/wordpress" --version="${wp_version}" --allow-root
+      - name: Run each declared source campaign or complete diagnostic suite once
+        run: |
+          sudo env GITHUB_ACTIONS="${GITHUB_ACTIONS}" RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT}" \
+            GITHUB_RUN_ID="${GITHUB_RUN_ID}" GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}" GITHUB_SHA="${GITHUB_SHA}" GITHUB_REF="${GITHUB_REF}" \
+            GITHUB_WORKSPACE="${GITHUB_WORKSPACE}" PATH="${PATH}" \
+            PINOVA_FPM_FULL_STACK_ROOT="${PINOVA_FPM_FULL_STACK_ROOT}" PINOVA_FPM_CAMPAIGN_ROOT="${PINOVA_FPM_CAMPAIGN_ROOT}" \
+            PINOVA_FPM_BIN="${PINOVA_FPM_BIN}" PINOVA_FPM_NGINX_BIN="${PINOVA_FPM_NGINX_BIN}" \
+            PINOVA_FPM_PHP_BIN="${PINOVA_FPM_PHP_BIN}" PINOVA_FPM_PHP_VERSION="${PINOVA_FPM_PHP_VERSION}" \
+            PINOVA_FPM_LOGGING_PROFILE="${PINOVA_FPM_LOGGING_PROFILE}" PINOVA_FPM_ACTIVE_JIT_PROOF="${PINOVA_FPM_ACTIVE_JIT_PROOF}" \
+            PINOVA_ACTIVE_JOB_KIND="${PINOVA_ACTIVE_JOB_KIND}" \
+            PINOVA_FPM_WP_CLI="${PINOVA_FPM_WP_CLI}" PINOVA_FPM_MYSQL_SOCKET="${PINOVA_FPM_MYSQL_SOCKET}" \
+            PINOVA_FPM_MYSQL_DEFAULTS_FILE="${PINOVA_FPM_MYSQL_DEFAULTS_FILE}" \
+            node --input-type=module <<'JS'
+          import { execFileSync, spawnSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
+          import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+          import { activeProofSelected, readActiveContract } from './tests/Integration/postwork-jit-evidence.mjs';
+          if (!activeProofSelected()) throw new Error('Proof selector missing.');
+          const contract = readActiveContract(), repo = process.cwd();
+          const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+          let result;
+          if (process.env.PINOVA_ACTIVE_JOB_KIND === 'source') {
+              result = spawnSync('node', ['tests/Integration/otp-fpm-revision-campaign.mjs'], { stdio: 'inherit', env: process.env });
+          } else {
+              if (process.env.PINOVA_ACTIVE_JOB_KIND !== 'full' || process.env.PINOVA_FPM_LOGGING_PROFILE !== 'diagnostic') throw new Error('Job scope mismatch.');
+              const root = process.env.PINOVA_FPM_FULL_STACK_ROOT, campaign = process.env.PINOVA_FPM_CAMPAIGN_ROOT;
+              if (existsSync(root)) throw new Error('Full-suite path must be fresh.');
+              mkdirSync(root, { mode: 0o755 }); mkdirSync(`${root}/runtime`, { mode: 0o755 });
+              cpSync(`${campaign}/wordpress`, `${root}/wordpress`, { recursive: true, force: false, errorOnExist: true });
+              const archive = execFileSync('git', ['archive', '--format=tar', contract.candidate_source], { maxBuffer: 64 * 1024 * 1024 });
+              execFileSync('tar', ['--extract', '--directory', `${root}/runtime`, '--no-same-owner'], { input: archive });
+              cpSync(`${repo}/vendor`, `${root}/runtime/vendor`, { recursive: true, force: false, errorOnExist: true });
+              const lock = readFileSync(`${repo}/composer.lock`);
+              writeFileSync(`${root}/runtime/composer.lock`, lock, { mode: 0o600 });
+              const identity = { schema: 'pinova.active-runtime-source.v1', application_source: contract.candidate_source,
+                  application_tree: contract.candidate_tree, workflow_source: process.env.GITHUB_SHA, source_archive_sha256: sha(archive),
+                  inventory_sha256: sha(readFileSync(`${repo}/vendor/composer/installed.json`)), composer_lock_sha256: sha(lock),
+                  logging_profile: 'diagnostic', source_recipe: 'pinned_git_archive_with_normalized_locked_production_vendor', crashed_constructor_copy_attested: false };
+              writeFileSync(`${root}/runtime-identity.json`, JSON.stringify(identity) + '\n', { mode: 0o600 });
+              result = spawnSync('bash', ['tests/Integration/otp-fpm-full-stack.sh'], { stdio: 'inherit', env: { ...process.env,
+                  PINOVA_FPM_PLUGIN_ROOT: `${root}/runtime`, PINOVA_FPM_ACTIVE_APPLICATION_SOURCE: contract.candidate_source } });
+          }
+          process.exitCode = result.status === 0 && !result.signal && !result.error ? 0 : 1;
+          JS
+      - name: Independently require full-suite source, active mode, native evidence and cleanup
+        if: always() && matrix.kind == 'full'
+        run: |
+          sudo env GITHUB_ACTIONS="${GITHUB_ACTIONS}" RUNNER_ENVIRONMENT="${RUNNER_ENVIRONMENT}" GITHUB_REF="${GITHUB_REF}" \
+            GITHUB_RUN_ID="${GITHUB_RUN_ID}" GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}" GITHUB_SHA="${GITHUB_SHA}" PINOVA_FPM_ACTIVE_JIT_PROOF="${PINOVA_FPM_ACTIVE_JIT_PROOF}" \
+            PINOVA_FPM_FULL_STACK_ROOT="${PINOVA_FPM_FULL_STACK_ROOT}" PINOVA_FPM_PHP_VERSION="${PINOVA_FPM_PHP_VERSION}" \
+            PINOVA_FPM_BIN="${PINOVA_FPM_BIN}" PATH="${PATH}" node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
+          import { chmodSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+          import { activeProofSelected, readActiveContract, validateActiveProfile, activeNativeGate, validateActiveCleanup, activeLoggingGate } from './tests/Integration/postwork-jit-evidence.mjs';
+          const root = process.env.PINOVA_FPM_FULL_STACK_ROOT, sha = bytes => createHash('sha256').update(bytes).digest('hex');
+          let output = { schema: 'pinova.active-full-suite-acceptance.v1', state: 'needs_review', shipping_fix: false,
+              crashed_constructor_copy_attested: false, configuration_incremental_cost_attributed: false };
+          try {
+              if (!activeProofSelected()) throw new Error();
+              const contract = readActiveContract();
+              const primary = readFileSync(`${root}/receipt/full-stack-result.json`), sidecar = readFileSync(`${root}/receipt/postwork-jit-mode.json`);
+              if (primary.length > 2 * 1024 * 1024 || sidecar.length > 8192) throw new Error();
+              const receipt = JSON.parse(primary), mode = JSON.parse(sidecar);
+              const expectedIdentity = { schema: 'pinova.active-runtime-source.v1', application_source: contract.candidate_source,
+                  application_tree: contract.candidate_tree, workflow_source: process.env.GITHUB_SHA,
+                  source_archive_sha256: sha(execFileSync('git', ['archive', '--format=tar', contract.candidate_source], { maxBuffer: 64 * 1024 * 1024 })),
+                  inventory_sha256: sha(readFileSync('vendor/composer/installed.json')), composer_lock_sha256: sha(readFileSync('composer.lock')),
+                  logging_profile: 'diagnostic', source_recipe: 'pinned_git_archive_with_normalized_locked_production_vendor', crashed_constructor_copy_attested: false };
+              const native = activeNativeGate(receipt.diagnostic_evidence);
+              const logging = activeLoggingGate(receipt.active_proof_logging, { applicationSource: contract.candidate_source, loggingProfile: 'diagnostic' });
+              const cleanupBytes = readFileSync(`${root}/receipt/active-native-cleanup.json`);
+              if (cleanupBytes.length > 2048) throw new Error();
+              const cleanup = JSON.parse(cleanupBytes);
+              const cleanupComplete = validateActiveCleanup(cleanup, { primaryReceiptHash: sha(primary), modeReceiptHash: sha(sidecar),
+                  startupLaunch: receipt.fpm_startup_profile, runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT }) &&
+                  [cleanup.master_pid, cleanup.nginx_pid].every(pid => !existsSync(`/proc/${pid}/cmdline`) ||
+                      !readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(root));
+              const processCoverage = ['baseline', 'candidate'].every(cohort => ['idle', 'normal', 'slow', 'concurrent'].every(kind =>
+                  receipt[cohort]?.[kind]?.resources?.process_coverage?.coverage_complete === true));
+              const bound = validateActiveProfile(mode, { phpMinor: process.env.PINOVA_FPM_PHP_VERSION,
+                  primaryReceiptHash: sha(primary), startupLaunch: receipt.fpm_startup_profile, expectedIdentity,
+                  contractHash: sha(readFileSync('tests/fixtures/diagnostics-active-jit-campaign.json')) });
+              const passed = bound && receipt.state === 'passed' && receipt.tests?.length === contract.full_suite_expected_groups &&
+                  receipt.source_commit === contract.candidate_source && receipt.workflow_source === process.env.GITHUB_SHA &&
+                  receipt.profile.php_cli === mode.php_version && receipt.profile.php_fpm === mode.php_version &&
+                  receipt.fpm_startup_profile.binary_sha256 === sha(readFileSync(realpathSync(process.env.PINOVA_FPM_BIN))) &&
+                  logging.state === 'passed' &&
+                  receipt.cli_cleanup_complete === true && receipt.ordinary_http_worker?.complete === true && native.state === 'passed' && cleanupComplete && processCoverage;
+              output = { ...output, state: passed ? 'passed' : 'needs_review', primary_receipt_sha256: sha(primary),
+                  postwork_receipt_sha256: sha(sidecar), native_gate: native, logging_gate: logging, runtime_profile_bound: bound,
+                  expected_groups: contract.full_suite_expected_groups, completed_groups: receipt.tests?.length ?? 0,
+                  owned_process_cleanup_complete: cleanupComplete, measured_process_coverage_complete: processCoverage, runtime_identity: expectedIdentity };
+          } catch { /* Missing or mismatched evidence remains unaccepted. */ }
+          if (existsSync(`${root}/receipt`)) {
+              writeFileSync(`${root}/receipt/active-full-suite-acceptance.json`, JSON.stringify(output, null, 2) + '\n', { mode: 0o600 });
+              chmodSync(`${root}/receipt/active-full-suite-acceptance.json`, 0o644);
+          }
+          console.log(`Active full-suite supplemental evidence: ${output.state}.`);
+          if (output.state !== 'passed') process.exitCode = 1;
+          JS
+      - name: Retain every bounded sanitized arm and acceptance result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: active-jit-${{ matrix.kind }}-php-${{ matrix.php }}-${{ matrix.logging }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ matrix.kind == 'source' && env.PINOVA_FPM_CAMPAIGN_ROOT || env.PINOVA_FPM_FULL_STACK_ROOT }}/receipt
+          if-no-files-found: error
+          retention-days: 7

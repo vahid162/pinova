@@ -5,7 +5,8 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, real
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateCampaign } from './revision-resource-gates.mjs';
-import { expectedNativeFpmProfile, validatePostworkProfile } from './postwork-jit-evidence.mjs';
+import { expectedNativeFpmProfile, validatePostworkProfile, activeProofSelected, readActiveContract,
+    expectedActiveFpmProfile, validateActiveProfile, activeNativeGate, validateActiveCleanup, activeLoggingGate } from './postwork-jit-evidence.mjs';
 import { DIAGNOSTIC_CASES, REVISION_ARM_TIMEOUT_MS, executionEvidence, readDiagnosticEvidence } from './otp-fpm-diagnostic-evidence.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -20,12 +21,14 @@ requireFact(process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONM
 'Revision campaign requires exact disposable hosted ownership.');
 requireFact(!existsSync(runRoot) && realpathSync(campaignRoot) === campaignRoot &&
     lstatSync(campaignRoot).uid === 0 && !existsSync(`${campaignRoot}/fixture-owned`), 'Revision campaign path is already owned.');
-const contractBytes = readFileSync(path.join(repo, 'tests/fixtures/diagnostics-campaign.json'));
+const activeProof = activeProofSelected();
+if (activeProof) readActiveContract();
+const contractBytes = readFileSync(path.join(repo, activeProof ? 'tests/fixtures/diagnostics-active-jit-campaign.json' : 'tests/fixtures/diagnostics-campaign.json'));
 const contract = JSON.parse(contractBytes);
 const php = process.env.PINOVA_FPM_PHP_VERSION;
 const logging = process.env.PINOVA_FPM_LOGGING_PROFILE;
 requireFact(contract.php.includes(php) && contract.logging_profiles.includes(logging), 'Invalid revision campaign profile.');
-const expectedRuntimeProfile = expectedNativeFpmProfile(php);
+const expectedRuntimeProfile = activeProof ? expectedActiveFpmProfile(php) : expectedNativeFpmProfile(php);
 requireFact(JSON.stringify(contract.fpm_runtime_profiles?.[php]) === JSON.stringify(expectedRuntimeProfile),
     'Declared native FPM profile does not match the fixed runtime profile.');
 const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
@@ -33,8 +36,13 @@ const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
 requireFact(!probeId || (probeCase && probeCase.php === php && probeCase.logging === logging), 'Invalid focused diagnostic case.');
 const order = probeCase ? [probeCase.arm] : contract.order;
 const git = args => execFileSync('git', args, { cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-const candidate = git(['rev-parse', 'HEAD']).trim();
-requireFact(candidate === process.env.GITHUB_SHA && /^[a-f0-9]{40}$/.test(candidate), 'Candidate is not this exact workflow revision.');
+const workflowSource = git(['rev-parse', 'HEAD']).trim();
+const candidate = activeProof ? contract.candidate_source : workflowSource;
+requireFact(workflowSource === process.env.GITHUB_SHA && /^[a-f0-9]{40}$/.test(candidate), 'Candidate is not this exact workflow revision.');
+if (activeProof) {
+    requireFact(git(['rev-parse', `${candidate}^{tree}`]).trim() === contract.candidate_tree &&
+        git(['rev-parse', `${contract.baseline_source}^{tree}`]).trim() === contract.baseline_tree, 'Active proof application trees changed.');
+}
 requireFact(git(['rev-parse', `${contract.baseline_source}^{commit}`]).trim() === contract.baseline_source, 'Pinned baseline commit is unavailable.');
 const manifestShape = sha => {
     const manifest = JSON.parse(git(['show', `${sha}:composer.json`]));
@@ -54,6 +62,8 @@ const identity = { candidate, inventory, php, logging, profile: null };
 const campaign = { schema: probeCase ? 'pinova.warmup-diagnostic.v1' : contract.schema, state: 'running', contract, contract_sha256: hash(contractBytes),
     identity, fpm_binary_sha256: fpmBinaryHash, composer_lock_sha256: hash(lock), dependency_normalization: 'both_code_revisions_use_identical_candidate_locked_production_vendor',
     ...(probeCase ? { resource_acceptance: false, probe_case: probeCase } : {}),
+    ...(activeProof ? { workflow_source: workflowSource, shipping_fix: false, configuration_incremental_cost_attributed: false,
+        crashed_constructor_copy_attested: false, profile_scope: 'absolute_cost_and_logging_source_regression_under_identical_active_exclusion' } : {}),
     active_arm: null, arms: order.map(arm => ({ arm, source: arm.startsWith('a') ? contract.baseline_source : candidate,
         inventory_sha256: inventory, profile_sha256: null, source_archive_sha256: null,
         state: 'unexecuted', measurement: null, failure_phase: null, cleanup_status: 'not_started' })) };
@@ -99,6 +109,15 @@ try {
         cpSync(path.join(repo, 'vendor'), `${runRoot}/runtime/vendor`, { recursive: true, errorOnExist: true, force: false });
         writeFileSync(`${runRoot}/runtime/composer.lock`, lock, { mode: 0o600 });
         requireFact(hash(readFileSync(`${runRoot}/runtime/vendor/composer/installed.json`)) === inventory, 'Normalized inventory changed.');
+        let expectedIdentity;
+        if (activeProof) {
+            expectedIdentity = { schema: 'pinova.active-runtime-source.v1', application_source: source,
+                application_tree: arm.startsWith('a') ? contract.baseline_tree : contract.candidate_tree, workflow_source: workflowSource,
+                source_archive_sha256: activeRow.source_archive_sha256, inventory_sha256: inventory, composer_lock_sha256: hash(lock),
+                logging_profile: logging, source_recipe: 'pinned_git_archive_with_normalized_locked_production_vendor', crashed_constructor_copy_attested: false };
+            writeFileSync(`${runRoot}/runtime-identity.json`, JSON.stringify(expectedIdentity) + '\n', { mode: 0o600 });
+            activeRow.runtime_identity = expectedIdentity;
+        }
         const armDirectory = `${campaignRoot}/receipt/${arm}`;
         mkdirSync(armDirectory, { mode: 0o755 });
         const stdout = `${campaignRoot}/private/${arm}.log`;
@@ -130,8 +149,9 @@ try {
             const bytes = readFileSync(`${runRoot}/receipt/postwork-jit-mode.json`);
             requireFact(bytes.length <= 8192, 'Postwork runtime profile exceeded its bound.');
             const value = JSON.parse(bytes);
-            requireFact(validatePostworkProfile(value, { phpMinor: php, primaryReceiptHash,
-                startupLaunch: receipt?.fpm_startup_profile }) &&
+            requireFact((activeProof ? validateActiveProfile(value, { phpMinor: php, primaryReceiptHash,
+                startupLaunch: receipt?.fpm_startup_profile, expectedIdentity, contractHash: hash(contractBytes) }) :
+                validatePostworkProfile(value, { phpMinor: php, primaryReceiptHash, startupLaunch: receipt?.fpm_startup_profile })) &&
                 receipt.fpm_startup_profile.binary_sha256 === fpmBinaryHash, 'Runtime profile evidence does not match this arm.');
             runtimeProfile = value;
         } catch { /* Unknown profile evidence cannot replace the primary workload outcome. */ }
@@ -146,10 +166,30 @@ try {
             state: execution.status === 0 && receipt?.state === 'passed' ? 'passed' : 'failed',
             measurement: probeCase ? null : receipt?.revision_arm || null,
             ...(probeCase ? { diagnostic: receipt?.diagnostic_probe || null } : {}),
-            ...(activeRow.parent_diagnostic_evidence ? {
+            ...(activeProof || activeRow.parent_diagnostic_evidence ? {
                 diagnostic_evidence: receipt?.diagnostic_evidence || activeRow.parent_diagnostic_evidence } : {}),
             failure_phase: receipt?.failure_phase || (execution.status === 0 ? null : 'fixture_execution'),
         });
+        if (activeProof) {
+            activeRow.native_cleanup_complete = false;
+            try {
+                const cleanupBytes = readFileSync(`${runRoot}/receipt/active-native-cleanup.json`);
+                requireFact(cleanupBytes.length <= 2048, 'Native cleanup receipt exceeded its bound.');
+                const cleanup = JSON.parse(cleanupBytes);
+                activeRow.native_cleanup_complete = validateActiveCleanup(cleanup, { primaryReceiptHash,
+                    modeReceiptHash: hash(readFileSync(`${runRoot}/receipt/postwork-jit-mode.json`)),
+                    startupLaunch: receipt?.fpm_startup_profile, runId: id, attempt });
+                activeRow.native_cleanup = cleanup;
+                const target = `${armDirectory}/active-native-cleanup.json`;
+                writeFileSync(target, cleanupBytes, { mode: 0o600 }); chmodSync(target, 0o644);
+            } catch { /* Missing native cleanup cannot be accepted. */ }
+            activeRow.native_gate = activeNativeGate(receipt?.diagnostic_evidence);
+            activeRow.logging_gate = activeLoggingGate(receipt?.active_proof_logging, { applicationSource: source, loggingProfile: logging });
+            activeRow.owned_controller_cleanup = receipt?.cli_cleanup_complete === true && receipt?.ordinary_http_worker?.complete === true;
+            if (receipt?.source_commit !== source || receipt?.workflow_source !== workflowSource ||
+                receipt?.active_proof_logging?.profile !== logging || receipt?.profile?.php_cli !== expectedRuntimeProfile.php_version ||
+                receipt?.profile?.php_fpm !== expectedRuntimeProfile.php_version) activeRow.state = 'failed';
+        }
         save();
         // No arm is rerun. Subsequent predeclared arms still run after an
         // ordinary assertion failure, preserving the complete campaign.
@@ -176,6 +216,14 @@ try {
         campaign.state = campaign.acceptance.state;
     }
     if (campaign.runtime_profile_gate.state !== 'passed') campaign.state = 'needs_review';
+    if (activeProof) {
+        const masters = campaign.arms.map(row => `${row.fpm_startup_profile?.master_pid}:${row.fpm_startup_profile?.master_start_ticks}`);
+        campaign.active_proof_gate = { state: campaign.arms.every(row => row.native_gate?.state === 'passed' && row.logging_gate?.state === 'passed' &&
+            row.owned_controller_cleanup && row.native_cleanup_complete && row.cleanup_status === 'complete') && new Set(masters).size === contract.order.length ? 'passed' : 'needs_review',
+            fresh_master_count: new Set(masters).size, shipping_fix: false, crashed_constructor_copy_attested: false,
+            configuration_incremental_cost_attributed: false };
+        if (campaign.active_proof_gate.state !== 'passed') campaign.state = 'needs_review';
+    }
     save();
     process.stdout.write(`${probeCase ? 'Focused warmup diagnosis (no resource acceptance)' : 'Revision comparison'} ${campaign.state}: ${campaign.arms.length} predeclared arms retained.\n`);
     if (!['passed', 'diagnostic_completed'].includes(campaign.state)) process.exitCode = 1;

@@ -26,8 +26,21 @@ mysql_socket="${PINOVA_FPM_MYSQL_SOCKET:?Missing existing MySQL Unix socket}"
 [[ "${php_version}" =~ ^8\.[34]$ && -x "${php_bin}" && -x "${fpm_bin}" && -x "${nginx_bin}" && -x "${wp_cli}" && -S "${mysql_socket}" ]]
 [[ "$("${php_bin}" -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')" == "${php_version}" ]]
 export PINOVA_FPM_PHP_VERSION="${php_version}" PINOVA_FPM_PHP_BIN="${php_bin}"
+active_proof=false
+if [[ -n "${PINOVA_FPM_ACTIVE_JIT_PROOF:-}" ]]; then
+	[[ "${PINOVA_FPM_ACTIVE_JIT_PROOF}" == creator-prefix-v1 && "${GITHUB_REF:-}" == refs/heads/proof/diagnostics-active-jit-acceptance \
+		&& "${GITHUB_RUN_ATTEMPT}" == 1 && -z "${PINOVA_FPM_PROBE_CASE:-}" ]]
+	active_proof=true
+fi
 plugin_root="${PINOVA_FPM_PLUGIN_ROOT:-${repo_root}}"
-if [[ "${plugin_root}" != "${repo_root}" ]]; then
+if [[ "${active_proof}" == true ]]; then
+	[[ "${plugin_root}" == "${run_root}/runtime" && -d "${plugin_root}" && ! -L "${plugin_root}" \
+		&& -f "${run_root}/runtime-identity.json" && ! -L "${run_root}/runtime-identity.json" ]]
+fi
+if [[ "${active_proof}" == true && -z "${PINOVA_FPM_REVISION_ARM:-}" ]]; then
+	[[ "${PINOVA_FPM_ACTIVE_APPLICATION_SOURCE:-}" == 117e434bf65f093ad9d05f15cd180d34b4193ba9 \
+		&& "${PINOVA_FPM_LOGGING_PROFILE:-}" == diagnostic ]]
+elif [[ "${plugin_root}" != "${repo_root}" ]]; then
 	[[ "${plugin_root}" == "${run_root}/runtime" && -d "${plugin_root}" && ! -L "${plugin_root}" \
 		&& "${PINOVA_FPM_REVISION_ARM:-}" =~ ^[ab][123]$ && "${PINOVA_FPM_REVISION_SOURCE:-}" =~ ^[a-f0-9]{40}$ ]]
 fi
@@ -174,6 +187,9 @@ php_admin_flag[display_errors] = off
 php_admin_flag[log_errors] = on
 php_admin_value[error_log] = ${run_root}/private/php.log
 EOF
+if [[ "${active_proof}" == true ]]; then
+	printf 'env[PINOVA_FPM_ACTIVE_JIT_PROOF] = creator-prefix-v1\n' >> "${run_root}/fpm.conf"
+fi
 cat > "${run_root}/nginx.conf" <<EOF
 daemon off;
 master_process off;
@@ -206,6 +222,7 @@ EOF
 fpm_pid='' nginx_pid=''
 cleanup_processes() {
 	local status=$? pid command_line
+	local fpm_wait_known=false nginx_wait_known=false fpm_exit_status=null nginx_exit_status=null wait_status
 	trap - EXIT
 	for pid in "${nginx_pid}" "${fpm_pid}"; do
 		if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
@@ -216,9 +233,39 @@ cleanup_processes() {
 				continue
 			fi
 			kill -TERM "${pid}"
-			wait "${pid}" || true
+			if [[ "${active_proof}" == true ]]; then
+				wait_status=0
+				wait "${pid}" || wait_status=$?
+				if [[ "${pid}" == "${fpm_pid}" ]]; then
+					fpm_wait_known=true; fpm_exit_status="${wait_status}"
+				else
+					nginx_wait_known=true; nginx_exit_status="${wait_status}"
+				fi
+			else
+				wait "${pid}" || true
+			fi
 		fi
 	done
+	if [[ "${active_proof}" == true ]]; then
+		local cleanup_state=needs_review primary_digest='' mode_digest='' daemons_gone=false
+		if [[ "${fpm_pid}" =~ ^[0-9]+$ && "${nginx_pid}" =~ ^[0-9]+$ ]] && \
+			! kill -0 "${fpm_pid}" 2>/dev/null && ! kill -0 "${nginx_pid}" 2>/dev/null; then
+			daemons_gone=true
+		fi
+		if [[ "${daemons_gone}" == true && "${fpm_wait_known}" == true && "${nginx_wait_known}" == true \
+			&& "${fpm_exit_status}" == 0 && "${nginx_exit_status}" == 0 \
+			&& -f "${run_root}/receipt/full-stack-result.json" && -f "${run_root}/receipt/postwork-jit-mode.json" ]]; then
+			read -r primary_digest _ < <(sha256sum -- "${run_root}/receipt/full-stack-result.json")
+			read -r mode_digest _ < <(sha256sum -- "${run_root}/receipt/postwork-jit-mode.json")
+			[[ "${primary_digest}" =~ ^[a-f0-9]{64}$ && "${mode_digest}" =~ ^[a-f0-9]{64}$ ]] && cleanup_state=complete
+		fi
+		printf '{"schema":"pinova.active-native-cleanup.v1","state":"%s","run_id":"%s","attempt":"%s","master_pid":%s,"nginx_pid":%s,"primary_receipt_sha256":"%s","postwork_receipt_sha256":"%s","boundary":"after_owned_term_wait","daemons_gone":%s,"fpm_wait_known":%s,"fpm_exit_status":%s,"nginx_wait_known":%s,"nginx_exit_status":%s,"shipping_fix":false}\n' \
+			"${cleanup_state}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" "${fpm_pid:-0}" "${nginx_pid:-0}" "${primary_digest}" "${mode_digest}" \
+			"${daemons_gone}" "${fpm_wait_known}" "${fpm_exit_status}" "${nginx_wait_known}" "${nginx_exit_status}" \
+			> "${run_root}/receipt/active-native-cleanup.json"
+		chmod 0644 "${run_root}/receipt/active-native-cleanup.json"
+		[[ "${cleanup_state}" == complete ]] || status=1
+	fi
 	exit "${status}"
 }
 trap cleanup_processes EXIT
@@ -229,9 +276,22 @@ case "${php_version}" in
 	8.4) fpm_jit_mode=disable; fpm_jit_buffer=64M ;;
 esac
 cp "${fixture_root}/startup-jit-mode.php" "${run_root}/startup-jit-mode.php"
-"${fpm_bin}" -d "opcache.jit=${fpm_jit_mode}" -d "opcache.jit_buffer_size=${fpm_jit_buffer}" \
-	--allow-to-run-as-root -F -y "${run_root}/fpm.conf" > "${run_root}/private/fpm-start.log" 2>&1 &
-fpm_pid=$!
+if [[ "${active_proof}" == true ]]; then
+	creator_path="${run_root}/runtime/vendor/nesbot/carbon/src/Carbon/Traits/Creator.php"
+	blacklist_path="${run_root}/startup-opcache-blacklist.txt"
+	[[ -f "${creator_path}" && ! -L "${creator_path}" && "$(realpath -- "${creator_path}")" == "${creator_path}" \
+		&& ! -e "${blacklist_path}" && ! -L "${blacklist_path}" ]]
+	printf '%s\n' "${creator_path}" > "${blacklist_path}"
+	chmod 0600 "${blacklist_path}"
+	"${fpm_bin}" -d opcache.jit=1235 -d opcache.jit_buffer_size=256M -d opcache.file_cache= -d opcache.preload= \
+		-d "opcache.blacklist_filename=${blacklist_path}" --allow-to-run-as-root -F -y "${run_root}/fpm.conf" \
+		> "${run_root}/private/fpm-start.log" 2>&1 &
+	fpm_pid=$!
+else
+	"${fpm_bin}" -d "opcache.jit=${fpm_jit_mode}" -d "opcache.jit_buffer_size=${fpm_jit_buffer}" \
+		--allow-to-run-as-root -F -y "${run_root}/fpm.conf" > "${run_root}/private/fpm-start.log" 2>&1 &
+	fpm_pid=$!
+fi
 export PINOVA_FPM_MASTER_PID="${fpm_pid}"
 "${nginx_bin}" -p "${run_root}" -c "${run_root}/nginx.conf" > "${run_root}/private/nginx-start.log" 2>&1 &
 nginx_pid=$!

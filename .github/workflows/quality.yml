@@ -2,6 +2,7 @@ name: Quality
 
 on:
   push:
+    branches-ignore: ['proof/diagnostics-active-jit-acceptance']
   pull_request:
   workflow_dispatch:
 

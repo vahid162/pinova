@@ -8,7 +8,8 @@ import path from 'node:path';
 import { createOrdinaryHTTP, ordinaryRuntimeVersion } from './ordinary-http-worker.mjs';
 import { PHPProcessSampler, inspectProcess } from './php-process-sampler.mjs';
 import { revisionWorkload } from './otp-fpm-revision-workload.mjs';
-import { captureStartupLaunch, preserveOutcomeAndObserve, readPostworkJit } from './postwork-jit-evidence.mjs';
+import { captureStartupLaunch, preserveOutcomeAndObserve, readPostworkJit, activeProofSelected, readActiveContract,
+    captureActiveLaunch, readActiveProofJit, preserveActiveOutcome, activeNativeGate, activeLoggingGate } from './postwork-jit-evidence.mjs';
 import { DIAGNOSTIC_CASES, readDiagnosticEvidence, sanitizeCheckpoint } from './otp-fpm-diagnostic-evidence.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -24,6 +25,8 @@ const ensure = (condition, message) => {
 ensure(process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted' &&
     /^\d+$/.test(process.env.GITHUB_RUN_ID || '') && /^\d+$/.test(process.env.GITHUB_RUN_ATTEMPT || '') && root === expected,
 'Full-stack fixture requires exact disposable GitHub ownership.');
+const activeProof = activeProofSelected();
+if (activeProof) readActiveContract();
 const manifest = JSON.parse(readFileSync(path.join(repo, 'tests/fixtures/third-party-baseline.json'), 'utf8'));
 const verified = JSON.parse(readFileSync(path.join(repo, '.build/third-party/verified.json'), 'utf8'));
 ensure(JSON.stringify(verified.plugins) === JSON.stringify(manifest.deployed_plugins) &&
@@ -534,8 +537,14 @@ let receipt = {
     tests,
 };
 try {
-    receipt.fpm_startup_profile = captureStartupLaunch({ root, master, tick,
+    receipt.fpm_startup_profile = (activeProof ? captureActiveLaunch : captureStartupLaunch)({ root, master, tick,
         binary: process.env.PINOVA_FPM_BIN, phpMinor: selectedPhp });
+    if (activeProof) {
+        receipt.workflow_source = receipt.source_commit;
+        receipt.source_commit = receipt.fpm_startup_profile.runtime_identity.application_source;
+        receipt.active_jit_proof = { selector: 'creator-prefix-v1', shipping_fix: false,
+            configuration_incremental_cost_attributed: false, crashed_constructor_copy_attested: false };
+    }
     phase = 'readiness';
     checkpoint('readiness');
     await new Promise(resolve => provider.listen(providerPort, '127.0.0.1', resolve));
@@ -546,6 +555,15 @@ try {
     ensure(setupLine, 'Missing representative-profile setup receipt.');
     const pages = JSON.parse(setupLine.slice('PINOVA_FULL_STACK_RESULT='.length));
     receipt.profile.hpos_enabled = pages.hpos_enabled;
+    if (activeProof) {
+        const selectedLogging = process.env.PINOVA_FPM_LOGGING_PROFILE;
+        const loggingGate = activeLoggingGate(pages.logging, {
+            applicationSource: receipt.fpm_startup_profile.runtime_identity.application_source, loggingProfile: selectedLogging });
+        receipt.active_proof_logging = loggingGate.observed;
+        receipt.active_logging_gate = loggingGate;
+        ensure(loggingGate.state === 'passed', 'Active proof logging profile mismatch for the staged source.');
+        ensure(process.env.PINOVA_FPM_REVISION_ARM || selectedLogging === 'diagnostic', 'Full active proof requires diagnostic logging.');
+    }
     if (probeCase) {
         const logging = pages.logging;
         ensure(logging?.minimum_level === 'warning' && logging.warning_enabled === true &&
@@ -1030,10 +1048,16 @@ try {
         receipt.resource_acceptance = false;
         receipt.diagnostic_checkpoint_failed = checkpointFailed;
     }
-    if (probeCase || (process.env.PINOVA_FPM_REVISION_ARM && receipt.state === 'failed')) {
+    if (activeProof || probeCase || (process.env.PINOVA_FPM_REVISION_ARM && receipt.state === 'failed')) {
         receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), last_phase: lastCheckpoint,
             checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
     }
-    await preserveOutcomeAndObserve(receipt, sanitizedReceipt, signal => readPostworkJit({
-        root, master, tick, phpMinor: selectedPhp, startupLaunch: receipt.fpm_startup_profile, signal }));
+    if (activeProof) {
+        receipt.active_native_gate = activeNativeGate(receipt.diagnostic_evidence);
+        await preserveActiveOutcome(receipt, sanitizedReceipt, signal => readActiveProofJit({
+            root, master, tick, phpMinor: selectedPhp, startupLaunch: receipt.fpm_startup_profile, signal }));
+    } else {
+        await preserveOutcomeAndObserve(receipt, sanitizedReceipt, signal => readPostworkJit({
+            root, master, tick, phpMinor: selectedPhp, startupLaunch: receipt.fpm_startup_profile, signal }));
+    }
 }

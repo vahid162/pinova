@@ -223,7 +223,14 @@ cleanup_processes() {
 }
 trap cleanup_processes EXIT
 diagnostic_checkpoint native_start
-"${fpm_bin}" --allow-to-run-as-root -F -y "${run_root}/fpm.conf" > "${run_root}/private/fpm-start.log" 2>&1 &
+# Override setup-php's injected JIT profile only for this owned FPM master.
+case "${php_version}" in
+	8.3) fpm_jit_mode=tracing; fpm_jit_buffer=0 ;;
+	8.4) fpm_jit_mode=disable; fpm_jit_buffer=64M ;;
+esac
+cp "${fixture_root}/startup-jit-mode.php" "${run_root}/startup-jit-mode.php"
+"${fpm_bin}" -d "opcache.jit=${fpm_jit_mode}" -d "opcache.jit_buffer_size=${fpm_jit_buffer}" \
+	--allow-to-run-as-root -F -y "${run_root}/fpm.conf" > "${run_root}/private/fpm-start.log" 2>&1 &
 fpm_pid=$!
 export PINOVA_FPM_MASTER_PID="${fpm_pid}"
 "${nginx_bin}" -p "${run_root}" -c "${run_root}/nginx.conf" > "${run_root}/private/nginx-start.log" 2>&1 &

@@ -47,6 +47,14 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.21.0'
+      - name: Validate native FPM profile evidence before provisioning
+        run: |
+          node --check tests/Integration/postwork-jit-evidence.mjs
+          node --check tests/Integration/otp-fpm-full-stack.mjs
+          node --check tests/Integration/otp-fpm-revision-campaign.mjs
+          bash -n tests/Integration/otp-fpm-full-stack.sh
+          php -l tests/fixtures/fpm-otp/startup-jit-mode.php
+          node --test tests/js/postwork-jit-evidence.test.mjs
       - name: Provision disposable native tools
         run: |
           sudo add-apt-repository --yes ppa:ondrej/php

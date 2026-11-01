@@ -5,6 +5,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, real
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateCampaign } from './revision-resource-gates.mjs';
+import { expectedNativeFpmProfile, validatePostworkProfile } from './postwork-jit-evidence.mjs';
 import { DIAGNOSTIC_CASES, REVISION_ARM_TIMEOUT_MS, executionEvidence, readDiagnosticEvidence } from './otp-fpm-diagnostic-evidence.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -24,6 +25,9 @@ const contract = JSON.parse(contractBytes);
 const php = process.env.PINOVA_FPM_PHP_VERSION;
 const logging = process.env.PINOVA_FPM_LOGGING_PROFILE;
 requireFact(contract.php.includes(php) && contract.logging_profiles.includes(logging), 'Invalid revision campaign profile.');
+const expectedRuntimeProfile = expectedNativeFpmProfile(php);
+requireFact(JSON.stringify(contract.fpm_runtime_profiles?.[php]) === JSON.stringify(expectedRuntimeProfile),
+    'Declared native FPM profile does not match the fixed runtime profile.');
 const probeId = process.env.PINOVA_FPM_PROBE_CASE || '';
 const probeCase = DIAGNOSTIC_CASES.find(item => item.id === probeId);
 requireFact(!probeId || (probeCase && probeCase.php === php && probeCase.logging === logging), 'Invalid focused diagnostic case.');
@@ -41,13 +45,14 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const inventoryBytes = readFileSync(path.join(repo, 'vendor/composer/installed.json'));
 const inventory = hash(inventoryBytes);
 const lock = readFileSync(path.join(repo, 'composer.lock'));
+const fpmBinaryHash = hash(readFileSync(realpathSync(process.env.PINOVA_FPM_BIN)));
 writeFileSync(`${campaignRoot}/fixture-owned`, `${id}:${attempt}\n`, { mode: 0o600 });
 chmodSync(campaignRoot, 0o755); // Traversal for sanitized receipts; config/private files retain private modes.
 mkdirSync(`${campaignRoot}/receipt`, { mode: 0o755 });
 mkdirSync(`${campaignRoot}/private`, { mode: 0o700 });
 const identity = { candidate, inventory, php, logging, profile: null };
 const campaign = { schema: probeCase ? 'pinova.warmup-diagnostic.v1' : contract.schema, state: 'running', contract, contract_sha256: hash(contractBytes),
-    identity, composer_lock_sha256: hash(lock), dependency_normalization: 'both_code_revisions_use_identical_candidate_locked_production_vendor',
+    identity, fpm_binary_sha256: fpmBinaryHash, composer_lock_sha256: hash(lock), dependency_normalization: 'both_code_revisions_use_identical_candidate_locked_production_vendor',
     ...(probeCase ? { resource_acceptance: false, probe_case: probeCase } : {}),
     active_arm: null, arms: order.map(arm => ({ arm, source: arm.startsWith('a') ? contract.baseline_source : candidate,
         inventory_sha256: inventory, profile_sha256: null, source_archive_sha256: null,
@@ -111,16 +116,33 @@ try {
         save();
         writeFileSync(stdout, `${execution.stdout || ''}\n${execution.stderr || ''}`, { mode: 0o600 });
         let receipt;
+        let primaryReceiptHash = null;
         if (existsSync(`${runRoot}/receipt/full-stack-result.json`)) {
             const bytes = readFileSync(`${runRoot}/receipt/full-stack-result.json`);
             requireFact(bytes.length <= 2 * 1024 * 1024, 'Revision arm receipt exceeded its bound.');
             receipt = JSON.parse(bytes);
+            primaryReceiptHash = hash(bytes);
             const target = `${armDirectory}/full-stack-result.json`;
             writeFileSync(target, bytes, { mode: 0o600 }); chmodSync(target, 0o644);
         }
+        let runtimeProfile = { state: 'unknown', reason: 'runtime_profile_evidence_unavailable_or_invalid' };
+        try {
+            const bytes = readFileSync(`${runRoot}/receipt/postwork-jit-mode.json`);
+            requireFact(bytes.length <= 8192, 'Postwork runtime profile exceeded its bound.');
+            const value = JSON.parse(bytes);
+            requireFact(validatePostworkProfile(value, { phpMinor: php, primaryReceiptHash,
+                startupLaunch: receipt?.fpm_startup_profile }) &&
+                receipt.fpm_startup_profile.binary_sha256 === fpmBinaryHash, 'Runtime profile evidence does not match this arm.');
+            runtimeProfile = value;
+        } catch { /* Unknown profile evidence cannot replace the primary workload outcome. */ }
+        try {
+            const target = `${armDirectory}/postwork-jit-mode.json`;
+            writeFileSync(target, JSON.stringify(runtimeProfile, null, 2) + '\n', { mode: 0o600 }); chmodSync(target, 0o644);
+        } catch { runtimeProfile = { state: 'unknown', reason: 'runtime_profile_evidence_copy_failed' }; }
         const profile = receipt?.profile ? hash(JSON.stringify(receipt.profile)) : null;
         if (identity.profile === null && profile) identity.profile = profile;
-        Object.assign(activeRow, { profile_sha256: profile,
+        Object.assign(activeRow, { profile_sha256: profile, fpm_startup_profile: receipt?.fpm_startup_profile || null,
+            runtime_profile: runtimeProfile,
             state: execution.status === 0 && receipt?.state === 'passed' ? 'passed' : 'failed',
             measurement: probeCase ? null : receipt?.revision_arm || null,
             ...(probeCase ? { diagnostic: receipt?.diagnostic_probe || null } : {}),
@@ -137,6 +159,13 @@ try {
         campaign.active_arm = null; save();
     }
     campaignPhase = 'campaign_evaluation';
+    const runtimeProfilesComplete = campaign.arms.every(row => row.runtime_profile?.state === 'observed' &&
+        row.fpm_startup_profile?.binary_sha256 === fpmBinaryHash && row.cleanup_status === 'complete');
+    const sharedIni = runtimeProfilesComplete && campaign.arms.every(row =>
+        JSON.stringify(row.runtime_profile.ini) === JSON.stringify(campaign.arms[0].runtime_profile.ini));
+    campaign.runtime_profile_gate = { state: runtimeProfilesComplete && sharedIni ? 'passed' : 'needs_review',
+        expected: expectedRuntimeProfile, complete_arms: campaign.arms.filter(row => row.runtime_profile?.state === 'observed').length,
+        common_selected_ini: Boolean(sharedIni), scope: 'postwork_responder_and_pinned_startup_not_signaled_worker' };
     if (probeCase) {
         // A focused warmup is never an input to the six-arm resource gate.
         campaign.state = campaign.arms.every(row => row.state === 'passed' && row.cleanup_status === 'complete' &&
@@ -146,6 +175,7 @@ try {
         campaign.acceptance = evaluateCampaign(campaign.arms, contract, identity);
         campaign.state = campaign.acceptance.state;
     }
+    if (campaign.runtime_profile_gate.state !== 'passed') campaign.state = 'needs_review';
     save();
     process.stdout.write(`${probeCase ? 'Focused warmup diagnosis (no resource acceptance)' : 'Revision comparison'} ${campaign.state}: ${campaign.arms.length} predeclared arms retained.\n`);
     if (!['passed', 'diagnostic_completed'].includes(campaign.state)) process.exitCode = 1;

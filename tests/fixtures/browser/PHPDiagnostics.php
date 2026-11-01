@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Pinova\Tests\Fixtures;
+namespace PinovaFixture\Browser;
 
 /** Read-only, finite diagnostics for the disposable real-plugin fixture. */
 final class PHPDiagnostics {

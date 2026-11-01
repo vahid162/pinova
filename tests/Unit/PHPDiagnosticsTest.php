@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Pinova\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
-use Pinova\Tests\Fixtures\PHPDiagnostics;
+use PinovaFixture\Browser\PHPDiagnostics;
 
 require_once dirname( __DIR__ ) . '/fixtures/browser/PHPDiagnostics.php';
 

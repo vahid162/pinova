@@ -198,6 +198,8 @@ http {
       fastcgi_param SCRIPT_FILENAME \$document_root/index.php;
       fastcgi_param SCRIPT_NAME /index.php;
       fastcgi_pass unix:${run_root}/fpm.sock;
+      fastcgi_buffer_size 16k;
+      fastcgi_buffers 8 16k;
       fastcgi_buffering off;
       fastcgi_read_timeout 25s;
     }

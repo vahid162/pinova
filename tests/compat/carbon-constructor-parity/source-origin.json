@@ -1,0 +1,25 @@
+{
+  "package": "nesbot/carbon",
+  "version": "2.73.0",
+  "source_reference": "9228ce90e1035ff2f0db84b40ec2e023ed802075",
+  "retrieval": "GitHub primary raw source at exact locked reference; source only",
+  "urls": {
+    "src/Carbon/Carbon.php": "https://raw.githubusercontent.com/CarbonPHP/carbon/9228ce90e1035ff2f0db84b40ec2e023ed802075/src/Carbon/Carbon.php",
+    "src/Carbon/CarbonImmutable.php": "https://raw.githubusercontent.com/CarbonPHP/carbon/9228ce90e1035ff2f0db84b40ec2e023ed802075/src/Carbon/CarbonImmutable.php",
+    "src/Carbon/Traits/Creator.php": "https://raw.githubusercontent.com/CarbonPHP/carbon/9228ce90e1035ff2f0db84b40ec2e023ed802075/src/Carbon/Traits/Creator.php",
+    "LICENSE": "https://raw.githubusercontent.com/CarbonPHP/carbon/9228ce90e1035ff2f0db84b40ec2e023ed802075/LICENSE"
+  },
+  "upstream_sha256": {
+    "src/Carbon/Carbon.php": "66d8915a111f9c771e8c4cefadcc13892f4474213062f8eb2ca50811f2c6192b",
+    "src/Carbon/CarbonImmutable.php": "7a414adf4b7d639b2b8e01863e69e5ce12ae9405774e29f049391def17568d66",
+    "src/Carbon/Traits/Creator.php": "b5f00b16f74ba0f0f86f86645ae6a0a10445b63e0ca75939298afb173da4af0a",
+    "LICENSE": "57a20d90f47d71dbfbb681c33f909bdc9e3ba2b82eeb187be1ed19a4910a23c5"
+  },
+  "git_blob_sha1": {
+    "src/Carbon/Carbon.php": "e32569ae3076371a1f9cf42c6c13ef249610a2ec",
+    "src/Carbon/CarbonImmutable.php": "4c9c1cfef56897b7461e0b09b695d5bd12189cd9",
+    "src/Carbon/Traits/Creator.php": "4ffb3e432d2aa4f96811f4b08fdf7c934a2d946a",
+    "LICENSE": "6de45ebf88246e1b8bf9375728f390d538817c60"
+  },
+  "native_executed": false
+}

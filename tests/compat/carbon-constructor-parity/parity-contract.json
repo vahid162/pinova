@@ -1,0 +1,116 @@
+{
+  "schema": "pinova.private-carbon-constructor-parity-contract.v1",
+  "source_reference": "9228ce90e1035ff2f0db84b40ec2e023ed802075",
+  "classes": [
+    "Carbon\\Carbon",
+    "Carbon\\CarbonImmutable"
+  ],
+  "cases": [
+    "default_now",
+    "null_now",
+    "empty_now",
+    "literal_now",
+    "relative_tomorrow",
+    "explicit_utc",
+    "iran_historical_dst",
+    "iran_current",
+    "paris_spring_before",
+    "paris_spring_gap",
+    "paris_autumn_ambiguous",
+    "timezone_object",
+    "timezone_offset",
+    "timezone_integer",
+    "microseconds",
+    "native_mutable_input",
+    "native_immutable_input",
+    "native_timezone_override",
+    "timestamp_zero",
+    "timestamp_negative",
+    "timestamp_positive",
+    "timestamp_fraction",
+    "compact_date",
+    "compact_datetime",
+    "warning_date",
+    "invalid_date",
+    "invalid_timezone",
+    "invalid_native_timezone",
+    "subclass_parent_constructor",
+    "subclass_numeric_late_static",
+    "clone_and_mutability",
+    "serialization_roundtrip"
+  ],
+  "expected_rows_per_process": 64,
+  "exception_cases": [
+    "invalid_date",
+    "invalid_timezone",
+    "invalid_native_timezone"
+  ],
+  "process_isolation": "baseline and candidate separate CLI processes; same PHP binary/dependency inventory/tzdata/locale",
+  "semantic_runtime": "JIT inactive, explicitly observed; this is not the active-JIT proof",
+  "synthetic_clock": "2024-06-15 10:11:12.123456 UTC",
+  "normalized_fields": {
+    "date": [
+      "class",
+      "local",
+      "unix_microseconds",
+      "offset_seconds",
+      "timezone"
+    ],
+    "last_errors": [
+      "warning_count",
+      "error_count",
+      "warnings[{offset,message}]",
+      "errors[{offset,message}]"
+    ],
+    "exception": [
+      "class",
+      "message",
+      "code",
+      "previous chain <=4; no trace/file/line"
+    ],
+    "extra": [
+      "native input before/after",
+      "parent calls",
+      "constructed object ID equality booleans",
+      "clone/mutability",
+      "serialization roundtrip"
+    ]
+  },
+  "allowed_structural_difference": "constructor source location and exact patched file hashes; excluded from value equality and separately attested",
+  "namespace_fallback_limit": {
+    "functions": [
+      "is_numeric",
+      "preg_match",
+      "method_exists",
+      "str_contains",
+      "setlocale",
+      "spl_object_hash"
+    ],
+    "constants": [
+      "LC_NUMERIC"
+    ],
+    "change": "unqualified fallback prefix Carbon\\Traits changes to Carbon; no namespaced override equivalence claim",
+    "unchanged_explicit_global_function": "\\is_string"
+  },
+  "upstream_functions_and_constants_shadowed": false,
+  "expected_outputs": "not generated; baseline values are to be captured once in isolated execution, then compared exactly to candidate on same runtime",
+  "locale_limit": "C only; comma-decimal locale branch not exercised by this fixture",
+  "reflection_limit": "filename/line change is intentional; source identity is verified separately",
+  "future_execution_prerequisites": [
+    "review this frozen bundle",
+    "same normalized locked vendor bytes in both roots except the two guarded class edits",
+    "actual PHP token-source check passes",
+    "bounded isolated hosted run; raw stderr private; any unexpected diagnostics fail the semantic run",
+    "no selective retries; retain both receipts even if comparison fails"
+  ],
+  "native_executed": false,
+  "semantic_parity_proven": false,
+  "active_JIT_fix_proven": false,
+  "shipping_fix": false,
+  "fixture_sha256": {
+    "constructor_parity.php": "a21c61a96ef425e39b116667baec350ae6a51ac6b6e47b8ecb391a3c1c80c846",
+    "check_constructor_source.php": "0bea3979171f77342b7ab128b9932feb11fe0b0ad561bd1e5d49acf7e2a6933e",
+    "compare_parity.py": "0a48851feb82d6d67b23234a0cb88ce5796effc0b642983894b29c02418113ba",
+    "generate_candidate.py": "cd846525d21d33f15413f690d77b45f8f06cbd3f2e8f1c000c51571fb276addc"
+  }
+}

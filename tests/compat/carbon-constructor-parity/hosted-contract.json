@@ -1,0 +1,79 @@
+{
+  "schema": "pinova.hosted-carbon-constructor-parity.v1",
+  "base_commit": "117e434bf65f093ad9d05f15cd180d34b4193ba9",
+  "base_tree": "2f52e09f470431bfb3b1320e9812dca2515c201c",
+  "branch": "proof/carbon-constructor-parity",
+  "source_bundle_manifest_sha256": "b3b6a0f13eae927de6ba6ed3a07560663e1d8e8973921ee7705dfdbb12f5e456",
+  "source_sha256": {
+    "candidate-contract.json": "608f9994ef5c21d2d6ced00b7f0a517ff8646852840c4b6dc687e9caf7f30373",
+    "check_constructor_source.php": "0bea3979171f77342b7ab128b9932feb11fe0b0ad561bd1e5d49acf7e2a6933e",
+    "compare_parity.py": "0a48851feb82d6d67b23234a0cb88ce5796effc0b642983894b29c02418113ba",
+    "constructor_parity.php": "a21c61a96ef425e39b116667baec350ae6a51ac6b6e47b8ecb391a3c1c80c846",
+    "generate_candidate.py": "cd846525d21d33f15413f690d77b45f8f06cbd3f2e8f1c000c51571fb276addc",
+    "parity-contract.json": "85c98a2c8bb8ddfb8a245654042734fe636f5742be8f966e18ee37fed887d66f",
+    "source-origin.json": "4223de389a97d689df652c2f7a72224365223ba2a4b7474d459b4b60327832e8"
+  },
+  "base_source_sha256": {
+    "composer.json": {
+      "sha256": "448eba120b4b1e60678519122acf06bfaad5f19a9bc47049732a1eebcb66dccf",
+      "size": 1628
+    },
+    "composer.lock": {
+      "sha256": "c66822aadc44ac1987c50927a4e475d19a74e3d4bb37a2f1033f39b07fb90c0d",
+      "size": 207799
+    },
+    "utils/class-database.php": {
+      "sha256": "eeb7796c43f3e46a93976bb9469572aee38e32f2aa04d8aa19119c18337bc351",
+      "size": 2435
+    },
+    "utils/class-install.php": {
+      "sha256": "f58c7fb398a65cf63173823d40a66a1736539cd8e1929ddc7c331a4389ead2a8",
+      "size": 477
+    },
+    "utils/class-settings.php": {
+      "sha256": "d4c30915695189b949117051fbd24a8c643b4697c325850e54048e280e171d29",
+      "size": 25865
+    },
+    "utils/class-version.php": {
+      "sha256": "3df7233271d967b247aa310fdbc63021bbfd0c0b74b5862345b84f6357897aa8",
+      "size": 2241
+    }
+  },
+  "matrix": [
+    "8.1",
+    "8.2",
+    "8.3",
+    "8.4",
+    "8.5"
+  ],
+  "composer_version": "2.10.3",
+  "allowed_vendor_differences": [
+    "nesbot/carbon/src/Carbon/Carbon.php",
+    "nesbot/carbon/src/Carbon/CarbonImmutable.php"
+  ],
+  "vendor_inventory": "every regular file path, mode, byte size and SHA256; symlink and special files rejected; before/after immutability required",
+  "limits": {
+    "driver_seconds": 420,
+    "command_seconds": {
+      "composer": 180,
+      "generator": 10,
+      "token": 20,
+      "lint": 10,
+      "semantic": 30,
+      "compare": 10
+    },
+    "command_output_bytes": 2097152,
+    "receipt_bytes": 131072,
+    "inventory_files": 30000,
+    "inventory_file_bytes": 33554432,
+    "inventory_total_bytes": 536870912,
+    "working_file_bytes": 67108864
+  },
+  "retry_count": 0,
+  "semantic_processes_per_matrix_job": 2,
+  "cases_per_semantic_process": 64,
+  "active_JIT_fix_proven": false,
+  "shipping_fix": false,
+  "resource_acceptance": false,
+  "build_integration": false
+}

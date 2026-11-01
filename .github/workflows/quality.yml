@@ -2,6 +2,7 @@ name: Quality
 
 on:
   push:
+    branches-ignore: ['proof/carbon-constructor-parity']
   pull_request:
   workflow_dispatch:
 

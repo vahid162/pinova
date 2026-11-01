@@ -1,0 +1,35 @@
+{
+  "schema": "pinova.private-carbon-constructor-source.v1",
+  "package": "nesbot/carbon",
+  "version": "2.73.0",
+  "source_reference": "9228ce90e1035ff2f0db84b40ec2e023ed802075",
+  "upstream_sha256": {
+    "src/Carbon/Carbon.php": "66d8915a111f9c771e8c4cefadcc13892f4474213062f8eb2ca50811f2c6192b",
+    "src/Carbon/CarbonImmutable.php": "7a414adf4b7d639b2b8e01863e69e5ce12ae9405774e29f049391def17568d66",
+    "src/Carbon/Traits/Creator.php": "b5f00b16f74ba0f0f86f86645ae6a0a10445b63e0ca75939298afb173da4af0a",
+    "LICENSE": "57a20d90f47d71dbfbb681c33f909bdc9e3ba2b82eeb187be1ed19a4910a23c5"
+  },
+  "candidate_sha256": {
+    "src/Carbon/Carbon.php": "d8ee1d202cf480a93a3e79233c9bb6ce95b0b34b6b6ed2ad7f7bbf5d9e75e701",
+    "src/Carbon/CarbonImmutable.php": "5f2515b6dfa2eff3ba70eb361f6f34640fa2804fed00fb663301f19db1b18636",
+    "src/Carbon/Traits/Creator.php": "b5f00b16f74ba0f0f86f86645ae6a0a10445b63e0ca75939298afb173da4af0a",
+    "LICENSE": "57a20d90f47d71dbfbb681c33f909bdc9e3ba2b82eeb187be1ed19a4910a23c5"
+  },
+  "constructor_signature_and_body_sha256": "10965227d44c135140ca5035d638b6a3f5e7ea3db42cc30e2efae09ca4215632",
+  "copied_doc_and_method_sha256": "8c37228940c800647c79ab843d42f712b247f24218201c1a613a9b8407f19377",
+  "patch_sha256": "f53c76693eb887d67d41804a17ace9783a34080da1454dc4129208d5a7ba10cf",
+  "changed_files": [
+    "src/Carbon/Carbon.php",
+    "src/Carbon/CarbonImmutable.php"
+  ],
+  "strict_types": "absent_in_all_three_upstream_and_candidate_files",
+  "constructor_copies_byte_equal": true,
+  "creator_trait_byte_unchanged": true,
+  "license_byte_unchanged": true,
+  "application_logging_changed": false,
+  "native_executed": false,
+  "semantic_parity_proven": false,
+  "JIT_fix_proven": false,
+  "build_integration": false,
+  "shipping_fix": false
+}

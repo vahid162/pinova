@@ -1,0 +1,94 @@
+{
+  "protocol": "native-admission-v1",
+  "branch": "refs/heads/proof/native-admission-20261101",
+  "base_commit": "117e434bf65f093ad9d05f15cd180d34b4193ba9",
+  "base_tree": "2f52e09f470431bfb3b1320e9812dca2515c201c",
+  "never_merge": true,
+  "shipping_fix": false,
+  "resource_acceptance": false,
+  "deployment_ready": false,
+  "native_seconds": 180,
+  "cleanup_seconds": 15,
+  "fixed_cases": [
+    "exact_open",
+    "persistent_close_cache",
+    "invalid_permissions_tokens",
+    "waiter_after_lock",
+    "parent_death",
+    "verified_reopen_refusals",
+    "unrelated_isolation"
+  ],
+  "sources": {
+    "README.md": "3069fedd0ae7f55c1c929a5ce24f68e4c264499b180aec827fd45c16723b6c0c",
+    "admission.conf.in": "2bed300978f6ac51b21582c098db52771b142bf7273f270611acace212b722f9",
+    "admission.py": "f09691c41fd9b365676a21eace735bcf0fbaa492738667e48af67b3f681652bc",
+    "email-guard.sh": "31fdf37d96644e918a373c55b68c5b37324add5b44a742ac4a8d248175344dbd",
+    "general-guard.sh": "b1e6471d0aac43b61af9fb5a18e4012a52d2f287eeff9426418c91ed84be02ce",
+    "otp-guard.sh": "31fdf37d96644e918a373c55b68c5b37324add5b44a742ac4a8d248175344dbd",
+    "proof.py": "0993e6998ac15d8b2cdec6e1fa09b1824cb731945b4c012ca254dcc1a6a2aef5",
+    "provision.sh": "7415067497ea9525934186edda9b4bc5f65ccfe0dd97385ea5750ce1af00f276"
+  },
+  "helper_extraction": {
+    "source_sha256": "7210c76f220904f49a1629d6b609e5bd47ce11e6d3800107499bece6ed8da63d",
+    "symbols_and_adapters": [
+      {
+        "symbol": "Failure",
+        "sha256": "fa777f4fbb5b79e28873f3c1d25d302a79c9f04c394e96cce4efc3c201a0817a"
+      },
+      {
+        "symbol": "need",
+        "sha256": "ab448ca3f660c102905011999bce55c1e9ae34b136021ac8c5f329e2133bdda0"
+      },
+      {
+        "symbol": "sha",
+        "sha256": "fc33541dab55897936faef1ad2869e455cbd6942f02508b99b41efdccc29be21"
+      },
+      {
+        "symbol": "signature",
+        "sha256": "e0c8f954d802d734ac47b4633e50b254e50b4d6b9f848585a1d7570f4a0d7543"
+      },
+      {
+        "symbol": "retain_parent_fd",
+        "sha256": "3c8e62b08645a079b93ad03e4310e672190b4d9a9e4294847b35cde4ea1851a9"
+      },
+      {
+        "symbol": "admission_identity",
+        "sha256": "3a11e262dccfa0b8e42ada53f7d889e2fe036d0bde0e007088c99cdf1b958acb"
+      },
+      {
+        "symbol": "rename_admission",
+        "sha256": "a32ca2a10da2cccc1f4ac2417bceb2387ad1265291543909e99c3f83431e6554"
+      },
+      {
+        "symbol": "PersistentAdmission",
+        "sha256": "a7d03a3f7fdb0dc97306dcd6ba2c2240093123da3338dde78eb020980732c11a"
+      },
+      {
+        "symbol": "verify_admission_binding",
+        "sha256": "ccef48a10f4c188d35ee5e9dba02a83310fe05357810673da35f439f0ec1f30e"
+      },
+      {
+        "adapter": "general",
+        "guard_sha256": "b1e6471d0aac43b61af9fb5a18e4012a52d2f287eeff9426418c91ed84be02ce",
+        "guard_after_last_flock": true,
+        "existing_command_bytes_unchanged_in_reviewed_draft": true
+      },
+      {
+        "adapter": "email",
+        "guard_sha256": "31fdf37d96644e918a373c55b68c5b37324add5b44a742ac4a8d248175344dbd",
+        "guard_after_last_flock": true,
+        "existing_command_bytes_unchanged_in_reviewed_draft": true
+      },
+      {
+        "adapter": "otp",
+        "guard_sha256": "31fdf37d96644e918a373c55b68c5b37324add5b44a742ac4a8d248175344dbd",
+        "guard_after_last_flock": true,
+        "existing_command_bytes_unchanged_in_reviewed_draft": true
+      }
+    ],
+    "nginx_neutral_sha256": "2bed300978f6ac51b21582c098db52771b142bf7273f270611acace212b722f9",
+    "constant_only_helper_substitution": true,
+    "native_executed": false
+  },
+  "production_reader_retirement_proven": false
+}

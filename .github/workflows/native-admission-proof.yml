@@ -1,0 +1,73 @@
+name: NEVER MERGE - native admission proof
+
+on:
+  push:
+    branches: [proof/native-admission-20261101]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-admission-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Execute exactly seven cases on an owned native fixture
+        env:
+          PROOF_RUN_ID: ${{ github.run_id }}
+          PROOF_RUN_ATTEMPT: ${{ github.run_attempt }}
+          PROOF_SHA: ${{ github.sha }}
+          PROOF_REF: ${{ github.ref }}
+        run: |
+          sudo -n env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            GITHUB_ACTIONS=true RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            GITHUB_RUN_ID="$PROOF_RUN_ID" GITHUB_RUN_ATTEMPT="$PROOF_RUN_ATTEMPT" \
+            GITHUB_SHA="$PROOF_SHA" GITHUB_REF="$PROOF_REF" \
+            PYTHONDONTWRITEBYTECODE=1 \
+            PINOVA_ADMISSION_PROOF_ROOT="/tmp/pinova-admission-${PROOF_RUN_ID}-${PROOF_RUN_ATTEMPT}" \
+            PINOVA_NGINX_BINARY="/tmp/pinova-admission-${PROOF_RUN_ID}-${PROOF_RUN_ATTEMPT}/package/root/usr/sbin/nginx" \
+            PINOVA_PROOF_SOURCE="$GITHUB_WORKSPACE/tests/ops/admission-proof" \
+            /bin/bash "$GITHUB_WORKSPACE/tests/ops/admission-proof/provision.sh"
+      - name: Project a finite setup failure if no case receipt exists
+        if: always()
+        env:
+          PROOF_RUN_ID: ${{ github.run_id }}
+          PROOF_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          sudo -n env -i PATH=/usr/bin:/bin \
+            PROOF_RUN_ID="$PROOF_RUN_ID" PROOF_RUN_ATTEMPT="$PROOF_RUN_ATTEMPT" \
+            /usr/bin/python3 - <<'PY'
+          import json, os, pathlib
+          run, attempt = os.environ["PROOF_RUN_ID"], os.environ["PROOF_RUN_ATTEMPT"]
+          assert run.isdigit() and attempt.isdigit()
+          root = pathlib.Path("/tmp/pinova-admission-" + run + "-" + attempt)
+          assert not root.is_symlink()
+          root.mkdir(mode=0o755, exist_ok=True)
+          output = root / "receipt.json"
+          if not output.exists():
+              names = ["exact_open", "persistent_close_cache", "invalid_permissions_tokens",
+                       "waiter_after_lock", "parent_death", "verified_reopen_refusals", "unrelated_isolation"]
+              receipt = {"protocol": "native-admission-v1", "never_merge": True,
+                         "shipping_fix": False, "resource_acceptance": False, "deployment_ready": False,
+                         "drain_proven": False, "production_reader_retirement_proven": False,
+                         "accepted": False, "failure_class": "setup_failed",
+                         "cleanup": "not_established", "cases": [{"name": n, "outcome": "unexecuted"} for n in names]}
+              fd = os.open(output, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o644)
+              with os.fdopen(fd, "w") as handle:
+                  json.dump(receipt, handle, indent=2)
+                  handle.write("\n")
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: native-admission-finite-receipt
+          path: /tmp/pinova-admission-${{ github.run_id }}-${{ github.run_attempt }}/receipt.json
+          if-no-files-found: error
+          retention-days: 7

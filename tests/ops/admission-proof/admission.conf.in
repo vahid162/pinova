@@ -1,0 +1,6 @@
+# Temporary, site-server-level deployment admission. Root controls the open entry.
+# File-test caching must not retain an allow decision after the entry is removed.
+open_file_cache off;
+if (!-f __ADMISSION_OPEN__) {
+    return 503 "Service temporarily unavailable.\n";
+}

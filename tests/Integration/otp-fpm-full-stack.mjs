@@ -4,6 +4,7 @@ import { createServer, request } from 'node:http';
 import { chmodSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { createOrdinaryTimingRecorder, timingProofSerialization } from './ordinary-timing-proof.mjs';
 import { PHPProcessSampler, inspectProcess } from './php-process-sampler.mjs';
 import { revisionWorkload } from './otp-fpm-revision-workload.mjs';
 import { DIAGNOSTIC_CASES, readDiagnosticEvidence, sanitizeCheckpoint } from './otp-fpm-diagnostic-evidence.mjs';
@@ -89,6 +90,7 @@ const delays = new Map();
 const codes = new Map();
 const tests = [];
 const httpDiagnostics = [];
+const ordinaryTimingProof = createOrdinaryTimingRecorder();
 let phase = 'bootstrap';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const now = () => Date.now() / 1000;
@@ -98,15 +100,18 @@ const providerMobile = index => mobile(index).replace(/^0/, '+98');
 function sanitizedReceipt(name, value) {
     ensure(['frozen-resource-gates.json', 'full-stack-result.json'].includes(name), 'Unexpected sanitized receipt target.');
     const target = path.join(receiptRoot, name);
-    writeFileSync(target, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
+    // Metadata is applied to a serialization copy only; evaluation keeps original thresholds.
+    const serializedValue = timingProofSerialization(name, value);
+    writeFileSync(target, JSON.stringify(serializedValue, null, 2) + '\n', { mode: 0o600 });
     // The shell's private umask also applies to Node's requested creation mode.
     // Widen only these allowlisted, sanitized receipts, never logs or WP config.
     chmodSync(target, 0o644);
 }
 
 function http(url, { body, label = 'ordinary', source = 120, headers = {}, method = body ? 'POST' : 'GET',
-    category = new URL(url).pathname === '/fpm-status' ? 'fpm_status' : body ? 'authentication' : 'ordinary', redirects = 0 } = {}) {
+    category = new URL(url).pathname === '/fpm-status' ? 'fpm_status' : body ? 'authentication' : 'ordinary', redirects = 0, timingHop = 0 } = {}) {
     const started = performance.now();
+    const timing = ordinaryTimingProof.start(label, timingHop, started, Date.now());
     return new Promise((resolve, reject) => {
         const serialized = body === undefined ? undefined : JSON.stringify(body);
         const outgoing = request(url, {
@@ -115,6 +120,7 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(serialized),
             } : {}), ...headers },
         }, incoming => {
+            ordinaryTimingProof.headers(timing, performance.now(), incoming.statusCode);
             let text = '';
             incoming.setEncoding('utf8');
             incoming.on('data', chunk => {
@@ -122,6 +128,7 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                 if (text.length > 2 * 1024 * 1024) outgoing.destroy(new Error('Fixture response exceeds its bound.'));
             });
             incoming.on('end', async () => {
+                ordinaryTimingProof.end(timing, performance.now());
                 httpDiagnostics.push({ phase, category, status: incoming.statusCode,
                     selected_php: matchesPhp(incoming.headers['x-pinova-fixture-php']) });
                 if (httpDiagnostics.length > 24) httpDiagnostics.shift();
@@ -131,7 +138,7 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                         const target = new URL(incoming.headers.location, url);
                         ensure(method === 'GET' && body === undefined && target.origin === base && !target.username && !target.password,
                             'Ordinary-page redirect escaped the exact fixture origin.');
-                        const next = await http(target.href, { label, source, headers, category, redirects: redirects - 1 });
+                        const next = await http(target.href, { label, source, headers, category, redirects: redirects - 1, timingHop: timingHop + 1 });
                         resolve({ ...next, ms: performance.now() - started });
                     } catch (error) { reject(error); }
                     return;
@@ -997,5 +1004,16 @@ try {
         receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), last_phase: lastCheckpoint,
             checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
     }
+    // This instrumented proof never grants resource acceptance, even if original gates pass.
+    receipt.resource_acceptance = false;
+    receipt.runtime_source_commit = 'a1bb4a8985502e38498bb1df53b719868ced40b8';
+    const ordinaryPhpMarkers = events().filter(event =>
+        /^(off|on)-normal-(?:[1-9]|10)-page$/.test(event.case) &&
+        ['request_start', 'timing_wp_shutdown'].includes(event.event));
+    receipt.ordinary_timing_proof = ordinaryTimingProof.snapshot(ordinaryPhpMarkers);
+    receipt.ordinary_timing_proof.php_markers = ordinaryPhpMarkers.slice(0, 160);
+    receipt.ordinary_timing_proof.provider_intervals = records.filter(record =>
+        /^(off|on)-normal-(?:[1-9]|10)$/.test(record.case)).map(({ case: label, entered, accepted, pid }) =>
+        ({ label, entered_epoch_s: entered, accepted_epoch_s: accepted, pid }));
     sanitizedReceipt('full-stack-result.json', receipt);
 }

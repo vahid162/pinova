@@ -2,6 +2,7 @@ name: Quality
 
 on:
   push:
+    branches-ignore: ['proof/ordinary-timing-a1bb4a8']
   pull_request:
   workflow_dispatch:
 

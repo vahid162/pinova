@@ -28,20 +28,51 @@ namespace {
 	}
 
 	/** Only finite test labels, PID and timestamps enter the shared evidence. */
-	function pinova_full_stack_marker( string $event ): void {
+	function pinova_full_stack_marker( string $event, array $timing = [] ): void {
 		$case = (string) ( $_SERVER['HTTP_X_PINOVA_FIXTURE_CASE'] ?? getenv( 'PINOVA_FPM_CASE' ) ?: 'setup' );
 		if ( ! preg_match( '/\A[a-z][a-z0-9_-]{0,47}\z/D', $case ) ) {
 			$case = 'invalid';
 		}
-		$allowed = [ 'request_start', 'early_shutdown', 'finished', 'account_lookup', 'provider_enter', 'provider_return', 'blocked_http', 'blocked_mail', 'cli_ready', 'cli_command' ];
+		$allowed = [ 'request_start', 'early_shutdown', 'finished', 'account_lookup', 'provider_enter', 'provider_return', 'blocked_http', 'blocked_mail', 'cli_ready', 'cli_command', 'timing_wp_shutdown' ];
 		if ( ! in_array( $event, $allowed, true ) ) {
 			return;
 		}
 		$entry = [ 'case' => $case, 'event' => $event, 'pid' => getmypid(), 'at' => microtime( true ) ];
+		foreach ( [ 'php_request_start_epoch_s', 'mu_wall_ms', 'mu_cpu_ms' ] as $key ) {
+			if ( isset( $timing[ $key ] ) && ( is_int( $timing[ $key ] ) || is_float( $timing[ $key ] ) )
+				&& is_finite( (float) $timing[ $key ] ) && 0 <= $timing[ $key ] ) {
+				$entry[ $key ] = $timing[ $key ];
+			}
+		}
 		file_put_contents( getenv( 'PINOVA_FPM_FULL_STACK_ROOT' ) . '/events.jsonl', json_encode( $entry ) . "\n", FILE_APPEND | LOCK_EX );
 	}
 
-	pinova_full_stack_marker( 'request_start' );
+	$ordinary_case = (string) ( $_SERVER['HTTP_X_PINOVA_FIXTURE_CASE'] ?? '' );
+	if ( 'fpm-fcgi' === PHP_SAPI && preg_match( '/\A(?:off|on)-normal-(?:[1-9]|10)-page\z/D', $ordinary_case ) ) {
+		$mu_started = hrtime( true );
+		$cpu_ms = static function (): ?float {
+			$usage = getrusage();
+			if ( ! is_array( $usage ) ) { return null; }
+			$total = 0.0;
+			foreach ( [ 'ru_utime.tv_sec' => 1000, 'ru_utime.tv_usec' => 0.001, 'ru_stime.tv_sec' => 1000, 'ru_stime.tv_usec' => 0.001 ] as $key => $factor ) {
+				if ( ! isset( $usage[ $key ] ) || ! is_int( $usage[ $key ] ) || 0 > $usage[ $key ] ) { return null; }
+				$total += $usage[ $key ] * $factor;
+			}
+			return $total;
+		};
+		$mu_cpu = $cpu_ms();
+		pinova_full_stack_marker( 'request_start', [ 'php_request_start_epoch_s' => $_SERVER['REQUEST_TIME_FLOAT'] ?? null ] );
+		// Late WordPress shutdown observation, NOT worker completion or response arrival.
+		add_action( 'shutdown', static function () use ( $mu_started, $mu_cpu, $cpu_ms ): void {
+			$ended_cpu = $cpu_ms();
+			pinova_full_stack_marker( 'timing_wp_shutdown', [
+				'mu_wall_ms' => ( hrtime( true ) - $mu_started ) / 1000000,
+				'mu_cpu_ms' => null !== $mu_cpu && null !== $ended_cpu && $ended_cpu >= $mu_cpu ? $ended_cpu - $mu_cpu : null,
+			] );
+		}, PHP_INT_MAX );
+	} else {
+		pinova_full_stack_marker( 'request_start' );
+	}
 	if ( defined( 'WP_CLI' ) && WP_CLI ) {
 		\WP_CLI::add_hook( 'before_invoke:pinova otp run', static function (): void { pinova_full_stack_marker( 'cli_command' ); } );
 		$barrier = (string) getenv( 'PINOVA_FPM_CLI_BARRIER' );

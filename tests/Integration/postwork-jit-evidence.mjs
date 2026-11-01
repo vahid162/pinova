@@ -207,7 +207,7 @@ export function classifyStartupArm(row, expectedCompleted) {
         ((event.event === 'signal_exit' && integer(event.signal_number, 64) && event.signal_number > 0) ||
          (event.event === 'normal_exit' && integer(event.exit_code, 255)) ||
          (event.event === 'request_timeout' && typeof event.timeout_seconds === 'number' &&
-            Number.isFinite(event.timeout_seconds) && event.timeout_seconds >= 0 && event.timeout_seconds <= 3600000))));
+            Number.isFinite(event.timeout_seconds) && event.timeout_seconds >= 0 && event.timeout_seconds <= 3600000)));
     const nativeComplete = evidence?.collection_boundary === 'controller_before_fpm_teardown' &&
         native?.read_success === true && native.tail_truncated === false && native.event_bound === false &&
         integer(native.invalid_records, 65536) && nativeShape;

@@ -73,7 +73,7 @@
   },
   "baseline_shell_sha256": "fb4d6fd08acf2152a4ff882bf8f30e920d2c209bb0aa23ea9253acfa07780daf",
   "proof_shell_sha256": "5c9ce92fc3e336076910d6c6cbb2fc5aa6ee7b0513fcfc6b6ccf09781edad56c",
-  "mode_helper_sha256": "2d39fff19291f6e4d2f40d68a0a3bd98e17aca49450c8962c72309a781d2496d",
+  "mode_helper_sha256": "7aec74857e455a705ac5956bc24d78315bccfce254a883c0bf213242c7634624",
   "mode_endpoint_sha256": "5c318bb07d62b4abc15eeb08f654a3e33eb689ddc5a2bf34da055a03991ff31c",
   "mode_limit": "post_failure_responder_may_be_replacement_not_signaled_worker",
   "pairs": [

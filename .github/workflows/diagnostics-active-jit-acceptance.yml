@@ -74,6 +74,7 @@ jobs:
           sudo add-apt-repository --yes ppa:ondrej/php
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends "php${PINOVA_FPM_PHP_VERSION}-fpm" "php${PINOVA_FPM_PHP_VERSION}-curl" "php${PINOVA_FPM_PHP_VERSION}-gd" "php${PINOVA_FPM_PHP_VERSION}-mbstring" "php${PINOVA_FPM_PHP_VERSION}-mysql" "php${PINOVA_FPM_PHP_VERSION}-xml" "php${PINOVA_FPM_PHP_VERSION}-zip" nginx
+          sudo phpdismod -v 8.3 -s fpm xdebug
           sudo systemctl start mysql.service
           sudo install -d -m 0755 "${PINOVA_FPM_CAMPAIGN_ROOT}"
           sudo install -m 0600 /dev/null "${PINOVA_FPM_MYSQL_DEFAULTS_FILE}"
@@ -145,8 +146,9 @@ jobs:
           import { activeProofSelected, readActiveContract, validateActiveProfile, activeNativeGate, validateActiveCleanup, activeLoggingGate } from './tests/Integration/postwork-jit-evidence.mjs';
           const root = process.env.PINOVA_FPM_FULL_STACK_ROOT, sha = bytes => createHash('sha256').update(bytes).digest('hex');
           let output = { schema: 'pinova.php83-postwork-diagnostic.v1', state: 'needs_review', diagnostic_only: true,
-              purpose: 'resolve_finite_postwork_observation_unknown', shipping_fix: false, resource_acceptance: false, release_acceptance: false,
+              purpose: 'compatible_active_jit_environment_diagnosis', shipping_fix: false, resource_acceptance: false, release_acceptance: false,
               reference_run_id: 41305053587, reference_unknown_witnesses: 13, reference_unknowns_retroactively_accepted: false,
+              reference_inactive_run_id: 41309368488,
               crashed_constructor_copy_attested: false, configuration_incremental_cost_attributed: false };
           try {
               if (!activeProofSelected()) throw new Error();
@@ -173,7 +175,7 @@ jobs:
               const bound = validateActiveProfile(mode, { phpMinor: process.env.PINOVA_FPM_PHP_VERSION,
                   primaryReceiptHash: sha(primary), startupLaunch: receipt.fpm_startup_profile, expectedIdentity,
                   contractHash: sha(readFileSync('tests/fixtures/diagnostics-active-jit-campaign.json')) });
-              const passed = bound && receipt.state === 'passed' && receipt.tests?.length === contract.full_suite_expected_groups &&
+              const passed = bound && mode.extensions?.xdebug_loaded === false && receipt.state === 'passed' && receipt.tests?.length === contract.full_suite_expected_groups &&
                   receipt.source_commit === contract.candidate_source && receipt.workflow_source === process.env.GITHUB_SHA &&
                   receipt.profile.php_cli === mode.php_version && receipt.profile.php_fpm === mode.php_version &&
                   receipt.fpm_startup_profile.binary_sha256 === sha(readFileSync(realpathSync(process.env.PINOVA_FPM_BIN))) &&

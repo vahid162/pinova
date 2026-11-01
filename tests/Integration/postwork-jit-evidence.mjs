@@ -372,7 +372,7 @@ export async function readActiveProofJit({ root, master, tick, phpMinor, startup
     bound = { ...value, ...binding };
     stage = 'profile';
     const accepted = parseActiveJitMode(text, phpMinor);
-    return { ...accepted, ...binding };
+    return { ...accepted, extensions: value.extensions, ...binding };
     } catch (error) {
         return activeFailureEvidence(stage, error?.proofCode, startupWarnings, bound);
     }

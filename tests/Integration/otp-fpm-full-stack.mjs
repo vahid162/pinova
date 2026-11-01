@@ -4,6 +4,7 @@ import { createServer, request } from 'node:http';
 import { chmodSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { createSamplerGatewayTiming, proofSerialization, readNginxTiming } from './sampler-gateway-timing.mjs';
 import { PHPProcessSampler, inspectProcess } from './php-process-sampler.mjs';
 import { revisionWorkload } from './otp-fpm-revision-workload.mjs';
 import { DIAGNOSTIC_CASES, readDiagnosticEvidence, sanitizeCheckpoint } from './otp-fpm-diagnostic-evidence.mjs';
@@ -89,6 +90,7 @@ const delays = new Map();
 const codes = new Map();
 const tests = [];
 const httpDiagnostics = [];
+const attributionTiming = createSamplerGatewayTiming();
 let phase = 'bootstrap';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const now = () => Date.now() / 1000;
@@ -98,15 +100,16 @@ const providerMobile = index => mobile(index).replace(/^0/, '+98');
 function sanitizedReceipt(name, value) {
     ensure(['frozen-resource-gates.json', 'full-stack-result.json'].includes(name), 'Unexpected sanitized receipt target.');
     const target = path.join(receiptRoot, name);
-    writeFileSync(target, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
+    writeFileSync(target, JSON.stringify(proofSerialization(name, value), null, 2) + '\n', { mode: 0o600 });
     // The shell's private umask also applies to Node's requested creation mode.
     // Widen only these allowlisted, sanitized receipts, never logs or WP config.
     chmodSync(target, 0o644);
 }
 
 function http(url, { body, label = 'ordinary', source = 120, headers = {}, method = body ? 'POST' : 'GET',
-    category = new URL(url).pathname === '/fpm-status' ? 'fpm_status' : body ? 'authentication' : 'ordinary', redirects = 0 } = {}) {
+    category = new URL(url).pathname === '/fpm-status' ? 'fpm_status' : body ? 'authentication' : 'ordinary', redirects = 0, timingHop = 0 } = {}) {
     const started = performance.now();
+    const timing = attributionTiming.clientStart(label, timingHop, started, Date.now());
     return new Promise((resolve, reject) => {
         const serialized = body === undefined ? undefined : JSON.stringify(body);
         const outgoing = request(url, {
@@ -115,6 +118,7 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(serialized),
             } : {}), ...headers },
         }, incoming => {
+            if (timing) attributionTiming.clientHeaders(timing, performance.now(), Date.now(), incoming.statusCode);
             let text = '';
             incoming.setEncoding('utf8');
             incoming.on('data', chunk => {
@@ -122,6 +126,7 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                 if (text.length > 2 * 1024 * 1024) outgoing.destroy(new Error('Fixture response exceeds its bound.'));
             });
             incoming.on('end', async () => {
+                if (timing) attributionTiming.clientEnd(timing, performance.now(), Date.now());
                 httpDiagnostics.push({ phase, category, status: incoming.statusCode,
                     selected_php: matchesPhp(incoming.headers['x-pinova-fixture-php']) });
                 if (httpDiagnostics.length > 24) httpDiagnostics.shift();
@@ -131,7 +136,7 @@ function http(url, { body, label = 'ordinary', source = 120, headers = {}, metho
                         const target = new URL(incoming.headers.location, url);
                         ensure(method === 'GET' && body === undefined && target.origin === base && !target.username && !target.password,
                             'Ordinary-page redirect escaped the exact fixture origin.');
-                        const next = await http(target.href, { label, source, headers, category, redirects: redirects - 1 });
+                        const next = await http(target.href, { label, source, headers, category, redirects: redirects - 1, timingHop: timingHop + 1 });
                         resolve({ ...next, ms: performance.now() - started });
                     } catch (error) { reject(error); }
                     return;
@@ -390,7 +395,12 @@ function beginMeasure(initialStatus) {
     statusSamples = [{ at: now(), active: initialStatus['active processes'], queue: initialStatus['listen queue'], reached: initialStatus['max children reached'] }];
     statusError = false;
     measuring = true;
-    monitor = setInterval(() => samples.push(processSampler.sample()), 40);
+    const timedNormal = phase === 'off_normal' || phase === 'on_normal';
+    monitor = setInterval(timedNormal ? () => {
+        const timing = attributionTiming.samplerStart(phase, performance.now(), Date.now());
+        try { samples.push(processSampler.sample()); }
+        finally { if (timing) attributionTiming.samplerEnd(timing, performance.now(), Date.now()); }
+    } : () => samples.push(processSampler.sample()), 40);
     statusMonitor = setInterval(async () => {
         if (statusBusy) return;
         statusBusy = true;
@@ -997,5 +1007,10 @@ try {
         receipt.diagnostic_evidence = { ...readDiagnosticEvidence(root), last_phase: lastCheckpoint,
             checkpoint_write_failed: checkpointFailed, collection_boundary: 'controller_before_fpm_teardown' };
     }
+    // Private diagnostic only; logging/timing overhead cannot certify acceptance.
+    receipt.resource_acceptance = false;
+    receipt.runtime_source_commit = '09e9d334ead9b06d0888736fb467915ecb272230';
+    const nginxTiming = readNginxTiming(path.join(privateRoot, 'ordinary-timing.jsonl'));
+    receipt.sampler_gateway_timing = attributionTiming.snapshot(nginxTiming);
     sanitizedReceipt('full-stack-result.json', receipt);
 }

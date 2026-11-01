@@ -181,7 +181,32 @@ pid ${run_root}/nginx.pid;
 error_log ${run_root}/private/nginx.log;
 events { worker_connections 256; }
 http {
-  access_log off;
+  # Diagnostic cost is explicit: finite writes only after matched responses.
+  map \$http_x_pinova_fixture_case \$ordinary_case_id {
+    default "";
+    ~^off-normal-1-page\$ c01;
+    ~^off-normal-2-page\$ c02;
+    ~^off-normal-3-page\$ c03;
+    ~^off-normal-4-page\$ c04;
+    ~^off-normal-5-page\$ c05;
+    ~^off-normal-6-page\$ c06;
+    ~^off-normal-7-page\$ c07;
+    ~^off-normal-8-page\$ c08;
+    ~^off-normal-9-page\$ c09;
+    ~^off-normal-10-page\$ c10;
+    ~^on-normal-1-page\$ c11;
+    ~^on-normal-2-page\$ c12;
+    ~^on-normal-3-page\$ c13;
+    ~^on-normal-4-page\$ c14;
+    ~^on-normal-5-page\$ c15;
+    ~^on-normal-6-page\$ c16;
+    ~^on-normal-7-page\$ c17;
+    ~^on-normal-8-page\$ c18;
+    ~^on-normal-9-page\$ c19;
+    ~^on-normal-10-page\$ c20;
+  }
+  log_format ordinary_timing escape=json '{"case_id":"\$ordinary_case_id","msec":"\$msec","request_time":"\$request_time","upstream_response_time":"\$upstream_response_time","status":\$status,"bytes":\$bytes_sent,"body_bytes":\$body_bytes_sent}';
+  access_log ${run_root}/private/ordinary-timing.jsonl ordinary_timing if=\$ordinary_case_id;
   client_body_temp_path ${run_root}/client-body;
   fastcgi_temp_path ${run_root}/fastcgi;
   server {

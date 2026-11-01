@@ -2,6 +2,7 @@ name: Quality
 
 on:
   push:
+    branches-ignore: ['proof/ordinary-sampler-gateway-09e9']
   pull_request:
   workflow_dispatch:
 

@@ -1,0 +1,49 @@
+name: Carbon CLI diagnostic
+on:
+  push:
+    branches: ['proof/carbon-cli-diagnostic']
+permissions:
+  contents: read
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
+        with:
+          php-version: '8.4.27'
+          coverage: none
+          tools: composer:2.10.3
+          extensions: curl, dom, fileinfo, gd, mbstring, pdo_mysql, simplexml, xml, xmlreader, xmlwriter, zip
+      - name: Prepare locked production dependencies
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist
+      - name: Run each declared CLI case once
+        env:
+          CARBON_VENDOR: ${{ github.workspace }}/vendor
+        run: |
+          set -eu
+          umask 077
+          ulimit -c 0
+          result_dir="${RUNNER_TEMP}/carbon-cli-results"
+          mkdir "${result_dir}"
+          for case_name in now string immutable_input timestamp mixed_immutable mixed_illuminate; do
+            set +e
+            timeout --kill-after=5s 20s php -d display_errors=0 -d log_errors=0 \
+              -d opcache.enable=1 -d opcache.enable_cli=1 -d opcache.optimization_level=0x7FFEBFFF \
+              -d opcache.jit=1235 -d opcache.jit_buffer_size=256M -d opcache.protect_memory=0 \
+              -d opcache.validate_timestamps=1 -d opcache.file_update_protection=2 -d opcache.revalidate_freq=2 \
+              tests/fixtures/carbon-cli/case.php "${case_name}" \
+              > "${result_dir}/${case_name}.json" 2> "${result_dir}/${case_name}.stderr"
+            case_exit=$?
+            set -e
+            printf '%d\n' "${case_exit}" > "${result_dir}/${case_name}.exit"
+          done
+          python3 -I -B tests/fixtures/carbon-cli/summarize.py "${result_dir}" "${RUNNER_TEMP}/carbon-cli-receipt.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: carbon-cli-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/carbon-cli-receipt.json
+          if-no-files-found: error
+          retention-days: 7

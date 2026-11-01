@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pinova\Tests\Integration;
 
 use Pinova\Install;
+use Pinova\Logging\OTPHealthState;
 use Pinova\Pinova;
 use Pinova\Services\OTPService;
 use WP_UnitTestCase;
@@ -21,6 +22,7 @@ final class OTPRetentionIntegrationTest extends WP_UnitTestCase {
 		global $wpdb;
 		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i', $wpdb->prefix . 'pinova_otp' ) );
 		wp_clear_scheduled_hook( 'pinova_otp_cleanup_continue' );
+		delete_option( 'pinova_otp_cleanup_health' );
 	}
 
 	public function tear_down(): void {
@@ -55,12 +57,21 @@ final class OTPRetentionIntegrationTest extends WP_UnitTestCase {
 		$this->seed( 5001, 'UTC_TIMESTAMP() - INTERVAL 8 DAY' );
 		$this->seed( 1, 'UTC_TIMESTAMP() + INTERVAL 3 MINUTE' );
 		self::assertSame( 5000, OTPService::cleanup() );
+		$health = OTPHealthState::snapshot();
+		self::assertTrue( $health['read_success'] );
+		self::assertSame( 'success', $health['status'] );
+		self::assertSame( 5000, $health['deleted'] );
+		self::assertSame( 'pending', $health['backlog'] );
+		self::assertSame( 'scheduled', $health['continuation'] );
+		self::assertTrue( $health['continuation_scheduled'] );
 		self::assertSame( 2, $this->count_records() );
 		$next = wp_next_scheduled( 'pinova_otp_cleanup_continue' );
 		self::assertIsInt( $next );
 		self::assertGreaterThanOrEqual( time() + 4 * MINUTE_IN_SECONDS, $next );
 		self::assertTrue( wp_unschedule_event( $next, 'pinova_otp_cleanup_continue' ) );
 		do_action( 'pinova_otp_cleanup_continue' );
+		self::assertSame( 'clear', OTPHealthState::snapshot()['backlog'] );
+		self::assertSame( 'not_needed', OTPHealthState::snapshot()['continuation'] );
 		self::assertSame( 1, $this->count_records() );
 		self::assertFalse( wp_next_scheduled( 'pinova_otp_cleanup_continue' ) );
 	}
@@ -92,6 +103,9 @@ final class OTPRetentionIntegrationTest extends WP_UnitTestCase {
 		} finally {
 			remove_filter( 'pre_schedule_event', $fail );
 		}
+		self::assertSame( 'failed', OTPHealthState::snapshot()['status'] );
+		self::assertSame( 'pending', OTPHealthState::snapshot()['backlog'] );
+		self::assertSame( 'failed', OTPHealthState::snapshot()['continuation'] );
 		self::assertSame( 1, $this->count_records() );
 		self::assertFalse( wp_next_scheduled( 'pinova_otp_cleanup_continue' ) );
 		self::assertSame( 1, OTPService::cleanup() );
@@ -126,6 +140,9 @@ final class OTPRetentionIntegrationTest extends WP_UnitTestCase {
 			remove_filter( 'query', $fail );
 			$wpdb->suppress_errors( $previous );
 		}
+		self::assertSame( 'failed', OTPHealthState::snapshot()['status'] );
+		self::assertNull( OTPHealthState::snapshot()['deleted'] );
+		self::assertSame( 'unknown', OTPHealthState::snapshot()['backlog'] );
 		self::assertSame( 1, $this->count_records() );
 		self::assertFalse( wp_next_scheduled( 'pinova_otp_cleanup_continue' ) );
 	}
@@ -161,6 +178,9 @@ final class OTPRetentionIntegrationTest extends WP_UnitTestCase {
 			remove_filter( 'query', $fail );
 			$wpdb->suppress_errors( $previous );
 		}
+		self::assertSame( 'failed', OTPHealthState::snapshot()['status'] );
+		self::assertSame( 1, OTPHealthState::snapshot()['deleted'] );
+		self::assertSame( 'unknown', OTPHealthState::snapshot()['backlog'] );
 		self::assertSame( 0, $this->count_records() );
 		self::assertFalse( wp_next_scheduled( 'pinova_otp_cleanup_continue' ) );
 	}

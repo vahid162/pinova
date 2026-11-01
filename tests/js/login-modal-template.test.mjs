@@ -129,7 +129,7 @@ test('modal uses the shared branded account stylesheet with a cache revision', (
         wooLoader,
         /wp_enqueue_script\(\s*'pinova-login-modal'[\s\S]*\[\s*'pinova-global'\s*\]/,
     );
-    assert.match(wooLoader, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.8'/);
+    assert.match(wooLoader, /\$account_asset_version\s*=\s*PINOVA_VERSION\s*\.\s*'\.9'/);
 });
 
 test('modal is rendered outside the checkout form and replaceable fragments', () => {
@@ -205,7 +205,7 @@ test('support references are isolated from the message and displayed left to rig
 test('both account controllers load the same cache-versioned shared state module', async () => {
     for (const filename of ['login-form.js', 'login-modal.js']) {
         const controller = await readFile(new URL(`../../assets/js/pages/${filename}`, import.meta.url), 'utf8');
-        assert.match(controller, /import \{ createAuthState \} from '\.\/auth-state\.js\?ver=8';/);
+        assert.match(controller, /import \{ createAuthState \} from '\.\/auth-state\.js\?ver=9';/);
         assert.match(controller, /\.\.\.createAuthState\(\)/);
     }
 });

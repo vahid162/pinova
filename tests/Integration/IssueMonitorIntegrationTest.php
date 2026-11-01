@@ -6,10 +6,14 @@ namespace Pinova\Tests\Integration;
 
 use Pinova\Admin\Issues;
 use Pinova\Admin\Logs;
+use Pinova\Helpers\Curl;
 use Pinova\Install;
 use Pinova\Integrations\IntegrationSettings;
+use Pinova\Logging\DiagnosticContext;
+use Pinova\Logging\EventThrottle;
 use Pinova\Logging\IssueMonitor;
 use Pinova\Logging\LogRepository;
+use Pinova\Services\OTPQueueStore;
 use Pinova\Services\RateLimitService;
 use WP_UnitTestCase;
 
@@ -81,12 +85,13 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		};
 		add_filter( 'query', $watch );
 		try {
-			$report = IssueMonitor::report();
+			[ $report, $report_window ] = $this->observe_queue_read( static fn(): array => IssueMonitor::report() );
 		} finally {
 			remove_filter( 'query', $watch );
 		}
 		self::assertSame( [], $writes );
-		self::assertSame( RateLimitService::queue_health(), $report['queue_health'] );
+		[ $current_queue, $current_window ] = $this->observe_queue_read( static fn(): array => RateLimitService::queue_health() );
+		$this->assert_queue_parity( $report['queue_health'], $report_window, $current_queue, $current_window );
 		self::assertTrue( $report['queue_health']['read_success'] );
 		self::assertSame( IntegrationSettings::snapshot()['wpforo'], $report['integrations']['wpforo'] );
 		self::assertSame( IntegrationSettings::snapshot()['dokan'], $report['integrations']['dokan'] );
@@ -100,9 +105,10 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 'not_verified', $report['coverage']['physical_delivery'] );
 		self::assertSame( 'info', $report['coverage']['minimum_level'] );
 		// Settings accepts the selected duration and stores its absolute deadline.
-		update_option( 'pinova_logging', [ 'minimum_level' => 'error', 'diagnostic_until' => 900 ] );
+		update_option( 'pinova_logging', [ 'minimum_level' => 'error', 'diagnostic_until' => 900, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ] );
 		self::assertGreaterThan( time(), get_option( 'pinova_logging' )['diagnostic_until'] );
-		self::assertSame( 'debug', IssueMonitor::report()['coverage']['minimum_level'] );
+		self::assertSame( 'error', IssueMonitor::report()['coverage']['minimum_level'] );
+		self::assertSame( 'active', IssueMonitor::report()['diagnostics']['status'] );
 	}
 
 	public function test_review_preserves_evidence_and_recurrence_reopens_it(): void {
@@ -126,9 +132,231 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 'resolved_unverified', $reopened['review']['state'] );
 	}
 
+	public function test_exact_flow_timeline_is_redacted_ordered_and_cannot_review_global_issues(): void {
+		global $wpdb;
+		$flow = str_repeat( 'a', 32 );
+		$first = $this->insert_event( 'otp.diagnostic', [ 'stage' => 'provider_completed', 'observed_at' => time() - 5, 'provider_duration_ms' => 53, 'result' => 'completed', 'password' => 'private-secret' ] );
+		$second = $this->insert_event( 'otp.verified' );
+		$unrelated = $this->insert_event();
+		foreach ( [ $first, $second ] as $id ) {
+			$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => $flow ], [ 'id' => $id ] );
+		}
+		$summary = IssueMonitor::report();
+		$report = IssueMonitor::report( [ 'flow_id' => $flow ] );
+		self::assertSame( 'timeline', $report['mode'] );
+		self::assertSame( [], $report['issues'] );
+		self::assertSame( [ $first, $second ], array_column( $report['timeline']['events'], 'id' ) );
+		self::assertSame( $unrelated, $report['coverage']['snapshot_event_id'] );
+		self::assertSame( 3, $report['coverage']['rows_examined'] );
+		self::assertTrue( $report['timeline']['observed_facts']['transport_completed'] );
+		self::assertFalse( $report['timeline']['observed_facts']['channel_accepted'] );
+		self::assertTrue( $report['timeline']['observed_facts']['otp_verified'] );
+		self::assertFalse( $report['timeline']['observed_facts']['session_created'] );
+		self::assertSame( 'not_verified', $report['timeline']['physical_delivery'] );
+		$issue = $summary['issues'][0];
+		self::assertFalse( IssueMonitor::review( $report, $issue['code'], 'acknowledged', $issue['last_event_id'], IssueMonitor::review_token( $issue['review'] ) ) );
+		self::assertSame( $summary['issues'], IssueMonitor::report()['issues'] );
+		self::assertStringNotContainsString( 'private-secret', wp_json_encode( $report ) );
+
+		$this->post( 'pinova_export_issues', [ 'flow_id' => $flow ] );
+		$export = json_decode( $this->invoke( 'export_response', false ), true );
+		self::assertSame( $report['timeline'], $export['timeline'] );
+		self::assertSame( $report['selected_selector'], $export['selected_selector'] );
+		$_GET = [ 'flow_id' => $flow ];
+		ob_start();
+		Issues::render();
+		$html = ob_get_clean();
+		self::assertStringContainsString( 'خط زمانی رخدادهای مشاهده‌شده', $html );
+		self::assertStringContainsString( 'curl.post', $html );
+		self::assertStringNotContainsString( 'pinova_review_issue', $html );
+		self::assertStringNotContainsString( 'private-secret', $html );
+	}
+
+	/** @dataProvider http_outcomes */
+	public function test_real_http_observations_preserve_unknown_results_in_the_timeline( string $outcome, bool $completed ): void {
+		update_option( 'pinova_logging', [ 'minimum_level' => 'warning', 'diagnostic_until' => 900, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ] );
+		self::assertTrue( EventThrottle::initialize_diagnostics() );
+		$identifier = 'timeline-http-' . $outcome . '@example.test';
+		[ $flow, $deadline ] = RateLimitService::decoy_flow( $identifier, 'authenticate', '192.0.2.240', null, true );
+		$claim = null;
+		$previous_scope = OTPQueueStore::provider_scope();
+		$http_calls = 0;
+		$intercept = static function ( $preempt, array $arguments, string $url ) use ( $outcome, &$http_calls ) {
+			++$http_calls;
+			self::assertSame( 'https://provider.example.test/send', $url );
+			if ( 'wp_error' === $outcome ) {
+				return new \WP_Error( 'http_request_failed', 'private-http-secret' );
+			}
+			if ( 'throw' === $outcome ) {
+				throw new \RuntimeException( 'private-http-secret' );
+			}
+			return [ 'headers' => [], 'body' => '{"private-http-secret":false}', 'response' => [ 'code' => 'http_error' === $outcome ? 503 : 200 ] ];
+		};
+		try {
+			self::assertTrue( RateLimitService::acknowledge_queued_otp( $flow ) );
+			$claim = RateLimitService::claim_queued_otp( $flow );
+			self::assertIsArray( $claim );
+			self::assertSame( $deadline, $claim['deadline'] );
+			$diagnostic = new DiagnosticContext( $flow, $claim['deadline'] );
+			OTPQueueStore::attach_diagnostic( $flow, $claim['claim_token'], $diagnostic );
+			OTPQueueStore::set_provider_scope( [ 'flow' => $flow, 'token' => $claim['claim_token'] ] );
+			add_filter( 'pre_http_request', $intercept, 10, 3 );
+			$threw = false;
+			try {
+				Curl::post( 'https://provider.example.test/send', [ 'synthetic' => true ] );
+			} catch ( \Exception $exception ) {
+				unset( $exception );
+				$threw = true;
+			} finally {
+				remove_filter( 'pre_http_request', $intercept );
+				OTPQueueStore::set_provider_scope( $previous_scope );
+				self::assertTrue( RateLimitService::finish_queued_otp( $flow, $claim['claim_token'] ) );
+				$claim = null;
+			}
+			self::assertSame( ! $completed, $threw );
+			self::assertSame( 1, $http_calls, 'Every transport call must be intercepted, never sent or retried.' );
+			$diagnostic->flush();
+			$report = IssueMonitor::report( [ 'flow_id' => $flow ] );
+			$transports = array_values( array_filter( $report['timeline']['events'], static fn( array $event ): bool => 'provider_completed' === ( $event['context']['stage'] ?? '' ) ) );
+			self::assertCount( 1, $transports, 'The finally observation must survive errors and throwing transports.' );
+			self::assertSame( $completed ? 'completed' : 'unknown', $transports[0]['context']['result'] );
+			self::assertSame( 'curl.post', $transports[0]['context']['source_ref'] );
+			self::assertSame( $completed, $report['timeline']['observed_facts']['transport_completed'] );
+			self::assertFalse( $report['timeline']['observed_facts']['channel_accepted'] );
+			self::assertFalse( $report['timeline']['observed_facts']['otp_verified'] );
+			self::assertFalse( $report['timeline']['observed_facts']['session_created'] );
+			self::assertSame( 'not_verified', $report['timeline']['physical_delivery'] );
+			self::assertStringNotContainsString( 'private-http-secret', wp_json_encode( $report ) );
+			$this->post( 'pinova_export_issues', [ 'flow_id' => $flow ] );
+			$export = json_decode( $this->invoke( 'export_response', false ), true );
+			self::assertSame( $report['timeline'], $export['timeline'] );
+		} finally {
+			remove_filter( 'pre_http_request', $intercept );
+			OTPQueueStore::set_provider_scope( $previous_scope );
+			if ( is_array( $claim ) ) {
+				RateLimitService::finish_queued_otp( $flow, $claim['claim_token'] );
+			}
+			RateLimitService::retire_queued_otp( $flow );
+			RateLimitService::delete_queued_for_identifiers( [ $identifier ] );
+		}
+	}
+
+	public static function http_outcomes(): array {
+		return [
+			'HTTP success response' => [ 'success', true ],
+			'HTTP error response' => [ 'http_error', true ],
+			'WordPress transport error' => [ 'wp_error', false ],
+			'throwing transport' => [ 'throw', false ],
+		];
+	}
+
+	public function test_correlation_expands_only_a_sole_valid_flow_and_keeps_request_only_rows(): void {
+		global $wpdb;
+		$flow = str_repeat( 'b', 32 );
+		$correlation = '123e4567-e89b-42d3-a456-426614174000';
+		$other = '223e4567-e89b-42d3-a456-426614174000';
+		$request_only = $this->insert_event();
+		$linked = $this->insert_event( 'otp.queued' );
+		$expanded = $this->insert_event( 'otp.created' );
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => $flow ], [ 'id' => $linked ] );
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => $flow, 'correlation_id' => $other ], [ 'id' => $expanded ] );
+		$uppercase_reference = $this->insert_event();
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => str_repeat( 'c', 32 ), 'correlation_id' => strtoupper( $correlation ) ], [ 'id' => $uppercase_reference ] );
+		$uppercase_flow = $this->insert_event();
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => strtoupper( $flow ), 'correlation_id' => $other ], [ 'id' => $uppercase_flow ] );
+		$report = IssueMonitor::report( [ 'correlation_id' => $correlation ] );
+		self::assertSame( 'sole_flow', $report['timeline']['linkage'] );
+		self::assertSame( $flow, $report['timeline']['expanded_flow_id'] );
+		self::assertSame( [ $request_only, $linked, $expanded ], array_column( $report['timeline']['events'], 'id' ) );
+		self::assertSame( 5, $report['coverage']['rows_examined'] );
+		self::assertTrue( $report['coverage']['complete'] );
+		self::assertSame( [ $linked, $expanded ], array_column( IssueMonitor::report( [ 'flow_id' => $flow ] )['timeline']['events'], 'id' ) );
+		// Existing raw viewer/export filters retain exact conjunction semantics.
+		$raw = LogRepository::incident_batch( [ 'flow_id' => $flow, 'correlation_id' => $correlation ] );
+		self::assertSame( [ $linked ], array_map( 'intval', array_column( $raw['rows'], 'id' ) ) );
+
+		$ambiguous = $this->insert_event();
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => str_repeat( 'c', 32 ) ], [ 'id' => $ambiguous ] );
+		$report = IssueMonitor::report( [ 'correlation_id' => $correlation ] );
+		self::assertSame( 'ambiguous', $report['timeline']['linkage'] );
+		self::assertSame( '', $report['timeline']['expanded_flow_id'] );
+		self::assertSame( [ $request_only, $linked, $ambiguous ], array_column( $report['timeline']['events'], 'id' ) );
+		self::assertFalse( $report['coverage']['complete'] );
+	}
+
+	public function test_timeline_freezes_its_snapshot_before_correlation_witnesses(): void {
+		global $wpdb;
+		$first = $this->insert_event();
+		$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => str_repeat( 'd', 32 ) ], [ 'id' => $first ] );
+		$added = 0;
+		$interleave = function ( string $query ) use ( &$added, $wpdb ): string {
+			if ( 0 === $added && str_contains( $query, 'SELECT DISTINCT `flow_id`' ) ) {
+				$added = $this->insert_event();
+				$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => str_repeat( 'e', 32 ) ], [ 'id' => $added ] );
+			}
+			return $query;
+		};
+		add_filter( 'query', $interleave );
+		try {
+			$report = IssueMonitor::report( [ 'correlation_id' => '123e4567-e89b-42d3-a456-426614174000' ] );
+		} finally {
+			remove_filter( 'query', $interleave );
+		}
+		self::assertGreaterThan( $first, $added );
+		self::assertSame( $first, $report['coverage']['snapshot_event_id'] );
+		self::assertSame( 'sole_flow', $report['timeline']['linkage'] );
+		self::assertSame( [ $first ], array_column( $report['timeline']['events'], 'id' ) );
+		self::assertSame( 'ambiguous', IssueMonitor::report( [ 'correlation_id' => '123e4567-e89b-42d3-a456-426614174000' ] )['timeline']['linkage'] );
+	}
+
+	public function test_timeline_invalid_selectors_and_read_failures_remain_incomplete(): void {
+		global $wpdb;
+		$this->insert_event();
+		foreach ( [
+			[ 'flow_id' => str_repeat( 'a', 32 ), 'correlation_id' => '123e4567-e89b-42d3-a456-426614174000' ],
+			[ 'correlation_id' => [ 'private-secret' ] ],
+			[ 'flow_id' => 'private-secret' ],
+		] as $filters ) {
+			$report = IssueMonitor::report( $filters );
+			self::assertFalse( $report['coverage']['valid_selector'] );
+			self::assertFalse( $report['coverage']['complete'] );
+			self::assertSame( [], $report['issues'] );
+			self::assertStringNotContainsString( 'private-secret', wp_json_encode( $report ) );
+		}
+		$deny = static fn( string $query ): string => str_contains( $query, 'SELECT DISTINCT `flow_id`' ) ? 'SELECT * FROM pinova_missing_timeline_fixture' : $query;
+		$previous = $wpdb->suppress_errors( true );
+		add_filter( 'query', $deny );
+		try {
+			$report = IssueMonitor::report( [ 'correlation_id' => '123e4567-e89b-42d3-a456-426614174000' ] );
+		} finally {
+			remove_filter( 'query', $deny );
+			$wpdb->suppress_errors( $previous );
+			$wpdb->last_error = '';
+		}
+		self::assertFalse( $report['coverage']['complete'] );
+		self::assertSame( [], $report['timeline'] );
+	}
+
+	public function test_timeline_events_and_lookup_witnesses_share_the_existing_row_budget(): void {
+		global $wpdb;
+		$flow = str_repeat( 'f', 32 );
+		for ( $index = 0; $index < 1001; ++$index ) {
+			$id = $this->insert_event();
+			$wpdb->update( $wpdb->prefix . 'pinova_logs', [ 'flow_id' => $flow ], [ 'id' => $id ] );
+		}
+		$report = IssueMonitor::report( [ 'flow_id' => $flow ] );
+		self::assertSame( 1000, $report['coverage']['rows_examined'] );
+		self::assertSame( 1, $report['coverage']['lookup_rows'] );
+		self::assertCount( 999, $report['timeline']['events'] );
+		self::assertTrue( $report['coverage']['truncated'] );
+		self::assertFalse( $report['coverage']['complete'] );
+		self::assertLessThanOrEqual( 2097152, strlen( wp_json_encode( $report ) ) );
+	}
+
 	public function test_current_queue_snapshot_is_separate_from_history_and_exposes_no_payload_or_ids(): void {
 		global $wpdb;
 		$before = RateLimitService::queue_health();
+		$fixture_now = $this->queue_utc_seconds();
 		$private = base64_encode( 'private-queue-identifier-and-ciphertext' );
 		foreach ( [
 			'pending' => [ 'ready:' . $private, 600 ],
@@ -142,13 +370,13 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 				'bucket_key' => $key,
 				'scope' => md5( 'issue-monitor-flow-' . $label ),
 				'hits' => 1,
-				'reset_at' => gmdate( 'Y-m-d H:i:s', time() + $seconds ),
-				'updated_at' => gmdate( 'Y-m-d H:i:s' ),
+				'reset_at' => gmdate( 'Y-m-d H:i:s', $fixture_now + $seconds ),
+				'updated_at' => gmdate( 'Y-m-d H:i:s', $fixture_now - ( 'processing' === $label ? 61 : 0 ) ),
 				'payload' => $payload,
 			] ) );
 			$this->queue_fixture_keys[] = $key;
 		}
-		$report = IssueMonitor::report();
+		[ $report, $queue_window ] = $this->observe_queue_read( static fn(): array => IssueMonitor::report() );
 		$queue = $report['queue_health'];
 		self::assertTrue( $queue['read_success'] );
 		self::assertFalse( $queue['truncated'] );
@@ -157,11 +385,14 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		}
 		self::assertSame( [], $report['issues'], 'A snapshot must not fabricate historical events or manual review state.' );
 		$yesterday = gmdate( 'Y-m-d', time() - DAY_IN_SECONDS );
-		self::assertSame( $queue, IssueMonitor::report( [ 'created_from' => $yesterday, 'created_to' => $yesterday ] )['queue_health'] );
-		self::assertSame( $queue, IssueMonitor::report( [ 'created_from' => 'invalid', 'created_to' => 'invalid' ] )['queue_health'] );
+		[ $historical, $historical_window ] = $this->observe_queue_read( static fn(): array => IssueMonitor::report( [ 'created_from' => $yesterday, 'created_to' => $yesterday ] ) );
+		$this->assert_queue_parity( $queue, $queue_window, $historical['queue_health'], $historical_window );
+		[ $invalid, $invalid_window ] = $this->observe_queue_read( static fn(): array => IssueMonitor::report( [ 'created_from' => 'invalid', 'created_to' => 'invalid' ] ) );
+		$this->assert_queue_parity( $queue, $queue_window, $invalid['queue_health'], $invalid_window );
 		$this->post( 'pinova_export_issues' );
-		$export = json_decode( $this->invoke( 'export_response', false ), true );
-		self::assertSame( $queue, $export['queue_health'] );
+		[ $json, $export_window ] = $this->observe_queue_read( fn(): string => $this->invoke( 'export_response', false ) );
+		$export = json_decode( $json, true );
+		$this->assert_queue_parity( $queue, $queue_window, $export['queue_health'], $export_window );
 		ob_start();
 		Issues::render();
 		$html = (string) ob_get_clean();
@@ -183,7 +414,7 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		global $wpdb;
 		$table = $wpdb->prefix . 'pinova_rate_limits';
 		$private = base64_encode( 'private-bounded-queue-identifier-and-ciphertext' );
-		$now = time();
+		$now = $this->queue_utc_seconds();
 		$states = [ 'pending', 'expired', 'reserved', 'processing', 'legacy' ];
 		$rows = [];
 		for ( $index = 0; $index < 1001; ++$index ) {
@@ -196,7 +427,7 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 				'processing' => 'processing:' . str_repeat( 'c', 16 ) . ':ready:' . $private,
 				'legacy' => $private,
 			][ $state ];
-			$rows[] = [ $key, md5( 'issue-monitor-boundary-flow-' . $index ), 1, gmdate( 'Y-m-d H:i:s', $now + ( 'expired' === $state ? -600 : 600 ) ), gmdate( 'Y-m-d H:i:s', $now ), $payload ];
+			$rows[] = [ $key, md5( 'issue-monitor-boundary-flow-' . $index ), 1, gmdate( 'Y-m-d H:i:s', $now + ( 'expired' === $state ? -600 : 600 ) ), gmdate( 'Y-m-d H:i:s', $now - ( 'processing' === $state ? 61 : 0 ) ), $payload ];
 			$this->queue_fixture_keys[] = $key;
 		}
 		foreach ( array_chunk( $rows, 100 ) as $batch ) {
@@ -216,10 +447,10 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		};
 		add_filter( 'query', $watch );
 		try {
-			$queue = RateLimitService::queue_health();
-			$report = IssueMonitor::report();
+			[ $queue, $queue_window ] = $this->observe_queue_read( static fn(): array => RateLimitService::queue_health() );
+			[ $report, $report_window ] = $this->observe_queue_read( static fn(): array => IssueMonitor::report() );
 			$this->post( 'pinova_export_issues' );
-			$json = $this->invoke( 'export_response', false );
+			[ $json, $export_window ] = $this->observe_queue_read( fn(): string => $this->invoke( 'export_response', false ) );
 			$export = json_decode( $json, true );
 			ob_start();
 			try {
@@ -234,7 +465,27 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 			remove_filter( 'query', $watch );
 		}
 		self::assertSame( [], $writes, 'Reading or exporting a truncated snapshot must not repair or delete queue rows.' );
-		self::assertSame( [ 'read_success', 'truncated', 'pending', 'expired', 'reserved', 'processing', 'legacy' ], array_keys( $queue ) );
+		self::assertSame(
+			[
+				'read_success',
+				'truncated',
+				'pending',
+				'expired',
+				'reserved',
+				'processing',
+				'legacy',
+				'timing_unknown',
+				'oldest_pending_age_seconds',
+				'earliest_pending_remaining_seconds',
+				'processing_held',
+				'processing_free_stale',
+				'processing_free_recent',
+				'processing_lock_unknown',
+				'processing_age_unknown',
+				'oldest_processing_age_seconds',
+			],
+			array_keys( $queue )
+		);
 		self::assertTrue( $queue['read_success'] );
 		self::assertTrue( $queue['truncated'] );
 		self::assertSame( 1000, array_sum( array_intersect_key( $queue, array_flip( $states ) ) ) );
@@ -243,8 +494,8 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 			self::assertGreaterThanOrEqual( 199, $queue[ $state ] );
 			self::assertLessThanOrEqual( 201, $queue[ $state ] );
 		}
-		self::assertSame( $queue, $report['queue_health'] );
-		self::assertSame( $queue, $export['queue_health'] );
+		$this->assert_queue_parity( $queue, $queue_window, $report['queue_health'], $report_window );
+		$this->assert_queue_parity( $queue, $queue_window, $export['queue_health'], $export_window );
 		self::assertTrue( $report['coverage']['complete'], 'Current queue truncation must not imply that the separate retained-event report was truncated.' );
 		self::assertSame( [], $report['issues'], 'A current snapshot must not fabricate a historical incident.' );
 		self::assertStringContainsString( 'خواندن صف به سقف بررسی رسیده است؛ شمارش‌ها ممکن است کمتر از مقدار واقعی باشند.', $html );
@@ -518,6 +769,56 @@ final class IssueMonitorIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 101, $report['coverage']['rows_examined'] );
 		self::assertSame( 101, $report['issues'][0]['observed_count'] );
 		self::assertSame( 102, IssueMonitor::report()['issues'][0]['observed_count'] );
+	}
+
+	/** @return array{mixed,array{int,int}} */
+	private function observe_queue_read( callable $read ): array {
+		$from = $this->queue_utc_seconds();
+		$value = $read();
+		return [ $value, [ $from, $this->queue_utc_seconds() ] ];
+	}
+
+	private function queue_utc_seconds(): int {
+		global $wpdb;
+		$value = $wpdb->get_var( "SELECT TIMESTAMPDIFF(SECOND, '1970-01-01 00:00:00', UTC_TIMESTAMP())" );
+		self::assertSame( '', (string) $wpdb->last_error );
+		self::assertMatchesRegularExpression( '/\A[0-9]{10}\z/D', (string) $value );
+		return (int) $value;
+	}
+
+	/**
+	 * All stable facts stay byte-identical; relative times must advance only by
+	 * the actual SQL UTC interval bracketing the two separate observations.
+	 *
+	 * @param array{int,int} $expected_window
+	 * @param array{int,int} $actual_window
+	 */
+	private function assert_queue_parity( array $expected, array $expected_window, array $actual, array $actual_window ): void {
+		$timings = [
+			'oldest_pending_age_seconds' => [ 1, 180 ],
+			'earliest_pending_remaining_seconds' => [ -1, 180 ],
+			'oldest_processing_age_seconds' => [ 1, 7 * DAY_IN_SECONDS ],
+		];
+		$stable_expected = array_diff_key( $expected, $timings );
+		$stable_actual = array_diff_key( $actual, $timings );
+		self::assertSame( $stable_expected, $stable_actual );
+		self::assertSame( array_keys( $expected ), array_keys( $actual ) );
+		$minimum_elapsed = $actual_window[0] - $expected_window[1];
+		$maximum_elapsed = $actual_window[1] - $expected_window[0];
+		foreach ( $timings as $key => [ $direction, $maximum ] ) {
+			if ( null === $expected[ $key ] ) {
+				self::assertNull( $actual[ $key ], $key );
+				continue;
+			}
+			self::assertIsInt( $expected[ $key ], $key );
+			self::assertIsInt( $actual[ $key ], $key );
+			self::assertGreaterThanOrEqual( 0, $actual[ $key ], $key );
+			self::assertLessThanOrEqual( $maximum, $actual[ $key ], $key );
+			$first = $expected[ $key ] + $direction * $minimum_elapsed;
+			$last = $expected[ $key ] + $direction * $maximum_elapsed;
+			self::assertGreaterThanOrEqual( min( $first, $last ), $actual[ $key ], $key );
+			self::assertLessThanOrEqual( max( $first, $last ), $actual[ $key ], $key );
+		}
 	}
 
 	private function review( array $report, string $state ): bool {

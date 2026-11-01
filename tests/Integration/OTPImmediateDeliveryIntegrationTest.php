@@ -232,6 +232,11 @@ final class OTPImmediateDeliveryIntegrationTest extends WP_UnitTestCase {
 			$claim = OTPQueueStore::claim_queued_otp( $flow );
 			self::assertIsArray( $claim );
 			self::assertTrue( OTPQueueStore::owns_queued_claim( $flow, $claim['claim_token'] ) );
+			self::assertTrue( OTPQueueStore::immediate_claim_is_active( $flow, $claim['claim_token'], $lease ) );
+			self::assertFalse( OTPQueueStore::immediate_claim_is_active( $flow, $claim['claim_token'], [ 'connection' => $lease['connection'] ] ), 'A missing fast-slot name must never borrow the flow lock as its slot.' );
+			self::assertFalse( OTPQueueStore::immediate_claim_is_active( $flow, $claim['claim_token'], [ 'name' => '', 'connection' => $lease['connection'] ] ) );
+			self::assertNull( OTPQueueStore::provider_was_attempted( $flow, str_repeat( '0', 16 ) ), 'A different token has no attempt witness.' );
+			self::assertFalse( OTPQueueStore::provider_was_attempted( $flow, $claim['claim_token'] ) );
 			self::assertTrue( $database->close() );
 			self::assertTrue( $database->db_connect( false ) );
 			self::assertFalse( OTPQueueStore::owns_immediate_slot( $lease ) );
@@ -364,17 +369,17 @@ final class OTPImmediateDeliveryIntegrationTest extends WP_UnitTestCase {
 	}
 
 	private function dispatch( string $flow ): void {
-		$headroom = new \ReflectionMethod( OTPImmediateDelivery::class, 'has_headroom' );
+		$headroom = new \ReflectionMethod( OTPImmediateDelivery::class, 'headroom_decline_reason' );
 		$headroom->setAccessible( true );
 		$deadline = microtime( true ) + 15;
 		do {
-			$eligible = $headroom->invoke( null );
-			if ( true === $eligible ) {
+			$decline_reason = $headroom->invoke( null );
+			if ( null === $decline_reason ) {
 				break;
 			}
 			usleep( 250000 );
 		} while ( microtime( true ) < $deadline );
-		self::assertTrue( $eligible, 'Isolated immediate delivery tests require actual host headroom; do not bypass the pressure guard.' );
+		self::assertNull( $decline_reason, 'Isolated immediate delivery tests require actual host headroom; do not bypass the pressure guard.' );
 		$method = new \ReflectionMethod( OTPImmediateDelivery::class, 'dispatch' );
 		$method->setAccessible( true );
 		$method->invoke( null, $flow );

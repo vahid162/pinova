@@ -18,14 +18,37 @@ fi
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 fixture_root="${repo_root}/tests/fixtures/fpm-otp"
 fpm_bin="${PINOVA_FPM_BIN:?Missing native FPM binary}"
+php_bin="${PINOVA_FPM_PHP_BIN:-$(command -v php)}"
+php_version="${PINOVA_FPM_PHP_VERSION:-8.3}"
 nginx_bin="${PINOVA_FPM_NGINX_BIN:?Missing native nginx binary}"
 wp_cli="${PINOVA_FPM_WP_CLI:?Missing executable WP-CLI}"
 mysql_socket="${PINOVA_FPM_MYSQL_SOCKET:?Missing existing MySQL Unix socket}"
-[[ -x "${fpm_bin}" && -x "${nginx_bin}" && -x "${wp_cli}" && -S "${mysql_socket}" ]]
+[[ "${php_version}" =~ ^8\.[34]$ && -x "${php_bin}" && -x "${fpm_bin}" && -x "${nginx_bin}" && -x "${wp_cli}" && -S "${mysql_socket}" ]]
+[[ "$("${php_bin}" -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')" == "${php_version}" ]]
+export PINOVA_FPM_PHP_VERSION="${php_version}" PINOVA_FPM_PHP_BIN="${php_bin}"
+plugin_root="${PINOVA_FPM_PLUGIN_ROOT:-${repo_root}}"
+if [[ "${plugin_root}" != "${repo_root}" ]]; then
+	[[ "${plugin_root}" == "${run_root}/runtime" && -d "${plugin_root}" && ! -L "${plugin_root}" \
+		&& "${PINOVA_FPM_REVISION_ARM:-}" =~ ^[ab][123]$ && "${PINOVA_FPM_REVISION_SOURCE:-}" =~ ^[a-f0-9]{40}$ ]]
+fi
 export PINOVA_FPM_FULL_STACK_FIXTURE=1
 export PINOVA_FPM_PROVIDER_PORT=18081
 export PINOVA_FPM_HTTP_PORT=18080
 export PINOVA_FPM_REPO_ROOT="${repo_root}"
+
+diagnostic_checkpoint() {
+	[[ -n "${PINOVA_FPM_PROBE_CASE:-}" ]] || return 0
+	local phase_name="$1" phase_arm="${PINOVA_FPM_REVISION_ARM:-}" phase_at_ms
+	case "${phase_name}" in shell_prepare|shell_database|shell_config|shell_install|shell_activate|shell_setup|native_start) ;; *) return 0 ;; esac
+	[[ "${phase_arm}" =~ ^[ab][123]$ ]] || phase_arm=''
+	phase_at_ms="$(date +%s%3N)"
+	if printf '{"phase":"%s","arm":"%s","at_ms":%s,"pid":%s,"resource_acceptance":false}\n' \
+		"${phase_name}" "${phase_arm}" "${phase_at_ms}" "$$" > "${run_root}/phase-checkpoint.json.tmp"; then
+		mv -- "${run_root}/phase-checkpoint.json.tmp" "${run_root}/phase-checkpoint.json" || true
+	fi
+	return 0
+}
+diagnostic_checkpoint shell_prepare
 
 if [[ "${1:-}" != --isolated ]]; then
 	[[ ! -e "${run_root}/fixture-owned" && ! -e "${run_root}/receipt" ]]
@@ -34,6 +57,7 @@ if [[ "${1:-}" != --isolated ]]; then
 	# Only sanitized receipts are readable by the unprivileged artifact uploader.
 	chmod 0755 "${run_root}/receipt"
 	printf '%s\n' "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" > "${run_root}/fixture-owned"
+	diagnostic_checkpoint shell_database
 	database="pinova_fpm_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
 	[[ "${database}" =~ ^pinova_fpm_[0-9]+_[0-9]+$ && ${#database} -le 32 ]]
 	mysql_args=(--protocol=socket --socket="${mysql_socket}" --user=root --batch --skip-column-names)
@@ -72,7 +96,7 @@ SQL
 		cp -a "${repo_root}/.build/third-party/${plugin}" "${run_root}/wordpress/wp-content/plugins/${plugin}"
 	done
 	[[ ! -e "${run_root}/wordpress/wp-content/plugins/pinova" ]]
-	ln -s "${repo_root}" "${run_root}/wordpress/wp-content/plugins/pinova"
+	ln -s "${plugin_root}" "${run_root}/wordpress/wp-content/plugins/pinova"
 	printf 'off\n' > "${run_root}/mode"
 	export PINOVA_FPM_DB_NAME="${database}" PINOVA_FPM_DB_PASSWORD="${password}"
 	# A new namespace has no external interfaces/routes. The Unix DB socket is
@@ -88,7 +112,8 @@ if ip -o link show | grep -Ev '^[0-9]+: lo:' | grep -q . || ip route show | grep
 	exit 1
 fi
 export PINOVA_FPM_NETWORK_ISOLATED=1
-wp=("${wp_cli}" --allow-root --path="${run_root}/wordpress")
+wp=("${php_bin}" "${wp_cli}" --allow-root --path="${run_root}/wordpress")
+diagnostic_checkpoint shell_config
 "${wp[@]}" config create --skip-check --dbname="${PINOVA_FPM_DB_NAME}" --dbuser="${PINOVA_FPM_DB_NAME}" \
 	--dbpass="${PINOVA_FPM_DB_PASSWORD}" --dbhost="localhost:${mysql_socket}" --dbprefix=wp_fpm_ \
 	> "${run_root}/private/config-create.log" 2>&1
@@ -100,13 +125,16 @@ wp=("${wp_cli}" --allow-root --path="${run_root}/wordpress")
 "${wp[@]}" config set WP_AUTO_UPDATE_CORE false --raw > /dev/null
 "${wp[@]}" config set AUTOMATIC_UPDATER_DISABLED true --raw > /dev/null
 "${wp[@]}" config set PINOVA_OTP_IMMEDIATE_DELIVERY "('on' === trim(file_get_contents('${run_root}/mode')))" --raw > /dev/null
+diagnostic_checkpoint shell_install
 "${wp[@]}" core install --url="http://127.0.0.1:${PINOVA_FPM_HTTP_PORT}" --title='Disposable FPM fixture' \
 	--admin_user=fixture_admin --admin_password="${PINOVA_FPM_DB_PASSWORD}" --admin_email=admin@example.test --skip-email \
 	> "${run_root}/private/install.log" 2>&1
+diagnostic_checkpoint shell_activate
 for plugin in woocommerce wpforo dokan-lite elementor pinova; do
 	"${wp[@]}" plugin activate "${plugin}" >> "${run_root}/private/activate.log" 2>&1
 done
 unset PINOVA_FPM_DB_PASSWORD
+diagnostic_checkpoint shell_setup
 "${wp[@]}" eval-file "${fixture_root}/full-stack-site.php" --use-include \
 	<<< '{"action":"setup"}' > "${run_root}/private/setup.log" 2>&1
 
@@ -115,6 +143,9 @@ cat > "${run_root}/fpm.conf" <<EOF
 daemonize = no
 error_log = ${run_root}/private/fpm.log
 pid = ${run_root}/fpm.pid
+; Ten fixed application workers plus one native status worker. This bounds
+; instrumentation inventory identically in both revision arms; no host tuning.
+process.max = 11
 [fixture]
 user = root
 group = root
@@ -191,7 +222,15 @@ cleanup_processes() {
 	exit "${status}"
 }
 trap cleanup_processes EXIT
-"${fpm_bin}" --allow-to-run-as-root -F -y "${run_root}/fpm.conf" > "${run_root}/private/fpm-start.log" 2>&1 &
+diagnostic_checkpoint native_start
+# Override setup-php's injected JIT profile only for this owned FPM master.
+case "${php_version}" in
+	8.3) fpm_jit_mode=tracing; fpm_jit_buffer=0 ;;
+	8.4) fpm_jit_mode=disable; fpm_jit_buffer=64M ;;
+esac
+cp "${fixture_root}/startup-jit-mode.php" "${run_root}/startup-jit-mode.php"
+"${fpm_bin}" -d "opcache.jit=${fpm_jit_mode}" -d "opcache.jit_buffer_size=${fpm_jit_buffer}" \
+	--allow-to-run-as-root -F -y "${run_root}/fpm.conf" > "${run_root}/private/fpm-start.log" 2>&1 &
 fpm_pid=$!
 export PINOVA_FPM_MASTER_PID="${fpm_pid}"
 "${nginx_bin}" -p "${run_root}" -c "${run_root}/nginx.conf" > "${run_root}/private/nginx-start.log" 2>&1 &

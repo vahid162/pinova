@@ -27,20 +27,36 @@ final class Issues {
 		return $result;
 	}
 
+	/** @param array<string,mixed> $input
+	 * @return array<string,string>
+	 */
+	public static function filters( array $input ): array {
+		$result = self::dates( $input );
+		foreach ( [
+			'flow_id'        => 32,
+			'correlation_id' => 36,
+		] as $key => $length ) {
+			$value          = isset( $input[ $key ] ) ? wp_unslash( $input[ $key ] ) : '';
+			$result[ $key ] = is_string( $value ) && $length >= strlen( $value ) ? $value : '!';
+		}
+		return $result;
+	}
+
 	public static function render(): void {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only, bounded report dates.
-		$report   = IssueMonitor::report( self::dates( $_GET ) );
+		$report   = IssueMonitor::report( self::filters( $_GET ) );
 		$coverage = $report['coverage'];
 		?>
 		<section aria-labelledby="pinova-issues-heading">
 			<h2 id="pinova-issues-heading"><?php esc_html_e( 'مشکلات و نتیجهٔ بررسی', 'pinova' ); ?></h2>
 			<?php self::render_integrations( $report['integrations'] ); ?>
 			<?php self::render_queue_health( $report['queue_health'] ); ?>
+			<?php self::render_otp_cleanup( $report['otp_cleanup'] ); ?>
 			<p><?php esc_html_e( 'این گزارش از رخدادهای ثبت‌شده ساخته می‌شود. خرابی مشاهده‌شده لزوماً باگ پینوا نیست؛ علت اصلی باید با شواهد بررسی شود. تأیید سرویس‌دهنده نیز به معنی دریافت پیامک روی گوشی نیست.', 'pinova' ); ?></p>
-			<p><?php esc_html_e( 'بازهٔ گزارش حداکثر هفت روز تقویمی UTC است؛ پیش‌فرض، روز جاری است. فیلترهای رخداد، سطح، کاربر و کد پیگیری فقط جدول لاگ‌ها را تغییر می‌دهند و بر این خلاصه اثر ندارند.', 'pinova' ); ?></p>
+			<p><?php esc_html_e( 'بازهٔ گزارش حداکثر هفت روز تقویمی UTC است؛ پیش‌فرض، روز جاری است. با انتخاب فقط یک شناسهٔ جریان یا کد پیگیری معتبر، خط زمانی همان مورد نمایش داده می‌شود. برای خلاصهٔ کل بازه، هر دو را خالی کنید. فیلتر رخداد، سطح و کاربر فقط جدول لاگ‌ها را تغییر می‌دهد.', 'pinova' ); ?></p>
 			<p>
 				<?php /* translators: 1: start date; 2: end date; 3: observed row count. */ ?>
 				<?php echo esc_html( sprintf( __( 'بازه: %1$s تا %2$s UTC؛ رخدادهای بررسی‌شده: %3$d', 'pinova' ), $report['selected_range'][0], $report['selected_range'][1], $coverage['rows_examined'] ) ); ?>
@@ -49,7 +65,11 @@ final class Issues {
 				<div class="notice notice-warning inline"><p><?php esc_html_e( 'شواهد کامل نیست: بازهٔ نامعتبر، محدودیت خواندن یا خطای ثبت/خواندن وجود دارد. نبودن مشکل در این خروجی، سلامت سیستم را تأیید نمی‌کند. برای بازهٔ شلوغ، تاریخ محدودتری انتخاب کنید.', 'pinova' ); ?></p></div>
 			<?php endif; ?>
 			<p><?php esc_html_e( 'تعدادها فقط مشاهدات ثبت‌شده‌اند؛ سطح ثبت، نمونه‌برداری و زمان نگهداری ممکن است برخی رخدادها را حذف کنند. لاگ‌های وردپرس، ووکامرس و سرور در این گزارش بررسی نمی‌شوند. ناپدیدشدن یک رخداد از بازه یا پایان نگهداری، به معنی رفع آن نیست.', 'pinova' ); ?></p>
-			<?php if ( empty( $report['issues'] ) ) : ?>
+			<?php if ( ! $coverage['valid_selector'] ) : ?>
+				<div class="notice notice-error inline"><p><?php esc_html_e( 'فقط یک شناسهٔ جریان یا یک کد پیگیری معتبر انتخاب کنید؛ ترکیب این دو برای خط زمانی مجاز نیست. فیلترهای ترکیبی جدول لاگ و خروجی رخدادها همچنان مستقل‌اند.', 'pinova' ); ?></p></div>
+			<?php elseif ( 'timeline' === $report['mode'] ) : ?>
+				<?php self::render_timeline( $report ); ?>
+			<?php elseif ( empty( $report['issues'] ) ) : ?>
 				<p><strong><?php echo esc_html( $coverage['complete'] ? __( 'در شواهد موجودِ این بازه، مشکل قابل دسته‌بندی پیدا نشد؛ عملکرد بدون خطا اثبات نشده است.', 'pinova' ) : __( 'برای نتیجه‌گیری، شواهد کافی در دسترس نیست.', 'pinova' ) ); ?></strong></p>
 			<?php else : ?>
 				<div style="overflow-x:auto">
@@ -141,11 +161,102 @@ final class Issues {
 				<?php endforeach; ?>
 				</tbody>
 			</table>
+			<h4><?php esc_html_e( 'سن و مالکیت پردازش فعلی', 'pinova' ); ?></h4>
+			<table class="widefat striped"><tbody>
+			<?php
+			foreach ( [
+				'timing_unknown'                     => __( 'رکوردهای با زمان نامشخص', 'pinova' ),
+				'oldest_pending_age_seconds'         => __( 'بیشترین سن انتظار از مبدأ معتبر (ثانیه)', 'pinova' ),
+				'earliest_pending_remaining_seconds' => __( 'کمترین مهلت باقی‌ماندهٔ انتظار (ثانیه)', 'pinova' ),
+				'processing_held'                    => __( 'پردازش با قفل نگه‌داشته‌شده', 'pinova' ),
+				'processing_free_stale'              => __( 'قفل آزاد و عمر claim دست‌کم ۶۰ ثانیه', 'pinova' ),
+				'processing_free_recent'             => __( 'قفل آزاد و claim تازه', 'pinova' ),
+				'processing_lock_unknown'            => __( 'مالکیت قفل نامشخص', 'pinova' ),
+				'processing_age_unknown'             => __( 'قفل آزاد با عمر claim نامشخص', 'pinova' ),
+				'oldest_processing_age_seconds'      => __( 'بیشترین عمر claim پردازش (ثانیه)', 'pinova' ),
+			] as $key => $label ) :
+				?>
+				<tr><td><?php echo esc_html( $label ); ?></td><td><?php echo esc_html( isset( $snapshot[ $key ] ) ? (string) $snapshot[ $key ] : __( 'نامشخص', 'pinova' ) ); ?></td></tr>
+			<?php endforeach; ?>
+			</tbody></table>
+			<p><?php esc_html_e( 'عمر claim از آغاز claim محاسبه می‌شود و زمان پذیرش صف نیست. این صفحه قفل را نمی‌گیرد و بازیابی یا ارسال انجام نمی‌دهد.', 'pinova' ); ?></p>
 			<?php if ( 0 < $snapshot['expired'] ) : ?>
 				<div class="notice notice-error inline"><p><?php esc_html_e( 'درخواست پذیرفته‌شده‌ای پیش از شروع پردازش منقضی شده است. این خرابی عملیاتی مشاهده‌شده است؛ علت دقیق را با زمان‌بندی، قفل‌ها و رخدادهای صف بررسی کنید. کد منقضی ارسال نمی‌شود.', 'pinova' ); ?></p></div>
 			<?php endif; ?>
 			<?php if ( 0 < $snapshot['legacy'] ) : ?>
 				<p><?php esc_html_e( 'پذیرش رکوردهای قدیمی قابل تأیید نیست؛ صرف وجود آن‌ها خرابی زمان‌بندی را ثابت نمی‌کند و باعث ارسال مجدد خودکار نمی‌شود.', 'pinova' ); ?></p>
+			<?php endif; ?>
+		<?php endif; ?>
+		<?php
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private static function render_otp_cleanup( array $snapshot ): void {
+		?>
+		<h3><?php esc_html_e( 'سلامت فعلی نگهداری کدهای تأیید', 'pinova' ); ?></h3>
+		<?php if ( empty( $snapshot['read_success'] ) ) : ?>
+			<p><?php esc_html_e( 'خواندن وضعیت نگهداری انجام نشد؛ نتیجه و زمان‌بندی نامشخص است.', 'pinova' ); ?></p>
+		<?php else : ?>
+			<p>
+				<?php
+				echo esc_html(
+					match ( $snapshot['status'] ) {
+						'success' => __( 'آخرین پاک‌سازی موفق گزارش شده است؛ این مشاهده تضمین اجرای بعدی نیست.', 'pinova' ),
+						'failed' => __( 'آخرین پاک‌سازی ناموفق گزارش شده است.', 'pinova' ),
+						default => __( 'نتیجهٔ پاک‌سازی هنوز مشخص نیست.', 'pinova' ),
+					}
+				);
+				?>
+			</p>
+			<?php if ( 0 < $snapshot['at'] ) : ?>
+				<p><?php echo esc_html( gmdate( 'Y-m-d H:i:s', $snapshot['at'] ) ); ?> UTC</p>
+			<?php endif; ?>
+			<?php /* translators: 1: observed deleted count or unknown; 2: finite backlog status; 3: finite continuation status. */ ?>
+			<p><?php echo esc_html( sprintf( __( 'حذف مشاهده‌شده: %1$s؛ backlog: %2$s؛ ادامه: %3$s', 'pinova' ), null === $snapshot['deleted'] ? __( 'نامشخص', 'pinova' ) : (string) $snapshot['deleted'], $snapshot['backlog'], $snapshot['continuation'] ) ); ?></p>
+			<?php if ( ! $snapshot['cleanup_scheduled'] || $snapshot['cleanup_overdue'] || $snapshot['continuation_missing'] || $snapshot['continuation_overdue'] || 'failed' === $snapshot['continuation'] ) : ?>
+				<div class="notice notice-warning inline"><p><?php esc_html_e( 'زمان‌بندی نگهداری روزانه یا ادامهٔ پاک‌سازی نیاز به بررسی دارد؛ این صفحه چیزی را زمان‌بندی یا پاک نمی‌کند.', 'pinova' ); ?></p></div>
+			<?php endif; ?>
+		<?php endif; ?>
+		<?php
+	}
+
+	/** @param array<string,mixed> $report */
+	private static function render_timeline( array $report ): void {
+		$timeline = $report['timeline'];
+		?>
+		<h3><?php esc_html_e( 'خط زمانی رخدادهای مشاهده‌شده', 'pinova' ); ?></h3>
+		<p><?php esc_html_e( 'ترتیب جدول بر اساس شناسهٔ ذخیره‌سازی است. observed_at زمان رخداد با دقت ثانیه و created_at زمان ذخیره است؛ فاصلهٔ این دو، تأخیر صف یا پنل محسوب نمی‌شود. کاتالوگ مراحل، توالی اجباری همهٔ کانال‌ها نیست.', 'pinova' ); ?></p>
+		<p><?php esc_html_e( 'اتمام ارتباط HTTP، پذیرش کانال، تأیید OTP و ایجاد نشست رخدادهای متفاوت‌اند. تأیید OTP به‌تنهایی ایجاد نشست، بازنشانی رمز، اثبات موبایل یا دریافت روی گوشی را ثابت نمی‌کند. مقدار false در مشاهدات یعنی شاهدی دیده نشد.', 'pinova' ); ?></p>
+		<?php if ( empty( $timeline ) ) : ?>
+			<p><?php esc_html_e( 'خط زمانی قابل خواندن نیست؛ شواهد کافی در دسترس نیست.', 'pinova' ); ?></p>
+		<?php else : ?>
+			<?php /* translators: 1: finite linkage status; 2: finite sampled coverage status. */ ?>
+			<p><?php echo esc_html( sprintf( __( 'پیوند شواهد: %1$s؛ پوشش: %2$s؛ دریافت گوشی: تأیید نشده', 'pinova' ), $timeline['linkage'], $timeline['coverage'] ) ); ?></p>
+			<?php if ( 'ambiguous' === $timeline['linkage'] ) : ?>
+				<p><?php esc_html_e( 'بیش از یک جریان برای این کد پیگیری دیده شد؛ گسترش خودکار انجام نشد و فقط رخدادهای همان درخواست نمایش داده می‌شوند.', 'pinova' ); ?></p>
+			<?php endif; ?>
+			<?php if ( 'sole_flow' === $timeline['linkage'] ) : ?>
+				<p><code dir="ltr"><?php echo esc_html( $timeline['expanded_flow_id'] ); ?></code></p>
+			<?php endif; ?>
+			<?php /* translators: 1: observed finite stage names; 2: unobserved possible stage names. */ ?>
+			<p><?php echo esc_html( sprintf( __( 'مراحل مشاهده‌شده: %1$s؛ مراحل مشاهده‌نشده: %2$s', 'pinova' ), implode( ', ', $timeline['observed_stages'] ), implode( ', ', $timeline['unobserved_stages'] ) ) ); ?></p>
+			<pre dir="ltr"><?php echo esc_html( (string) wp_json_encode( $timeline['observed_facts'], JSON_UNESCAPED_SLASHES ) ); ?></pre>
+			<?php if ( empty( $timeline['events'] ) ) : ?>
+				<p><?php esc_html_e( 'رخدادی برای انتخاب حاضر در شواهد نگهداری‌شده دیده نشد؛ نتیجهٔ عملیات نامشخص است.', 'pinova' ); ?></p>
+			<?php else : ?>
+				<div style="overflow-x:auto"><table class="widefat striped">
+					<thead><tr><th><?php esc_html_e( 'شناسه و رخداد', 'pinova' ); ?></th><th><?php esc_html_e( 'زمان ذخیره UTC', 'pinova' ); ?></th><th><?php esc_html_e( 'زمان رخداد UTC', 'pinova' ); ?></th><th><?php esc_html_e( 'شواهد پالایش‌شده و مرجع کد', 'pinova' ); ?></th></tr></thead>
+					<tbody>
+					<?php foreach ( $timeline['events'] as $event ) : ?>
+						<tr>
+							<td>#<?php echo esc_html( (string) $event['id'] ); ?><br><code dir="ltr"><?php echo esc_html( $event['event'] ); ?></code></td>
+							<td><?php echo esc_html( $event['created_at'] ); ?></td>
+							<td><?php echo esc_html( isset( $event['context']['observed_at'] ) ? gmdate( 'Y-m-d H:i:s', $event['context']['observed_at'] ) : __( 'نامشخص', 'pinova' ) ); ?></td>
+							<td><code dir="ltr"><?php echo esc_html( (string) wp_json_encode( $event['context'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ); ?></code></td>
+						</tr>
+					<?php endforeach; ?>
+					</tbody>
+				</table></div>
 			<?php endif; ?>
 		<?php endif; ?>
 		<?php
@@ -212,6 +323,9 @@ final class Issues {
 		?>
 		<input type="hidden" name="created_from" value="<?php echo esc_attr( $report['selected_range'][0] ); ?>">
 		<input type="hidden" name="created_to" value="<?php echo esc_attr( $report['selected_range'][1] ); ?>">
+		<?php if ( in_array( $report['selected_selector']['type'], [ 'flow', 'correlation' ], true ) ) : ?>
+			<input type="hidden" name="<?php echo esc_attr( 'flow' === $report['selected_selector']['type'] ? 'flow_id' : 'correlation_id' ); ?>" value="<?php echo esc_attr( $report['selected_selector']['value'] ); ?>">
+		<?php endif; ?>
 		<?php
 	}
 
@@ -242,7 +356,7 @@ final class Issues {
 	private function export_response( bool $send_headers = true ): void {
 		self::authorize( 'pinova_export_issues' );
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- The action nonce is checked by authorize above.
-		$report = IssueMonitor::report( self::dates( $_POST ) );
+		$report = IssueMonitor::report( self::filters( $_POST ) );
 		if ( ! $report['coverage']['valid_range'] ) {
 			wp_die( esc_html__( 'بازهٔ گزارش نامعتبر است؛ حداکثر هفت روز انتخاب کنید.', 'pinova' ), '', [ 'response' => 400 ] );
 		}
@@ -286,7 +400,7 @@ final class Issues {
 			}
 		}
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- The action nonce is checked by authorize above.
-		$report = IssueMonitor::report( self::dates( $_POST ) );
+		$report = IssueMonitor::report( self::filters( $_POST ) );
 		if ( ! ctype_digit( $input['through_id'] ) || ! IssueMonitor::review( $report, $input['issue'], $input['state'], (int) $input['through_id'], $input['expected'] ) ) {
 			wp_die( esc_html__( 'وضعیت تغییر کرده یا شواهد کامل نیست. صفحه را تازه کنید و دوباره بررسی کنید.', 'pinova' ), '', [ 'response' => 409 ] );
 		}

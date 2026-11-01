@@ -5,12 +5,14 @@ namespace Pinova\Channels;
 use Exception;
 use Pinova\Helpers\Curl;
 use Pinova\Pinova;
+use Pinova\Services\OTPImmediateDelivery;
 
 class Bale implements ChannelInterface {
 
 	public static function send_code( string $identifier, int $code ): bool {
 
 		if ( function_exists( 'pinova_bale_send_v2' ) ) {
+			OTPImmediateDelivery::provider_timeout();
 			return pinova_bale_send_v2( $identifier, $code );
 		}
 

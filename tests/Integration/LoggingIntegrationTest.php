@@ -11,6 +11,9 @@ use Pinova\Exceptions\RateLimitException;
 use Pinova\Gateways\BaseGateway;
 use Pinova\Install;
 use Pinova\Logging\HealthState;
+use Pinova\Logging\DiagnosticContext;
+use Pinova\Logging\EventEvidence;
+use Pinova\Logging\EventThrottle;
 use Pinova\Logging\Logger;
 use Pinova\Logging\LogRepository;
 use Pinova\Objects\Identifier;
@@ -105,6 +108,102 @@ final class LoggingIntegrationTest extends WP_UnitTestCase {
 		self::assertStringNotContainsString( 'provider leaked', $row['context'] );
 		self::assertStringContainsString( 'identifier_fingerprint', $row['context'] );
 		self::assertStringContainsString( 'RuntimeException', $row['context'] );
+	}
+
+	public function test_scoped_diagnostic_uses_the_existing_database_and_shared_historical_redactor(): void {
+		self::assertTrue( EventThrottle::initialize_diagnostics() );
+		$flow = str_repeat( 'a', 32 );
+		$logger = new Logger(
+			null,
+			null,
+			static fn(): array => [ 'minimum_level' => 'error', 'diagnostic_until' => time() + 60, 'diagnostic_scope' => [ 'type' => 'flow', 'value' => $flow ] ]
+		);
+		$context = new DiagnosticContext( $flow, time() + 60 );
+		$context->observe( 'provider_completed', [
+			'execution_mode' => 'cron', 'result' => 'accepted', 'provider_duration_ms' => 250,
+			'error_code' => 'none', 'identifier' => 'private@example.test', 'provider_response' => 'private-provider-response',
+			'exception' => new \RuntimeException( 'private-exception-message' ),
+		] );
+		$context->flush( $logger );
+		$rows = LogRepository::paginate( 1, 10, '', [ 'flow_id' => $flow ] );
+		self::assertTrue( $rows['success'] );
+		self::assertCount( 1, $rows['rows'] );
+		$row = $rows['rows'][0];
+		self::assertSame( 'otp.diagnostic', $row['event'] );
+		self::assertSame( 'debug', $row['level'] );
+		self::assertSame( $flow, $row['flow_id'] );
+		self::assertStringNotContainsString( 'private', $row['context'] );
+		self::assertSame( 1, EventThrottle::diagnostics_snapshot()['admitted'] );
+		$evidence = EventEvidence::redact( $row );
+		self::assertSame( 'http_transport', $evidence['context']['component'] );
+		self::assertSame( 'curl.post', $evidence['context']['source_ref'] );
+		self::assertSame( 250, $evidence['context']['provider_duration_ms'] );
+		self::assertSame( 'accepted', $evidence['context']['result'] );
+		self::assertSame( $evidence, Logs::redact_incident_row( $row ) );
+	}
+
+	public function test_new_diagnostic_context_cap_is_enforced_in_sql_without_lowering_legacy_cap(): void {
+		global $wpdb;
+		foreach ( [ 'otp.diagnostic', 'otp.created' ] as $event ) {
+			self::assertSame( 1, $wpdb->insert( $wpdb->prefix . 'pinova_logs', [
+				'created_at' => gmdate( 'Y-m-d H:i:s' ), 'level' => 'info', 'event' => $event,
+				'correlation_id' => '12345678-1234-4234-8234-123456789abc',
+				'context' => wp_json_encode( [ 'stage' => 'worker_started', 'password' => str_repeat( 'x', 3000 ) ] ),
+			] ) );
+		}
+		foreach ( [ LogRepository::paginate()['rows'], LogRepository::incident_batch( [] )['rows'] ] as $rows ) {
+			$by_event = array_column( $rows, null, 'event' );
+			self::assertSame( '{}', $by_event['otp.diagnostic']['context'] );
+			self::assertTrue( $by_event['otp.diagnostic']['context_truncated'] );
+			self::assertFalse( $by_event['otp.created']['context_truncated'] );
+			self::assertGreaterThan( 2048, strlen( $by_event['otp.created']['context'] ) );
+			$redacted = EventEvidence::redact( $by_event['otp.diagnostic'] );
+			self::assertSame( [], $redacted['context'] );
+			self::assertTrue( $redacted['context_truncated'] );
+		}
+	}
+
+	public function test_wordpress_diagnostic_filter_can_shorten_but_never_extend_persisted_authority(): void {
+		global $wpdb;
+		$flow = str_repeat( 'e', 32 );
+		$config = [ 'minimum_level' => 'error', 'retention_days' => 14, 'diagnostic_until' => time() - 1, 'diagnostic_scope' => [ 'type' => 'flow', 'value' => $flow ], 'diagnostic_budget_initialized' => true ];
+		$seed = static function ( array $value ) use ( $wpdb ): void {
+			$wpdb->update( $wpdb->options, [ 'option_value' => maybe_serialize( $value ) ], [ 'option_name' => 'pinova_logging' ] );
+			wp_cache_delete( 'pinova_logging', 'options' );
+			wp_cache_delete( 'alloptions', 'options' );
+		};
+		self::assertTrue( EventThrottle::initialize_diagnostics() );
+		$seed( $config );
+		$extend = static fn(): int => time() + 900;
+		add_filter( 'pinova/logging_diagnostic_until', $extend );
+		try {
+			$context = new DiagnosticContext( $flow, time() + 60 );
+			$context->observe( 'worker_started', [ 'execution_mode' => 'cron', 'result' => 'started' ] );
+			$context->flush();
+			self::assertSame( 'expired', Logger::diagnostics_status()['status'] );
+			self::assertSame( $config['diagnostic_until'], Logger::diagnostics_status()['until'] );
+			self::assertSame( 0, EventThrottle::diagnostics_snapshot()['admitted'] );
+			self::assertSame( 0, LogRepository::paginate()['total'] );
+			$config['diagnostic_until'] = time() + 2 * DAY_IN_SECONDS;
+			$seed( $config );
+			self::assertSame( 'invalid', Logger::diagnostics_status()['status'] );
+			self::assertSame( 0, Logger::diagnostics_status()['until'] );
+		} finally {
+			remove_filter( 'pinova/logging_diagnostic_until', $extend );
+		}
+		$config['diagnostic_until'] = time() + 900;
+		$seed( $config );
+		$shortened = time() + 30;
+		$shorten = static fn(): int => $shortened;
+		add_filter( 'pinova/logging_diagnostic_until', $shorten );
+		try {
+			$status = Logger::diagnostics_status();
+			self::assertSame( 'active', $status['status'] );
+			self::assertSame( $shortened, $status['until'] );
+			self::assertTrue( $status['initialization_locked'] );
+		} finally {
+			remove_filter( 'pinova/logging_diagnostic_until', $shorten );
+		}
 	}
 
 	public function test_admin_sms_test_is_audited_when_minimum_level_is_error(): void {

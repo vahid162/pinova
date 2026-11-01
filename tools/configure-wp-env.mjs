@@ -66,12 +66,14 @@ config.plugins = baseline
 config.config ??= {};
 if (baseline) {
     config.config.PINOVA_THIRD_PARTY_BASELINE = true;
+    config.config.WP_DEBUG_DISPLAY = false;
     config.config.DISABLE_WP_CRON = true;
     config.config.WP_ENVIRONMENT_TYPE = 'local';
     config.config.WP_MEMORY_LIMIT = '256M';
     config.config.WP_MAX_MEMORY_LIMIT = '512M';
 } else if (config.config.PINOVA_THIRD_PARTY_BASELINE === true) {
     delete config.config.PINOVA_THIRD_PARTY_BASELINE;
+    delete config.config.WP_DEBUG_DISPLAY;
     delete config.config.DISABLE_WP_CRON;
     delete config.config.WP_ENVIRONMENT_TYPE;
     delete config.config.WP_MEMORY_LIMIT;

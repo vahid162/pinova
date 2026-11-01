@@ -66,7 +66,7 @@ test('integration PHP selection reaches wp-env and rejects malformed versions wi
 
 test('default configuration preserves constants not owned by the third-party profile', () => {
     fixture(({ execute, configPath, config }) => {
-        const original = { WP_DEBUG: true, DISABLE_WP_CRON: true, WP_ENVIRONMENT_TYPE: 'development' };
+        const original = { WP_DEBUG: true, WP_DEBUG_DISPLAY: true, DISABLE_WP_CRON: true, WP_ENVIRONMENT_TYPE: 'development' };
         writeFileSync(configPath, JSON.stringify({ config: original }));
         assert.equal(execute(configure).status, 0);
         assert.deepEqual(config().config, original);
@@ -89,7 +89,7 @@ test('third-party profile requires exact baseline and prepared fixtures', () => 
         ]);
         assert.equal(config().plugins.some(plugin => plugin.includes('woo-wallet')), false);
         assert.deepEqual(config().config, {
-            WP_DEBUG: true, PINOVA_THIRD_PARTY_BASELINE: true, DISABLE_WP_CRON: true, WP_ENVIRONMENT_TYPE: 'local',
+            WP_DEBUG: true, PINOVA_THIRD_PARTY_BASELINE: true, WP_DEBUG_DISPLAY: false, DISABLE_WP_CRON: true, WP_ENVIRONMENT_TYPE: 'local',
             WP_MEMORY_LIMIT: '256M', WP_MAX_MEMORY_LIMIT: '512M',
         });
         rmSync(path.join(directory, '.build/third-party/dokan-lite/dokan.php'));

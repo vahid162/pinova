@@ -6,12 +6,69 @@ namespace Pinova\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use Pinova\Logging\BuildMetadata;
+use Pinova\Logging\EventEvidence;
 use Pinova\Logging\HandlerInterface;
 use Pinova\Logging\InvalidLogLevelException;
 use Pinova\Logging\Logger;
 use Pinova\Logging\SafeContext;
 
 final class LoggingTest extends TestCase {
+
+	public function test_diagnostic_catalogue_preserves_finite_facts_in_input_and_historical_output(): void {
+		$observed = time();
+		$facts    = [
+			'component'                 => 'otp_delivery',
+			'stage'                     => 'worker_started',
+			'source_ref'                => 'otp_service.deliver_queued',
+			'operation'                 => 'queued_otp',
+			'execution_mode'            => 'immediate',
+			'observed_at'               => $observed,
+			'request_to_worker_seconds' => 31,
+		];
+		$input    = $facts + [
+			'identifier'        => 'private@example.test',
+			'otp'               => 'private-otp',
+			'provider_response' => 'private-provider-response',
+			'exception'         => new \RuntimeException( 'private-exception-message' ),
+		];
+		$safe     = ( new SafeContext() )->sanitize( $input, 'otp.diagnostic' );
+
+		self::assertEquals( $facts, $safe );
+		$historical = EventEvidence::redact(
+			[
+				'created_at'     => gmdate( 'Y-m-d H:i:s', $observed + 2 ),
+				'event'          => 'otp.diagnostic',
+				'level'          => 'debug',
+				'correlation_id' => '12345678-1234-4234-8234-123456789abc',
+				'flow_id'        => str_repeat( 'a', 32 ),
+				'context'        => json_encode( $input ),
+			]
+		);
+
+		self::assertSame( 'otp.diagnostic', $historical['event'] );
+		self::assertEquals( $facts, $historical['context'] );
+		self::assertSame( $observed, $historical['context']['observed_at'] );
+		self::assertStringNotContainsString( 'private', (string) json_encode( $historical ) );
+	}
+
+	public function test_diagnostic_codes_are_not_accepted_merely_because_they_look_like_codes(): void {
+		$context = ( new SafeContext() )->sanitize(
+			[
+				'component'      => 'private_component',
+				'stage'          => 'private_stage',
+				'source_ref'     => 'private.source_ref',
+				'error_code'     => 'private_error_code',
+				'execution_mode' => 'private_execution_mode',
+				'operation'      => 'private_operation',
+				'result'         => 'private_result',
+				'observed_at'    => 'private_timestamp',
+			],
+			'otp.diagnostic'
+		);
+
+		self::assertSame( [], $context );
+		self::assertSame( [], ( new SafeContext() )->sanitize( [ 'stage' => 'worker_started', 'source_ref' => 'otp_service.deliver_queued' ] ) );
+	}
 
 	public function test_queue_timing_fields_are_numeric_and_secrets_remain_denied(): void {
 		$context = new SafeContext();
@@ -109,6 +166,78 @@ final class LoggingTest extends TestCase {
 		self::assertStringNotContainsString( 'secret-token', (string) $encoded );
 	}
 
+	public function test_anonymous_exception_names_cannot_persist_a_null_byte_or_source_path(): void {
+		$exception = new class( 'private-exception-message', 23 ) extends \RuntimeException {};
+		$class     = get_class( $exception );
+		self::assertStringContainsString( '@anonymous', $class );
+		self::assertStringContainsString( __FILE__, $class );
+
+		foreach ( [ [ 'exception' => $exception ], [ 'exception_class' => $class, 'exception_code' => 23 ] ] as $input ) {
+			$safe = ( new SafeContext() )->sanitize( $input );
+			self::assertArrayNotHasKey( 'exception_class', $safe );
+			self::assertSame( '23', $safe['exception_code'] );
+			$encoded = (string) json_encode( $safe );
+			foreach ( [ '@anonymous', __FILE__, 'private-exception-message', '\u0000' ] as $forbidden ) {
+				self::assertStringNotContainsString( $forbidden, $encoded );
+			}
+		}
+	}
+
+	/** @dataProvider exception_class_names */
+	public function test_exception_class_names_are_validated_without_stripping_or_truncating( string $class, bool $valid ): void {
+		$safe = ( new SafeContext() )->sanitize( [ 'exception_class' => $class, 'exception_code' => 'E-17' ] );
+		self::assertSame( 'E-17', $safe['exception_code'] );
+		if ( $valid ) {
+			self::assertSame( $class, $safe['exception_class'] );
+		} else {
+			self::assertArrayNotHasKey( 'exception_class', $safe );
+		}
+	}
+
+	public static function exception_class_names(): array {
+		return [
+			'ordinary class' => [ 'RuntimeException', true ],
+			'namespaced class' => [ 'Vendor\\Domain\\NamedError', true ],
+			'fully qualified class' => [ '\\Vendor\\Domain\\NamedError', true ],
+			'case and underscore' => [ 'Vendor_2\\_NamedError42', true ],
+			'exact byte limit' => [ str_repeat( 'A', 160 ), true ],
+			'over byte limit' => [ str_repeat( 'A', 161 ), false ],
+			'empty' => [ '', false ],
+			'leading digit' => [ '9RuntimeException', false ],
+			'empty namespace segment' => [ 'Vendor\\\\NamedError', false ],
+			'trailing separator' => [ 'Vendor\\', false ],
+			'newline' => [ "RuntimeException\n", false ],
+			'null byte' => [ "RuntimeException\0private-source", false ],
+			'leading whitespace' => [ ' RuntimeException', false ],
+			'path suffix' => [ 'RuntimeException/private/source.php:42', false ],
+			'absolute path' => [ '/private/source/RuntimeException', false ],
+			'Windows path' => [ 'C:\\private\\source.php', false ],
+			'non-ASCII symbol' => [ 'Vendor\\NämédError', false ],
+			'hyphen' => [ 'Vendor\\Named-Error', false ],
+		];
+	}
+
+	public function test_named_throwables_remain_exact_and_explicit_names_do_not_trigger_autoloading(): void {
+		$sanitizer = new SafeContext();
+		foreach ( [ new \RuntimeException( 'private-runtime-message', 17 ), new LoggingNamedException( 'private-namespaced-message', 29 ) ] as $exception ) {
+			$safe = $sanitizer->sanitize( [ 'exception' => $exception ] );
+			self::assertSame( get_class( $exception ), $safe['exception_class'] );
+			self::assertSame( (string) $exception->getCode(), $safe['exception_code'] );
+		}
+		// Preload the ordinary sanitizer's existing catalogue dependency first.
+		$sanitizer->sanitize( [] );
+		$autoloads = 0;
+		$loader = static function ( string $class ) use ( &$autoloads ): void { ++$autoloads; };
+		spl_autoload_register( $loader, true, true );
+		try {
+			$safe = $sanitizer->sanitize( [ 'exception_class' => 'NotLoaded\\ExactCaseError' ] );
+		} finally {
+			spl_autoload_unregister( $loader );
+		}
+		self::assertSame( 'NotLoaded\\ExactCaseError', $safe['exception_class'] );
+		self::assertSame( 0, $autoloads );
+	}
+
 	public function test_flow_id_is_a_strict_top_level_field_not_arbitrary_context(): void {
 		$handler = new class() implements HandlerInterface {
 			public array $records = [];
@@ -154,20 +283,34 @@ final class LoggingTest extends TestCase {
 		self::assertCount( 1, $handler->records );
 		self::assertSame( 'auth.rate_limited', $handler->records[0]['event'] );
 
-		$diagnostic = new Logger(
-			$handler,
-			new SafeContext( static fn(): string => 'salt' ),
-			static fn(): array => [
-				'minimum_level'    => 'error',
-				'diagnostic_until' => time() + 60,
-			],
-			static fn(): string => 'diagnostic'
-		);
-		$diagnostic->debug( 'auth.trace' );
-		self::assertTrue( $diagnostic->is_enabled( 'debug' ) );
-
-		self::assertCount( 2, $handler->records );
-		self::assertSame( 'auth.trace', $handler->records[1]['event'] );
+		$now     = time();
+		$windows = [
+			'legacy active'      => [ 'diagnostic_until' => $now + 60 ],
+			'operation active'   => [ 'diagnostic_until' => $now + 60, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ],
+			'flow active'        => [ 'diagnostic_until' => $now + 60, 'diagnostic_scope' => [ 'type' => 'flow', 'value' => str_repeat( 'a', 32 ) ] ],
+			'operation expired'  => [ 'diagnostic_until' => $now - 1, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ],
+			'operation disabled' => [ 'diagnostic_until' => 0, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ],
+		];
+		foreach ( $windows as $label => $window ) {
+			$config     = [ 'minimum_level' => 'error' ] + $window;
+			$diagnostic = new Logger(
+				$handler,
+				new SafeContext( static fn(): string => 'salt' ),
+				static fn(): array => $config,
+				static fn(): string => 'diagnostic'
+			);
+			foreach ( [ 'debug', 'info', 'notice', 'warning' ] as $level ) {
+				self::assertFalse( $diagnostic->is_enabled( $level ), $label . ' must preserve the ordinary minimum level.' );
+				$diagnostic->log( $level, 'auth.trace' );
+			}
+			self::assertTrue( $diagnostic->is_enabled( 'ERROR' ) );
+			self::assertFalse( $diagnostic->is_enabled( 'unknown' ) );
+			self::assertCount( 1, $handler->records );
+			$diagnostic->error( 'auth.request_failed' );
+			self::assertCount( 2, $handler->records );
+			self::assertSame( 'auth.request_failed', $handler->records[1]['event'] );
+			array_pop( $handler->records );
+		}
 	}
 
 	public function test_enabled_check_fails_closed_when_configuration_throws(): void {
@@ -255,3 +398,5 @@ final class LoggingTest extends TestCase {
 		self::assertSame( '', $logger->fingerprint( 'private-value', 'test' ) );
 	}
 }
+
+final class LoggingNamedException extends \RuntimeException {}

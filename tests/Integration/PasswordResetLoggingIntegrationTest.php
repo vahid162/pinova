@@ -28,7 +28,7 @@ final class PasswordResetLoggingIntegrationTest extends WP_UnitTestCase {
 		global $wpdb;
 		$this->original_server = $_SERVER;
 		$_SERVER['REMOTE_ADDR'] = '192.0.2.81';
-		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_reset_failed', 'log_reset_succeeded')" );
+		$wpdb->query( "DELETE FROM {$wpdb->prefix}pinova_rate_limits WHERE scope IN ('log_reset_failed', 'log_reset_succeeded', 'log_otp_verify_failed')" );
 		OTP::query()->delete();
 		LogRepository::delete_all();
 		update_option( 'pinova_logging', [ 'minimum_level' => 'info', 'diagnostic_until' => 0 ] );

@@ -295,24 +295,16 @@ test('modal OTP input normalizes digits and autosubmits each complete code exact
     }
 });
 
-test('modal WebOTP follows the normalized exact-length autosubmit path', async () => {
-    const { listeners, state } = harness(undefined, {
-        codeLength: 4,
-        webOtpCode: '۱۲٣٤',
-    });
+test('modal WebOTP starts after accepted state and uses normalized exact-length autosubmit', async () => {
+    const { listeners, state } = harness({success: true, data: {login_method: 'otp', jwt: 'active-flow', ttl: 180}}, {codeLength: 4, webOtpCode: '۱۲٣٤'});
     let submissions = 0;
     state.modalIsOpen = true;
-    state.stepName = 'signIn';
-    state.submit = () => {
-        submissions += 1;
-    };
-
+    state.submit = () => { submissions += 1; };
     state.init();
-    listeners.DOMContentLoaded();
+    assert.equal(listeners.DOMContentLoaded, undefined);
+    await state.authenticate();
     await Promise.resolve();
-    await Promise.resolve();
-
-    assert.equal(state.forms.signIn.inputs.code.value, '1234');
+    assert.equal(state.forms.loginByOtp.inputs.code.value, '1234');
     assert.equal(submissions, 1);
 });
 

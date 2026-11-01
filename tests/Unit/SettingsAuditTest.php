@@ -62,6 +62,18 @@ final class SettingsAuditTest extends TestCase {
 		self::assertSame( [], SettingsAudit::changed_keys( 'pinova_gateway_pwsms', [], [ 'pwsms_help' => 'PRIVATE_VALUE' ] ) );
 	}
 
+	public function test_diagnostic_audit_names_the_scope_without_values_or_server_owned_marker(): void {
+		$new = [
+			'diagnostic_until'              => 1234567890,
+			'diagnostic_scope'              => [ 'type' => 'flow', 'value' => str_repeat( 'a', 32 ) ],
+			'diagnostic_budget_initialized' => true,
+		];
+		self::assertSame( [ 'diagnostic_until', 'diagnostic_scope' ], SettingsAudit::changed_keys( 'pinova_logging', [], $new ) );
+		self::assertSame( [], SettingsAudit::changed_keys( 'pinova_logging', $new, $new ) );
+		$context = ( new SafeContext() )->sanitize( [ 'changed_keys' => array_keys( $new ), 'diagnostic_scope' => $new['diagnostic_scope'] ] );
+		self::assertSame( [ 'changed_keys' => [ 'diagnostic_until', 'diagnostic_scope' ] ], $context );
+	}
+
 	public function test_context_rejects_unknown_keys_and_adjacent_secret_values(): void {
 		$context = ( new SafeContext() )->sanitize(
 			[

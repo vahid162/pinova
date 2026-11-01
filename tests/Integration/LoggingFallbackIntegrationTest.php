@@ -6,6 +6,8 @@ namespace Pinova\Tests\Integration;
 
 use Pinova\Install;
 use Pinova\Logging\DatabaseHandler;
+use Pinova\Logging\DiagnosticContext;
+use Pinova\Logging\EventThrottle;
 use Pinova\Logging\HealthState;
 use Pinova\Logging\Logger;
 use WP_UnitTestCase;
@@ -20,7 +22,7 @@ final class LoggingFallbackIntegrationTest extends WP_UnitTestCase {
 	}
 
 	/** @dataProvider fallback_failures */
-	public function test_filtered_woocommerce_still_attempts_php_without_exposing_secrets( bool $throws ): void {
+	public function test_filtered_woocommerce_still_attempts_php_without_exposing_secrets( bool $throws, bool $diagnostic = false ): void {
 		global $wpdb;
 
 		delete_option( 'pinova_logging_fallback_health' );
@@ -35,17 +37,26 @@ final class LoggingFallbackIntegrationTest extends WP_UnitTestCase {
 		$previous_errors                          = $wpdb->suppress_errors( true );
 		$GLOBALS['pinova_test_fallback_messages'] = [];
 		$GLOBALS['pinova_test_fallback_throws']   = $throws;
+		if ( $diagnostic ) {
+			self::assertTrue( EventThrottle::initialize_diagnostics() );
+		}
 		add_filter( 'query', $fail );
 		add_filter( 'woocommerce_logger_log_message', '__return_null' );
 		try {
-			$logger = new Logger( null, null, static fn(): array => [ 'minimum_level' => 'info' ] );
-			$logger->error(
-				'auth.request_failed',
-				[
-					'password'  => 'never-expose-secret',
-					'exception' => new \RuntimeException( 'never-expose-secret' ),
-				]
-			);
+			$logger = new Logger( null, null, static fn(): array => [ 'minimum_level' => 'info', 'diagnostic_until' => time() + 60, 'diagnostic_scope' => [ 'type' => 'operation', 'value' => 'queued_otp' ] ] );
+			if ( $diagnostic ) {
+				$context = new DiagnosticContext( str_repeat( 'a', 32 ), time() + 60 );
+				$context->observe( 'worker_started', [ 'password' => 'never-expose-secret', 'exception' => new \RuntimeException( 'never-expose-secret' ) ] );
+				$context->flush( $logger );
+			} else {
+				$logger->error(
+					'auth.request_failed',
+					[
+						'password'  => 'never-expose-secret',
+						'exception' => new \RuntimeException( 'never-expose-secret' ),
+					]
+				);
+			}
 			self::assertTrue( DatabaseHandler::did_fallback() );
 			self::assertCount( 1, $GLOBALS['pinova_test_fallback_messages'] );
 			self::assertStringNotContainsString( 'never-expose-secret', $GLOBALS['pinova_test_fallback_messages'][0] );
@@ -63,8 +74,10 @@ final class LoggingFallbackIntegrationTest extends WP_UnitTestCase {
 
 	public function fallback_failures(): array {
 		return [
-			'false'     => [ false ],
-			'throwable' => [ true ],
+			'false'               => [ false, false ],
+			'throwable'           => [ true, false ],
+			'diagnostic false'    => [ false, true ],
+			'diagnostic throwable' => [ true, true ],
 		];
 	}
 }

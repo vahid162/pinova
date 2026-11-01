@@ -18,7 +18,7 @@ final class SettingsAudit {
 		'pinova_zohal'               => [ 'api_key' ],
 		'pinova_design'              => [ 'logo' ],
 		'pinova_integrations'        => [ 'wpforo_enabled', 'dokan_enabled' ],
-		'pinova_logging'             => [ 'minimum_level', 'retention_days', 'diagnostic_until' ],
+		'pinova_logging'             => [ 'minimum_level', 'retention_days', 'diagnostic_until', 'diagnostic_scope' ],
 		'pinova_advanced'            => [
 			'mobile_possible_meta_keys',
 			'code_length',

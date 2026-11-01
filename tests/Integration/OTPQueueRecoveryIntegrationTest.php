@@ -293,6 +293,84 @@ final class OTPQueueRecoveryIntegrationTest extends WP_UnitTestCase {
 		self::assertSame( 1, $this->mail_calls );
 	}
 
+	public function test_queue_health_uses_one_bounded_read_and_distinguishes_claim_age_from_request_origin(): void {
+		global $wpdb;
+		$table = $wpdb->prefix . 'pinova_rate_limits';
+		$held = str_repeat( 'a', 32 );
+		self::assertNotFalse( $wpdb->query( 'SET timestamp = 1800000000' ) );
+		try {
+			$states = [
+				[ str_repeat( '1', 32 ), 'ready:synthetic', 120, -10 ],
+				[ $held, 'processing:aaaaaaaaaaaaaaaa:ready:synthetic', 120, -61 ],
+				[ str_repeat( '3', 32 ), 'processing:aaaaaaaaaaaaaaaa:ready:synthetic', 120, -60 ],
+				[ str_repeat( '4', 32 ), 'processing:aaaaaaaaaaaaaaaa:ready:synthetic', 120, -59 ],
+				[ str_repeat( '5', 32 ), 'processing:aaaaaaaaaaaaaaaa:ready:synthetic', 120, 1 ],
+				[ str_repeat( '6', 32 ), 'ready:synthetic', 181, -10 ],
+			];
+			foreach ( $states as [ $flow, $payload, $remaining, $updated ] ) {
+				self::assertSame( 1, $wpdb->query( $wpdb->prepare( 'INSERT INTO %i (bucket_key,scope,hits,reset_at,updated_at,payload) VALUES (%s,%s,1,UTC_TIMESTAMP() + INTERVAL %d SECOND,UTC_TIMESTAMP() + INTERVAL %d SECOND,%s)', $table, hash( 'sha256', $flow ), $flow, $remaining, $updated, $payload ) ) );
+			}
+			self::assertSame( '1', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s,0)', 'pinova_otp_' . $held ) ) );
+			$queries = [];
+			$inspect = static function ( string $query ) use ( &$queries ): string {
+				$queries[] = $query;
+				return $query;
+			};
+			add_filter( 'query', $inspect );
+			try {
+				$health = RateLimitService::queue_health();
+			} finally {
+				remove_filter( 'query', $inspect );
+			}
+			self::assertCount( 1, $queries );
+			self::assertStringContainsString( 'LIMIT 1001', $queries[0] );
+			self::assertStringStartsWith( 'SELECT ', $queries[0] );
+			self::assertTrue( $health['read_success'] );
+			self::assertFalse( $health['truncated'] );
+			self::assertSame( 2, $health['pending'] );
+			self::assertSame( 4, $health['processing'] );
+			self::assertSame( 60, $health['oldest_pending_age_seconds'] );
+			self::assertSame( 120, $health['earliest_pending_remaining_seconds'] );
+			self::assertSame( 61, $health['oldest_processing_age_seconds'] );
+			self::assertSame( 1, $health['processing_held'] );
+			self::assertSame( 1, $health['processing_free_stale'], 'Exactly the existing 60-second lease boundary is stale.' );
+			self::assertSame( 1, $health['processing_free_recent'] );
+			self::assertSame( 1, $health['processing_age_unknown'] );
+			self::assertSame( 0, $health['processing_lock_unknown'] );
+			self::assertSame( 2, $health['timing_unknown'] );
+			self::assertStringNotContainsString( 'synthetic', wp_json_encode( $health ) );
+		} finally {
+			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', 'pinova_otp_' . $held ) );
+			$wpdb->query( 'SET timestamp = 0' );
+		}
+	}
+
+	public function test_queue_health_marks_truncation_and_read_failure_without_inventing_healthy_counts(): void {
+		global $wpdb;
+		$table = $wpdb->prefix . 'pinova_rate_limits';
+		for ( $index = 1; 1002 >= $index; ++$index ) {
+			$flow = sprintf( '%032x', $index );
+			self::assertSame( 1, $wpdb->query( $wpdb->prepare( 'INSERT INTO %i (bucket_key,scope,hits,reset_at,updated_at,payload) VALUES (%s,%s,1,UTC_TIMESTAMP() + INTERVAL 120 SECOND,UTC_TIMESTAMP(),%s)', $table, hash( 'sha256', $flow ), $flow, 'ready:synthetic' ) ) );
+		}
+		$health = RateLimitService::queue_health();
+		self::assertTrue( $health['read_success'] );
+		self::assertTrue( $health['truncated'] );
+		self::assertSame( 1000, $health['pending'] );
+		$fail = static fn( string $query ): string => str_contains( $query, 'AS queue_state' ) ? 'SELECT `pinova_missing_health_column`' : $query;
+		$previous = $wpdb->suppress_errors( true );
+		add_filter( 'query', $fail );
+		try {
+			$failed = RateLimitService::queue_health();
+		} finally {
+			remove_filter( 'query', $fail );
+			$wpdb->suppress_errors( $previous );
+		}
+		self::assertFalse( $failed['read_success'] );
+		foreach ( [ 'timing_unknown', 'oldest_pending_age_seconds', 'earliest_pending_remaining_seconds', 'processing_held', 'processing_free_stale', 'processing_free_recent', 'processing_lock_unknown', 'processing_age_unknown', 'oldest_processing_age_seconds' ] as $key ) {
+			self::assertNull( $failed[ $key ] );
+		}
+	}
+
 	public function test_durable_recovery_obeys_three_job_bound_and_future_or_recurring_jobs(): void {
 		foreach ( range( 1, 4 ) as $index ) {
 			$flow = $this->reserve( 'bounded-' . $index . '@example.test' );

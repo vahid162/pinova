@@ -11,6 +11,7 @@ use Pinova\Channels\SMS;
 use Pinova\Exceptions\SendOTPException;
 use Pinova\Exceptions\ProviderOutcomeUnknownException;
 use Pinova\Exceptions\OTPImmediateDeliveryDeferredException;
+use Pinova\Exceptions\OTPDeliveryDeferredException;
 use Pinova\Pinova;
 use Pinova\Models\OTP;
 use Pinova\Logging\Logger;
@@ -22,6 +23,21 @@ class ChannelService {
 	 * @throws Exception
 	 */
 	public static function send( OTP $otp, int $code, ?string $queue_claim_token = null ): array {
+		$previous = OTPQueueStore::set_provider_scope(
+			null === $queue_claim_token ? null : [
+				'flow'  => (string) $otp->flow_id,
+				'token' => $queue_claim_token,
+			]
+		);
+		try {
+			return self::send_scoped( $otp, $code, $queue_claim_token );
+		} finally {
+			OTPQueueStore::set_provider_scope( $previous );
+		}
+	}
+
+	/** The current transport scope belongs to this exact queued or nonqueued call. */
+	private static function send_scoped( OTP $otp, int $code, ?string $queue_claim_token ): array {
 
 		$identifier = new Identifier( $otp->identifier );
 		$channels   = $otp->channels;
@@ -29,58 +45,85 @@ class ChannelService {
 
 		foreach ( $channels as $channel => &$success ) {
 
-			if ( in_array( $channel, [ 'sms', 'bale', 'call', 'email' ], true ) ) {
+			if ( ! in_array( $channel, [ 'sms', 'bale', 'call', 'email' ], true ) ) {
+				continue;
+			}
+			OTPQueueStore::set_provider_channel( $channel );
+			try {
 				if ( null !== $queue_claim_token ) {
-					try {
-						OTPImmediateDelivery::guard( (string) $otp->flow_id, $queue_claim_token, [ $channel ] );
-					} catch ( OTPImmediateDeliveryDeferredException $exception ) {
-						if ( ! OTPImmediateDelivery::provider_was_attempted() ) {
-							throw $exception;
-						}
-						// Prior acceptance remains authoritative. Never begin another
-						// channel after the finite budget or its connection lease ends.
+					OTPImmediateDelivery::guard( (string) $otp->flow_id, $queue_claim_token, [ $channel ] );
+					OTPQueueStore::guard_provider();
+				}
+				// Keep accepted channels if a preceding provider outlives the
+				// flow or an erasure cancels it, but never start another send.
+				if ( $otp->expires_at->lessThanOrEqualTo( Carbon::now() ) ) {
+					break;
+				}
+				if ( null !== $queue_claim_token ) {
+					$claim_state = OTPQueueStore::queued_claim_state( (string) $otp->flow_id, $queue_claim_token );
+					if ( 'unavailable' === $claim_state ) {
+						throw new OTPDeliveryDeferredException( 'Queued channel ownership is unavailable.' );
+					}
+					if ( 'active' !== $claim_state ) {
 						break;
 					}
 				}
-				// A previous provider may outlive the flow or an erasure may cancel
-				// its claim. Keep accepted channels, but never start another send.
-				if ( $otp->expires_at->lessThanOrEqualTo( Carbon::now() ) ||
-					( null !== $queue_claim_token && ! RateLimitService::queued_otp_is_active( (string) $otp->flow_id, $queue_claim_token ) ) ) {
-					break;
+			} catch ( OTPDeliveryDeferredException $exception ) {
+				$attempted = null === $queue_claim_token ? null : OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token );
+				if ( false === $attempted ) {
+					throw $exception;
 				}
+				$uncertain = $uncertain || null === $attempted;
+				// Prior acceptance remains authoritative. An unattempted
+				// deferral must not become a terminal known provider failure.
+				break;
+			}
 
-				$started   = microtime( true );
-				$exception = null;
-				try {
-					$success = self::send_channel( $channel, $identifier, $code, $otp->type );
-				} catch ( OTPImmediateDeliveryDeferredException $e ) {
-					if ( ! OTPImmediateDelivery::provider_was_attempted() ) {
-						throw $e;
-					}
-					$exception = $e;
-					$uncertain = true;
-				} catch ( \Throwable $e ) {
-					$exception = $e;
-					$uncertain = true;
+			$started   = microtime( true );
+			$monotonic = OTPService::diagnostic_clock();
+			$exception = null;
+			try {
+				$success = self::send_channel( $channel, $identifier, $code, $otp->type );
+			} catch ( OTPDeliveryDeferredException $e ) {
+				if ( null !== $queue_claim_token && false === OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token ) ) {
+					throw $e;
 				}
-				if ( false === $success || null !== $exception ) {
-					Logger::instance()->warning(
-						'otp.channel_send_failed',
-						[
-							'user_id'                => $otp->user_id,
-							'flow_id'                => $otp->flow_id,
-							'otp_type'               => $otp->type,
-							'channel'                => $channel,
-							'reason'                 => null === $exception ? 'provider_returned_false' : 'provider_exception',
-							'duration_ms'            => min( 600000, max( 0, (int) round( ( microtime( true ) - $started ) * 1000 ) ) ),
-							'identifier_type'        => $identifier->get_type(),
-							'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
-							'exception'              => $exception,
-						]
-					);
-					if ( null !== $exception ) {
-						do_action( 'pinova/channel_send_failed', sanitize_key( (string) $channel ) );
-					}
+				// This channel was not handed off. Preserve earlier true/false or
+				// uncertain results instead of inventing another provider outcome.
+				$uncertain = $uncertain || null === $queue_claim_token
+					|| null === OTPQueueStore::provider_was_attempted( (string) $otp->flow_id, $queue_claim_token );
+				break;
+			} catch ( \Throwable $e ) {
+				$exception = $e;
+				$uncertain = true;
+			}
+			$details  = [
+				'channel'    => $channel,
+				'result'     => null !== $exception ? 'unknown' : ( $success ? 'accepted' : 'rejected' ),
+				'error_code' => null !== $exception ? 'provider_exception' : ( $success ? 'none' : 'provider_returned_false' ),
+			];
+			$duration = OTPService::diagnostic_duration( $monotonic );
+			if ( null !== $duration ) {
+				$details['channel_duration_ms'] = $duration;
+			}
+			OTPQueueStore::observe_provider( 'channel_completed', $details );
+			if ( false === $success || null !== $exception ) {
+				Logger::instance()->warning(
+					'otp.channel_send_failed',
+					[
+						'user_id'                => $otp->user_id,
+						'flow_id'                => $otp->flow_id,
+						'otp_type'               => $otp->type,
+						'channel'                => $channel,
+						'reason'                 => null === $exception ? 'provider_returned_false' : 'provider_exception',
+						'duration_ms'            => min( 600000, max( 0, (int) round( ( microtime( true ) - $started ) * 1000 ) ) ),
+						'identifier_type'        => $identifier->get_type(),
+						'identifier_fingerprint' => Logger::instance()->fingerprint( $identifier->get_value(), $identifier->get_type() ),
+						'exception'              => $exception,
+					]
+				);
+				if ( null !== $exception ) {
+					do_action( 'pinova/channel_send_failed', sanitize_key( (string) $channel ) );
 				}
 			}
 		}
@@ -125,12 +168,12 @@ class ChannelService {
 			throw new Exception( 'پیامک صرفا به تلفن همراه ارسال می‌شود.' );
 		}
 
-		if ( OTPImmediateDelivery::is_active() ) {
+		if ( OTPImmediateDelivery::is_active( OTPQueueStore::provider_scope()['flow'] ?? '' ) ) {
 			// Send through the exact inspected native object. Resolving it again
 			// inside SMS::send_code could admit a changed arbitrary subclass.
 			$gateway = OTPImmediateDelivery::bounded_gateway();
 			if ( null === $gateway || ! $gateway->is_enable() ) {
-				throw new OTPImmediateDeliveryDeferredException( 'Immediate SMS provider is unsupported.' );
+				throw new OTPImmediateDeliveryDeferredException( 'Immediate SMS provider is unsupported.', reason: 'channel_unsupported' );
 			}
 			$message = Pinova::get_option( 'sms.message_code' );
 			return $gateway->send( $identifier->get_value(), SMSService::replace_code( empty( $message ) ? $code : $message, $code ) );
@@ -147,9 +190,9 @@ class ChannelService {
 			throw new Exception( 'پیام بله صرفا به تلفن همراه ارسال می‌شود.' );
 		}
 
-		if ( OTPImmediateDelivery::is_active() ) {
+		if ( OTPImmediateDelivery::is_active( OTPQueueStore::provider_scope()['flow'] ?? '' ) ) {
 			if ( function_exists( 'pinova_bale_send_v2' ) ) {
-				throw new OTPImmediateDeliveryDeferredException( 'Immediate Bale provider is unsupported.' );
+				throw new OTPImmediateDeliveryDeferredException( 'Immediate Bale provider is unsupported.', reason: 'channel_unsupported' );
 			}
 			return Bale::send_v3( $identifier->get_value(), $code );
 		}

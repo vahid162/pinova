@@ -4,6 +4,7 @@
 declare(strict_types=1);
 
 use Pinova\Helpers\JWT;
+use Pinova\Logging\Logger;
 use Pinova\Models\OTP;
 use Pinova\Services\RateLimitService;
 
@@ -17,6 +18,24 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI || '1' !== getenv( 'PINOVA_FPM_FULL_STACK
 
 $input = json_decode( stream_get_contents( STDIN ), true, 32, JSON_THROW_ON_ERROR );
 $action = $input['action'] ?? '';
+$logging_profile = (string) getenv( 'PINOVA_FPM_LOGGING_PROFILE' );
+if ( ! in_array( $logging_profile, [ '', 'normal', 'diagnostic' ], true ) ) {
+	throw new RuntimeException( 'Unknown finite fixture logging profile.' );
+}
+$logging_observation = static function () use ( $logging_profile ): array {
+	$config = get_option( 'pinova_logging', [] );
+	return [
+		'profile' => $logging_profile,
+		'minimum_level' => $config['minimum_level'] ?? null,
+		'diagnostic_window_active' => (int) ( $config['diagnostic_until'] ?? 0 ) > time(),
+		'debug_enabled' => Logger::instance()->is_enabled( 'debug' ),
+		'info_enabled' => Logger::instance()->is_enabled( 'info' ),
+		'warning_enabled' => Logger::instance()->is_enabled( 'warning' ),
+		'diagnostic_mode' => 'diagnostic' !== $logging_profile ? 'off' : ( is_file( PINOVA_DIR . '/src/Logging/DiagnosticContext.php' ) ? 'scoped_queued_otp' : 'legacy_global' ),
+		'scope_matches' => [ 'type' => 'operation', 'value' => 'queued_otp' ] === ( $config['diagnostic_scope'] ?? null ),
+		'budget_initialized' => true === ( $config['diagnostic_budget_initialized'] ?? false ),
+	];
+};
 global $wpdb;
 $result = [];
 switch ( $action ) {
@@ -30,7 +49,26 @@ switch ( $action ) {
 		update_option( 'woocommerce_store_pages_only', 'no' );
 		update_option( 'pinova_sms', [ 'gateway' => 'MeliPayamak', 'message_code' => '' ] );
 		update_option( 'pinova_gateway_melipayamak', [ 'username' => 'fixture-user', 'password' => 'fixture-secret', 'sender' => 'fixture-sender' ] );
-		update_option( 'pinova_logging', [ 'minimum_level' => 'info', 'retention_days' => 14 ] );
+		// Existing acceptance jobs retain their original info profile. Only the
+		// separate baseline workflow opts into normal or existing global debug.
+		$logging = [ 'minimum_level' => '' === $logging_profile ? 'info' : 'warning', 'retention_days' => 14 ];
+		$previous_actor = get_current_user_id();
+		$settings_actor = get_user_by( 'login', 'fixture_admin' );
+		if ( ! $settings_actor || ! user_can( $settings_actor, 'manage_options' ) ) { throw new RuntimeException( 'Synthetic settings actor unavailable.' ); }
+		wp_set_current_user( $settings_actor->ID );
+		try {
+			update_option( 'pinova_logging', $logging );
+			if ( 'diagnostic' === $logging_profile ) {
+				// Same duration action in both revisions; candidate additionally
+				// selects the explicit operation through its real authorization.
+				$logging['diagnostic_until'] = HOUR_IN_SECONDS;
+				$logging['diagnostic_scope'] = [ 'type' => 'operation', 'value' => 'queued_otp' ];
+				update_option( 'pinova_logging', $logging );
+			}
+		} finally {
+			wp_set_current_user( $previous_actor );
+		}
+		$logging_proof = '' !== $logging_profile ? $logging_observation() : null;
 		for ( $i = 1; $i <= 80; ++$i ) {
 			$id = wp_insert_user( [ 'user_login' => 'fixture_' . $i, 'user_email' => 'fixture_' . $i . '@example.test', 'user_pass' => wp_generate_password( 32 ), 'role' => 80 === $i ? 'administrator' : 'customer' ] );
 			if ( is_wp_error( $id ) ) { throw new RuntimeException( 'Synthetic account setup failed.' ); }
@@ -47,6 +85,7 @@ switch ( $action ) {
 		$result = [ 'ordinary' => get_permalink( $page ), 'shop' => get_permalink( wc_get_page_id( 'shop' ) ), 'cart' => get_permalink( wc_get_page_id( 'cart' ) ), 'wordpress' => get_bloginfo( 'version' ), 'woocommerce' => WC_VERSION,
 			'hpos_enabled' => \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled(),
 		];
+		if ( null !== $logging_proof ) { $result['logging'] = $logging_proof; }
 		break;
 	case 'inspect':
 		$token = $input['jwt'] ?? null;
@@ -75,6 +114,16 @@ switch ( $action ) {
 		$due = 0;
 		foreach ( wp_get_ready_cron_jobs() as $hooks ) { $due += count( $hooks['pinova_otp_delivery'] ?? [] ); }
 		$result = [ 'db' => array_column( $stats, 'Value', 'Variable_name' ), 'otp_rows' => (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . $wpdb->prefix . 'pinova_otp' ), 'due_jobs' => $due, 'redis' => 'not_applicable_not_installed' ];
+		if ( '' !== $logging_profile ) {
+			// Aggregate counts only, on this run's synthetic disposable database.
+			$storage = $wpdb->get_row( 'SELECT COUNT(*) AS rows_count, COALESCE(SUM(OCTET_LENGTH(context)), 0) AS context_bytes FROM ' . $wpdb->prefix . 'pinova_logs', ARRAY_A );
+			if ( ! is_array( $storage ) || '' !== $wpdb->last_error ) {
+				throw new RuntimeException( 'Missing baseline log-storage observation.' );
+			}
+			$result['logging'] = $logging_observation();
+			$result['log_storage'] = [ 'rows' => (int) $storage['rows_count'], 'context_bytes' => (int) $storage['context_bytes'] ];
+			$result['diagnostic_rows'] = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE event = %s', $wpdb->prefix . 'pinova_logs', 'otp.diagnostic' ) );
+		}
 		break;
 	case 'nonce':
 		$cookie = $input['logged_in_cookie'] ?? '';

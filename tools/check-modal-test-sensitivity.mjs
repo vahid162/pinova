@@ -121,7 +121,7 @@ async function main() {
         const reportPath = path.join(output, `${item.name}.json`);
         await rm(reportPath, { force: true }); // A crashed reporter must not reuse stale evidence.
         const result = spawnSync(path.join(root, 'node_modules/.bin/playwright'), [
-            'test', '--config', 'tests/browser/playwright.config.mjs',
+            'test', '--config', 'tests/browser/playwright.config.mjs', '--project=chromium',
             '--grep', `^.*${selectedTest}$`, '--workers=1', '--retries=0',
             `--repeat-each=${item.repeats}`, '--reporter=json',
             `--output=${path.join(output, item.name)}`,

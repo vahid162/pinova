@@ -640,8 +640,20 @@ class OTPService {
 			throw new Exception( __( 'کد تایید معتبر نمی‌باشد.', 'pinova' ) );
 		}
 
-		$diagnostic        = is_string( $record_flow ) && null !== $otp->expires_at
-			? self::diagnostic_context( $record_flow, $otp->expires_at->getTimestamp(), OTP::TYPE_VERIFY_MOBILE === $otp->type ? 'verify_mobile' : 'verify_otp' ) : null;
+		$diagnostic = null;
+		if ( is_string( $record_flow ) ) {
+			try {
+				$raw_expiry = $otp->getRawOriginal( 'expires_at' );
+				if ( is_string( $raw_expiry ) && 19 === strlen( $raw_expiry ) ) {
+					$diagnostic_deadline = strtotime( $raw_expiry . ' UTC' );
+					if ( false !== $diagnostic_deadline && gmdate( 'Y-m-d H:i:s', $diagnostic_deadline ) === $raw_expiry ) {
+						$diagnostic = self::diagnostic_context( $record_flow, $diagnostic_deadline, OTP::TYPE_VERIFY_MOBILE === $otp->type ? 'verify_mobile' : 'verify_otp' );
+					}
+				}
+			} catch ( Throwable $throwable ) {
+				unset( $throwable );
+			}
+		}
 		$diagnostic_result = 'failed';
 		$diagnostic_code   = 'operation_failed';
 		try {
